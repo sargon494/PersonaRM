@@ -62,7 +62,7 @@ static int RunMemorySelfTest() {
         personarm::MemoryManager mgr;
         mgr.Initialize(2 * 1024 * 1024); // 2MB
 
-        void* block1 = mgr.Allocate(512, personarm::AllocationPolicy::POOLED);
+        void* block1 = mgr.Allocate(128, personarm::AllocationPolicy::POOLED);
         void* block2 = mgr.Allocate(1024, personarm::AllocationPolicy::DEFAULT);
 
         if (!block1 || !block2) {

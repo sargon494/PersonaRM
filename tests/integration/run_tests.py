@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Integration Tests for Persona 2: Eternal Punishment Native Port
+Integration Tests for Persona 2: Eternal Punishment Native Port (PersonaRM)
 
 This script runs integration tests that verify the full system works
-correctly with actual game data.
+correctly with native binaries and test flags.
 """
 
 import subprocess
@@ -11,14 +11,21 @@ import sys
 import time
 import os
 from pathlib import Path
-from typing import List, Optional, Dict, Any
+from typing import List, Optional
 
+# Force UTF-8 encoding on standard output/err where supported
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 # ───────────────────────────────────────────────────────────────────────
 # Test Configuration
 # ───────────────────────────────────────────────────────────────────────
 
-TEST_TIMEOUT = 300  # seconds
+TEST_TIMEOUT = 120  # seconds
 BUILD_DIR = Path(os.environ.get("CMAKE_BINARY_DIR", "build/Release"))
 TEST_BINARY = BUILD_DIR / ("personarm.exe" if sys.platform == "win32" and (BUILD_DIR / "personarm.exe").exists() else ("personarm" if (BUILD_DIR / "personarm").exists() else ("persona2ep.exe" if sys.platform == "win32" else "persona2ep")))
 
@@ -29,9 +36,7 @@ if sys.platform != "win32" and TEST_BINARY.exists():
         current_stat = os.stat(TEST_BINARY)
         os.chmod(TEST_BINARY, current_stat.st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     except Exception as e:
-        print(f"Warning: could not set executable permissions on {TEST_BINARY}: {e}")
-
-
+        print(f"[WARN] could not set executable permissions on {TEST_BINARY}: {e}")
 
 # ───────────────────────────────────────────────────────────────────────
 # Test Results
@@ -48,9 +53,8 @@ class TestResult:
         self.message = message
 
     def __repr__(self) -> str:
-        status = "✓ PASS" if self.passed else "✗ FAIL"
+        status = "PASS" if self.passed else "FAIL"
         return f"[{status}] {self.name} ({self.duration:.2f}s) {self.message}"
-
 
 # ───────────────────────────────────────────────────────────────────────
 # Test Suite
@@ -86,366 +90,66 @@ class IntegrationTestSuite:
 
         return self.results
 
-    def test_startup(self) -> TestResult:
-        """Test that the application starts correctly."""
-        print("\n🚀 Testing startup...")
-
+    def _run_subcommand(self, name: str, arg: str, check_fn=None) -> TestResult:
+        t0 = time.time()
         try:
             result = subprocess.run(
-                [str(TEST_BINARY), "--version"],
+                [str(TEST_BINARY), arg],
                 capture_output=True,
                 text=True,
                 timeout=TEST_TIMEOUT
             )
+            duration = time.time() - t0
+            passed = (result.returncode == 0)
+            if passed and check_fn:
+                passed = check_fn(result.stdout)
 
-            if result.returncode == 0 and "Persona 2" in result.stdout:
-                duration = time.time() - self.start_time
-                return TestResult(
-                    name="startup",
-                    passed=True,
-                    duration=duration,
-                    message=f"Version string found: {result.stdout.strip()}"
-                )
-            else:
-                return TestResult(
-                    name="startup",
-                    passed=False,
-                    duration=duration,
-                    message=f"Unexpected output: {result.stdout}"
-                )
+            msg = "OK" if passed else f"Exit code {result.returncode}: {result.stderr or result.stdout}"
+            return TestResult(name=name, passed=passed, duration=duration, message=msg)
         except subprocess.TimeoutExpired:
-            return TestResult(
-                name="startup",
-                passed=False,
-                duration=TEST_TIMEOUT,
-                message="Timeout during startup test"
-            )
-        except FileNotFoundError:
-            return TestResult(
-                name="startup",
-                passed=False,
-                duration=0,
-                message="Binary not found"
-            )
+            return TestResult(name=name, passed=False, duration=time.time() - t0, message="Timeout")
+        except Exception as e:
+            return TestResult(name=name, passed=False, duration=time.time() - t0, message=str(e))
+
+    def test_startup(self) -> TestResult:
+        print("\n[INFO] Testing startup...")
+        return self._run_subcommand("startup", "--version", lambda out: "Persona 2" in out)
 
     def test_renderer(self) -> TestResult:
-        """Test the renderer component."""
-        print("\n🎨 Testing renderer...")
-
-        try:
-            # Test shader compilation
-            result = subprocess.run(
-                [str(TEST_BINARY), "--test-renderer"],
-                capture_output=True,
-                text=True,
-                timeout=TEST_TIMEOUT
-            )
-
-            if result.returncode == 0:
-                duration = time.time() - self.start_time
-                return TestResult(
-                    name="renderer",
-                    passed=True,
-                    duration=duration,
-                    message="Renderer tests passed"
-                )
-            else:
-                return TestResult(
-                    name="renderer",
-                    passed=False,
-                    duration=duration,
-                    message=f"Renderer tests failed: {result.stderr}"
-                )
-        except subprocess.TimeoutExpired:
-            return TestResult(
-                name="renderer",
-                passed=False,
-                duration=TEST_TIMEOUT,
-                message="Timeout during renderer test"
-            )
+        print("\n[INFO] Testing renderer...")
+        return self._run_subcommand("renderer", "--test-renderer")
 
     def test_input(self) -> TestResult:
-        """Test the input system."""
-        print("\n⌨️  Testing input...")
-
-        try:
-            result = subprocess.run(
-                [str(TEST_BINARY), "--test-input"],
-                capture_output=True,
-                text=True,
-                timeout=TEST_TIMEOUT
-            )
-
-            if result.returncode == 0:
-                duration = time.time() - self.start_time
-                return TestResult(
-                    name="input",
-                    passed=True,
-                    duration=duration,
-                    message="Input tests passed"
-                )
-            else:
-                return TestResult(
-                    name="input",
-                    passed=False,
-                    duration=duration,
-                    message=f"Input tests failed: {result.stderr}"
-                )
-        except subprocess.TimeoutExpired:
-            return TestResult(
-                name="input",
-                    passed=False,
-                    duration=TEST_TIMEOUT,
-                    message="Timeout during input test"
-                )
+        print("\n[INFO] Testing input...")
+        return self._run_subcommand("input", "--test-input")
 
     def test_audio(self) -> TestResult:
-        """Test the audio system."""
-        print("\n🎵 Testing audio...")
-
-        try:
-            result = subprocess.run(
-                [str(TEST_BINARY), "--test-audio"],
-                capture_output=True,
-                text=True,
-                timeout=TEST_TIMEOUT
-            )
-
-            if result.returncode == 0:
-                duration = time.time() - self.start_time
-                return TestResult(
-                    name="audio",
-                    passed=True,
-                    duration=duration,
-                    message="Audio tests passed"
-                )
-            else:
-                return TestResult(
-                    name="audio",
-                    passed=False,
-                    duration=duration,
-                    message=f"Audio tests failed: {result.stderr}"
-                )
-        except subprocess.TimeoutExpired:
-            return TestResult(
-                name="audio",
-                passed=False,
-                duration=TEST_TIMEOUT,
-                message="Timeout during audio test"
-            )
+        print("\n[INFO] Testing audio...")
+        return self._run_subcommand("audio", "--test-audio")
 
     def test_memory(self) -> TestResult:
-        """Test the memory manager."""
-        print("\n💾 Testing memory manager...")
-
-        try:
-            result = subprocess.run(
-                [str(TEST_BINARY), "--test-memory"],
-                capture_output=True,
-                text=True,
-                timeout=TEST_TIMEOUT
-            )
-
-            if result.returncode == 0:
-                duration = time.time() - self.start_time
-                return TestResult(
-                    name="memory",
-                    passed=True,
-                    duration=duration,
-                    message="Memory manager tests passed"
-                )
-            else:
-                return TestResult(
-                    name="memory",
-                    passed=False,
-                    duration=duration,
-                    message=f"Memory tests failed: {result.stderr}"
-                )
-        except subprocess.TimeoutExpired:
-            return TestResult(
-                name="memory",
-                passed=False,
-                duration=TEST_TIMEOUT,
-                message="Timeout during memory test"
-            )
+        print("\n[INFO] Testing memory manager...")
+        return self._run_subcommand("memory", "--test-memory")
 
     def test_tim_parser(self) -> TestResult:
-        """Test the TIM texture parser."""
-        print("\n🖼️ Testing TIM texture parser...")
-
-        try:
-            result = subprocess.run(
-                [str(TEST_BINARY), "--test-tim"],
-                capture_output=True,
-                text=True,
-                timeout=TEST_TIMEOUT
-            )
-
-            if result.returncode == 0:
-                duration = time.time() - self.start_time
-                return TestResult(
-                    name="tim_parser",
-                    passed=True,
-                    duration=duration,
-                    message="TIM texture parser tests passed"
-                )
-            else:
-                return TestResult(
-                    name="tim_parser",
-                    passed=False,
-                    duration=duration,
-                    message=f"TIM texture parser tests failed: {result.stderr}"
-                )
-        except subprocess.TimeoutExpired:
-            return TestResult(
-                name="tim_parser",
-                passed=False,
-                duration=TEST_TIMEOUT,
-                message="Timeout during TIM texture parser test"
-            )
+        print("\n[INFO] Testing TIM texture parser...")
+        return self._run_subcommand("tim_parser", "--test-tim")
 
     def test_vag_decoder(self) -> TestResult:
-        """Test the VAG audio decoder."""
-        print("\n🔊 Testing VAG audio decoder...")
-
-        try:
-            result = subprocess.run(
-                [str(TEST_BINARY), "--test-vag"],
-                capture_output=True,
-                text=True,
-                timeout=TEST_TIMEOUT
-            )
-
-            if result.returncode == 0:
-                duration = time.time() - self.start_time
-                return TestResult(
-                    name="vag_decoder",
-                    passed=True,
-                    duration=duration,
-                    message="VAG audio decoder tests passed"
-                )
-            else:
-                return TestResult(
-                    name="vag_decoder",
-                    passed=False,
-                    duration=duration,
-                    message=f"VAG audio decoder tests failed: {result.stderr}"
-                )
-        except subprocess.TimeoutExpired:
-            return TestResult(
-                name="vag_decoder",
-                passed=False,
-                duration=TEST_TIMEOUT,
-                message="Timeout during VAG audio decoder test"
-            )
+        print("\n[INFO] Testing VAG audio decoder...")
+        return self._run_subcommand("vag_decoder", "--test-vag")
 
     def test_game_loading(self) -> TestResult:
-        """Test game loading with user-provided binary."""
-        print("\n📦 Testing game loading...")
-
-        try:
-            # This test requires a user-provided game binary
-            # For now, we just verify the loader initializes correctly
-            result = subprocess.run(
-                [str(TEST_BINARY), "--test-load"],
-                capture_output=True,
-                text=True,
-                timeout=TEST_TIMEOUT
-            )
-
-            if result.returncode == 0:
-                duration = time.time() - self.start_time
-                return TestResult(
-                    name="game_loading",
-                    passed=True,
-                    duration=duration,
-                    message="Game loading test passed"
-                )
-            else:
-                return TestResult(
-                    name="game_loading",
-                    passed=False,
-                    duration=duration,
-                    message=f"Game loading test failed: {result.stderr}"
-                )
-        except subprocess.TimeoutExpired:
-            return TestResult(
-                name="game_loading",
-                passed=False,
-                duration=TEST_TIMEOUT,
-                message="Timeout during game loading test"
-            )
+        print("\n[INFO] Testing disc/game loader...")
+        return self._run_subcommand("game_loading", "--test-load")
 
     def test_save_system(self) -> TestResult:
-        """Test the save system."""
-        print("\n💾 Testing save system...")
-
-        try:
-            result = subprocess.run(
-                [str(TEST_BINARY), "--test-save"],
-                capture_output=True,
-                text=True,
-                timeout=TEST_TIMEOUT
-            )
-
-            if result.returncode == 0:
-                duration = time.time() - self.start_time
-                return TestResult(
-                    name="save_system",
-                    passed=True,
-                    duration=duration,
-                    message="Save system tests passed"
-                )
-            else:
-                return TestResult(
-                    name="save_system",
-                    passed=False,
-                    duration=duration,
-                    message=f"Save system tests failed: {result.stderr}"
-                )
-        except subprocess.TimeoutExpired:
-            return TestResult(
-                name="save_system",
-                passed=False,
-                duration=TEST_TIMEOUT,
-                message="Timeout during save system test"
-            )
+        print("\n[INFO] Testing save system...")
+        return self._run_subcommand("save_system", "--test-save")
 
     def test_performance(self) -> TestResult:
-        """Test performance benchmarks."""
-        print("\n⚡ Testing performance...")
-
-        try:
-            result = subprocess.run(
-                [str(TEST_BINARY), "--test-performance"],
-                capture_output=True,
-                text=True,
-                timeout=TEST_TIMEOUT
-            )
-
-            if result.returncode == 0:
-                duration = time.time() - self.start_time
-                return TestResult(
-                    name="performance",
-                    passed=True,
-                    duration=duration,
-                    message="Performance benchmarks passed"
-                )
-            else:
-                return TestResult(
-                    name="performance",
-                    passed=False,
-                    duration=duration,
-                    message=f"Performance tests failed: {result.stderr}"
-                )
-        except subprocess.TimeoutExpired:
-            return TestResult(
-                name="performance",
-                passed=False,
-                duration=TEST_TIMEOUT,
-                message="Timeout during performance test"
-            )
-
+        print("\n[INFO] Testing performance benchmarks...")
+        return self._run_subcommand("performance", "--test-performance")
 
 # ───────────────────────────────────────────────────────────────────────
 # Main Entry Point
@@ -476,12 +180,11 @@ def main() -> int:
     print(f"  Failed: {total - passed}/{total}")
 
     if passed == total:
-        print("\n  🎉 All tests passed!")
+        print("\n  [PASS] All integration tests passed successfully!")
         return 0
     else:
-        print(f"\n  ❌ {total - passed} test(s) failed")
+        print(f"\n  [FAIL] {total - passed} test(s) failed")
         return 1
-
 
 if __name__ == "__main__":
     sys.exit(main())

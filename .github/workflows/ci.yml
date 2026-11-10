@@ -9,6 +9,7 @@ on:
 env:
   BUILD_TYPE: Release
   CMAKE_BUILD_TYPE: Release
+  PYTHONIOENCODING: utf-8
 
 jobs:
   # ───────────────────────────────────────────────────────────────────────
