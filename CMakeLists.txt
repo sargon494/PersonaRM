@@ -55,10 +55,6 @@ endif()
 
 include(GNUInstallDirs)
 
-install(TARGETS personarm
-    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-)
-
 install(FILES
     README.md
     LICENSE

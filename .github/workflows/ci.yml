@@ -65,7 +65,7 @@ jobs:
           pip install cmake ninja
 
       - name: Configure CMake
-        run: cmake -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/linux.cmake
+        run: cmake -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
 
       - name: Build
         run: cmake --build build --config Release --verbose
@@ -135,7 +135,7 @@ jobs:
           pip install cmake ninja
 
       - name: Configure CMake
-        run: cmake -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/linux.cmake -DBUILD_TESTS=ON
+        run: cmake -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} -DBUILD_TESTS=ON
 
       - name: Build
         run: cmake --build build --config Release --verbose
@@ -242,7 +242,7 @@ jobs:
           pip install cmake ninja
 
       - name: Configure CMake
-        run: cmake -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/linux.cmake
+        run: cmake -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
 
       - name: Build
         run: cmake --build build --config Release --verbose

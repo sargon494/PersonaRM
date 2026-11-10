@@ -85,6 +85,10 @@ else()
     target_compile_options(personarm PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
+install(TARGETS personarm
+    RUNTIME DESTINATION bin
+)
+
 # ───────────────────────────────────────────────────────────────────────
 # Static Analysis Target
 # ───────────────────────────────────────────────────────────────────────
