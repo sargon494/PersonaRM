@@ -79,6 +79,10 @@ public:
     bool IsOpen() const { return m_is_open; }
     DiscFormat GetFormat() const { return m_format; }
     std::string GetFilePath() const { return m_file_path; }
+    uint32_t GetSectorSize() const { return m_sector_size; }
+    uint32_t GetHeaderOffset() const { return m_sector_header_offset; }
+    const std::string& GetVolumeLabel() const { return m_volume_label; }
+    size_t GetFileCount() const { return m_file_table.size(); }
 
     // Directory & File Operations
     std::vector<DiscFileEntry> ListFiles(const std::string& directory_path = "/");
@@ -95,6 +99,9 @@ public:
     /// Boot executable names (SYSTEM.CNF form) of every known Persona 2 EP disc.
     static std::vector<std::string> KnownPersona2BootExecutables();
 
+    /// Resolves the binary image path referenced inside a .cue sheet file.
+    static std::string ResolveCueBinary(const std::string& cue_path);
+
     // Executable Parser
     static ExecutableInfo ParseExecutable(const uint8_t* data, size_t size);
 
@@ -106,7 +113,10 @@ private:
     std::ifstream m_stream;
     bool m_is_open = false;
     DiscFormat m_format = DiscFormat::Unknown;
-    uint32_t m_sector_size = 2048; // Standard ISO 9660 (or 2352 for raw CD-ROM Mode 2)
+    uint32_t m_sector_size = 2048; // Standard ISO 9660 (2048) or raw CD-ROM Mode 1/2 (2352)
+    uint32_t m_sector_header_offset = 0; // 0 for ISO 2048, 16 for Mode 1 2352, 24 for Mode 2 Form 1 2352
+    uint32_t m_sector_data_size = 2048;
+    std::string m_volume_label;
 
     std::unordered_map<std::string, DiscFileEntry> m_file_table;
 };

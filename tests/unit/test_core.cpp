@@ -10,6 +10,7 @@
 #include "core/memory_manager.h"
 #include "core/save_manager.h"
 #include "core/logger.h"
+#include "launcher/portal.h"
 #include "input/input_manager.h"
 #include "loader/disc_reader.h"
 #include "loader/tim_parser.h"
@@ -816,6 +817,118 @@ int main() {
         assert(cpu.GetGPR(29) == 0x801FFF10);
         assert(ram[0x10000] == 0xAA && ram[0x10100] == 0 && ram[0x1010F] == 0 && ram[0x10110] == 0xAA);
         std::cout << "  ✓ PS-X EXE header layout & memfill tests passed.\n";
+    }
+
+    // 23. DiscReader MODE2/2352 raw sector, CUE resolution & Portal tests
+    {
+        const std::string test_bin = "test_synth_disc.bin";
+        const std::string test_cue = "test_synth_disc.cue";
+        const uint32_t SECTOR_SIZE = 2352;
+        const uint32_t HEADER_OFF = 24;
+        const uint32_t TOTAL_SECTORS = 25;
+
+        std::vector<uint8_t> disc_data(TOTAL_SECTORS * SECTOR_SIZE, 0);
+
+        // Sector 16: Primary Volume Descriptor
+        size_t pvd_off = 16 * SECTOR_SIZE + HEADER_OFF;
+        disc_data[pvd_off + 0] = 0x01; // PVD type
+        disc_data[pvd_off + 1] = 'C';
+        disc_data[pvd_off + 2] = 'D';
+        disc_data[pvd_off + 3] = '0';
+        disc_data[pvd_off + 4] = '0';
+        disc_data[pvd_off + 5] = '1';
+        std::memcpy(disc_data.data() + pvd_off + 40, "PERSONA2_EP                     ", 32);
+
+        // Root directory record at offset 156
+        size_t root_rec = pvd_off + 156;
+        disc_data[root_rec + 0] = 34; // record length
+        *reinterpret_cast<uint32_t*>(disc_data.data() + root_rec + 2) = 18; // root LBA
+        *reinterpret_cast<uint32_t*>(disc_data.data() + root_rec + 10) = 2048; // root length
+
+        // Sector 18: Root directory records
+        size_t dir_off = 18 * SECTOR_SIZE + HEADER_OFF;
+        uint8_t entry_len = 33 + 10;
+        disc_data[dir_off + 0] = entry_len;
+        *reinterpret_cast<uint32_t*>(disc_data.data() + dir_off + 2) = 19; // LBA
+        *reinterpret_cast<uint32_t*>(disc_data.data() + dir_off + 10) = 40; // size
+        disc_data[dir_off + 25] = 0x00; // file flag
+        disc_data[dir_off + 32] = 10; // name len
+        std::memcpy(disc_data.data() + dir_off + 33, "SYSTEM.CNF", 10);
+
+        // Sector 19: SYSTEM.CNF content
+        size_t cnf_off = 19 * SECTOR_SIZE + HEADER_OFF;
+        const char* cnf_text = "BOOT = cdrom:\\SLPS_027.85;1\r\nTCB = 4\r\n";
+        std::memcpy(disc_data.data() + cnf_off, cnf_text, std::strlen(cnf_text));
+
+        // Write synthetic bin file
+        {
+            std::ofstream out(test_bin, std::ios::binary);
+            out.write(reinterpret_cast<const char*>(disc_data.data()), disc_data.size());
+        }
+
+        // Write synthetic cue file
+        {
+            std::ofstream cue_out(test_cue);
+            cue_out << "FILE \"" << test_bin << "\" BINARY\n";
+            cue_out << "  TRACK 01 MODE2/2352\n";
+            cue_out << "    INDEX 01 00:00:00\n";
+        }
+
+        // Test CUE resolution
+        std::string resolved_bin = personarm::DiscReader::ResolveCueBinary(test_cue);
+        assert(!resolved_bin.empty());
+
+        // Test opening via CUE
+        personarm::DiscReader reader;
+        assert(reader.Open(test_cue));
+        assert(reader.GetSectorSize() == 2352);
+        assert(reader.GetHeaderOffset() == 24);
+        assert(reader.GetVolumeLabel() == "PERSONA2_EP");
+        assert(reader.FileExists("SYSTEM.CNF"));
+
+        std::vector<uint8_t> read_cnf;
+        assert(reader.ReadFile("SYSTEM.CNF", read_cnf));
+        assert(read_cnf.size() == 40);
+        std::string cnf_str(read_cnf.begin(), read_cnf.end());
+        assert(cnf_str.find("SLPS_027.85") != std::string::npos);
+
+        std::string boot_exe = reader.DetectBootExecutable();
+        assert(boot_exe == "SLPS_027.85");
+
+        auto p2_info = personarm::DiscReader::IdentifyPersona2(boot_exe);
+        assert(p2_info.recognized);
+        assert(p2_info.product_id == "SLPS-02785");
+        assert(p2_info.region == "JP");
+        assert(p2_info.edition == "Deluxe Pack");
+        assert(p2_info.disc_number == 1);
+
+        reader.Close();
+
+        // Portal dual-disc management tests
+        {
+            personarm::Portal portal;
+            assert(portal.Initialize("test_portal_config.json"));
+
+            assert(portal.LoadDisc(1, test_cue));
+            const auto& slot1 = portal.GetDiscSlot(1);
+            assert(slot1.verified);
+            assert(slot1.disc_number == 1);
+            assert(slot1.info.recognized);
+            assert(slot1.info.product_id == "SLPS-02785");
+
+            assert(portal.GetActiveDiscNumber() == 1);
+            assert(portal.SetActiveDiscNumber(2));
+            assert(portal.GetActiveDiscNumber() == 2);
+            assert(portal.SetActiveDiscNumber(1));
+            assert(portal.GetActiveDiscNumber() == 1);
+
+            std::remove("test_portal_config.json");
+        }
+
+        std::remove(test_bin.c_str());
+        std::remove(test_cue.c_str());
+
+        std::cout << "  ✓ DiscReader MODE2/2352, CUE parsing & Portal tests passed.\n";
     }
 
     std::cout << "[PASS] All unit tests completed successfully!\n";

@@ -43,8 +43,20 @@ bool Launcher::LoadConfig(const std::string& config_path) {
             m_config.video.vsync = (line.substr(6) == "1" || line.substr(6) == "true");
         } else if (line.find("target_fps=") != std::string::npos) {
             m_config.video.target_fps = std::stoul(line.substr(11));
+        } else if (line.find("disc1_path=") != std::string::npos) {
+            m_config.game.disc1_path = line.substr(11);
+            if (m_config.game.legal_rom_path.empty()) {
+                m_config.game.legal_rom_path = m_config.game.disc1_path;
+            }
+        } else if (line.find("disc2_path=") != std::string::npos) {
+            m_config.game.disc2_path = line.substr(11);
+        } else if (line.find("active_disc=") != std::string::npos) {
+            m_config.game.active_disc = std::stoi(line.substr(12));
         } else if (line.find("rom_path=") != std::string::npos) {
             m_config.game.legal_rom_path = line.substr(9);
+            if (m_config.game.disc1_path.empty()) {
+                m_config.game.disc1_path = m_config.game.legal_rom_path;
+            }
         }
     }
 
@@ -67,6 +79,9 @@ bool Launcher::SaveConfig(const std::string& config_path) const {
     file << "mouse_sensitivity=" << m_config.input.mouse_sensitivity << "\n";
     file << "turbo_multiplier=" << m_config.input.turbo_multiplier << "\n";
     file << "rom_path=" << m_config.game.legal_rom_path << "\n";
+    file << "disc1_path=" << m_config.game.disc1_path << "\n";
+    file << "disc2_path=" << m_config.game.disc2_path << "\n";
+    file << "active_disc=" << m_config.game.active_disc << "\n";
 
     return true;
 }

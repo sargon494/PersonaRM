@@ -152,6 +152,7 @@ python tests/integration/run_tests.py
 ### Command-Line Self-Tests
 The `personarm` executable contains built-in self-test flags:
 - `--test-engine`: Unified core engine and frame execution loop.
+- `--test-portal`: PersonaRM Portal & BYOC dual-disc management.
 - `--test-window`: Window context & GL presentation pipeline.
 - `--test-mdec`: PS1 MDEC video macroblock IDCT decoder.
 - `--test-save`: 128 KB Memory Card & QuickSave state manager.
@@ -173,3 +174,4 @@ The `personarm` executable contains built-in self-test flags:
 - **Namespace**: All engine types live under `namespace personarm`.
 - **Formatting**: 4 spaces indentation, no tabs.
 - **Commits**: Follow [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `docs:`, `test:`, `refactor:`).
+

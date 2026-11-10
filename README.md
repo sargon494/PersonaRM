@@ -121,6 +121,7 @@ You can invoke individual subsystem self-tests directly from the CLI:
 
 ```bash
 # Component Self-Tests
+./personarm --test-portal       # Verify PersonaRM Portal & BYOC disc management
 ./personarm --test-engine       # Verify unified core engine & frame execution loop
 ./personarm --test-window       # Verify window context & GL presentation pipeline
 ./personarm --test-mdec         # Verify PS1 MDEC video macroblock IDCT decoder
