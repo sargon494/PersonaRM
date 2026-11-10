@@ -111,7 +111,7 @@ private:
     SpuEmulator m_spu;
     Ps1BiosHle& m_bios;
     DiscReader m_disc_reader;
-    InputManager m_input;
+    InputManager& m_input;
 
     // Physical Memory Buffers
     std::vector<uint8_t> m_ram;        // 2 MB Main RAM

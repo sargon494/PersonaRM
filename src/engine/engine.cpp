@@ -6,7 +6,8 @@
 namespace personarm {
 
 Engine::Engine()
-    : m_bios(Ps1BiosHle::Instance()) {
+    : m_bios(Ps1BiosHle::Instance()),
+      m_input(InputManager::Instance()) {
     m_ram.resize(PS1_MAIN_RAM_SIZE, 0);
     m_scratchpad.resize(PS1_SCRATCHPAD_SIZE, 0);
 }
