@@ -64,6 +64,8 @@ class IntegrationTestSuite:
             self.test_input,
             self.test_audio,
             self.test_memory,
+            self.test_tim_parser,
+            self.test_vag_decoder,
             self.test_game_loading,
             self.test_save_system,
             self.test_performance,
@@ -256,6 +258,76 @@ class IntegrationTestSuite:
                 passed=False,
                 duration=TEST_TIMEOUT,
                 message="Timeout during memory test"
+            )
+
+    def test_tim_parser(self) -> TestResult:
+        """Test the TIM texture parser."""
+        print("\n🖼️ Testing TIM texture parser...")
+
+        try:
+            result = subprocess.run(
+                [str(TEST_BINARY), "--test-tim"],
+                capture_output=True,
+                text=True,
+                timeout=TEST_TIMEOUT
+            )
+
+            if result.returncode == 0:
+                duration = time.time() - self.start_time
+                return TestResult(
+                    name="tim_parser",
+                    passed=True,
+                    duration=duration,
+                    message="TIM texture parser tests passed"
+                )
+            else:
+                return TestResult(
+                    name="tim_parser",
+                    passed=False,
+                    duration=duration,
+                    message=f"TIM texture parser tests failed: {result.stderr}"
+                )
+        except subprocess.TimeoutExpired:
+            return TestResult(
+                name="tim_parser",
+                passed=False,
+                duration=TEST_TIMEOUT,
+                message="Timeout during TIM texture parser test"
+            )
+
+    def test_vag_decoder(self) -> TestResult:
+        """Test the VAG audio decoder."""
+        print("\n🔊 Testing VAG audio decoder...")
+
+        try:
+            result = subprocess.run(
+                [str(TEST_BINARY), "--test-vag"],
+                capture_output=True,
+                text=True,
+                timeout=TEST_TIMEOUT
+            )
+
+            if result.returncode == 0:
+                duration = time.time() - self.start_time
+                return TestResult(
+                    name="vag_decoder",
+                    passed=True,
+                    duration=duration,
+                    message="VAG audio decoder tests passed"
+                )
+            else:
+                return TestResult(
+                    name="vag_decoder",
+                    passed=False,
+                    duration=duration,
+                    message=f"VAG audio decoder tests failed: {result.stderr}"
+                )
+        except subprocess.TimeoutExpired:
+            return TestResult(
+                name="vag_decoder",
+                passed=False,
+                duration=TEST_TIMEOUT,
+                message="Timeout during VAG audio decoder test"
             )
 
     def test_game_loading(self) -> TestResult:

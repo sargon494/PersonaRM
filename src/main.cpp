@@ -18,8 +18,10 @@
 #include "core/memory_manager.h"
 #include "input/input_manager.h"
 #include "loader/disc_reader.h"
+#include "loader/tim_parser.h"
 #include "rendering/renderer.h"
 #include "audio/audio_system.h"
+#include "audio/vag_decoder.h"
 
 static constexpr const char* LAUNCHER_NAME    = "PersonaRM - Native Launcher & Hub";
 static constexpr const char* LAUNCHER_VERSION = "0.2.0";
@@ -48,6 +50,8 @@ static void PrintUsage(const char* prog) {
               << "  --test-renderer    Verify OpenGL renderer initialization\n"
               << "  --test-audio       Verify OpenAL audio device context\n"
               << "  --test-load        Verify binary/disc loader\n"
+              << "  --test-tim         Verify TIM texture parser\n"
+              << "  --test-vag         Verify VAG SPU audio decoder\n"
               << "  --test-save        Verify modern save state system\n"
               << "  --test-performance Run engine frametime benchmarks\n";
 }
@@ -55,11 +59,11 @@ static void PrintUsage(const char* prog) {
 static int RunMemorySelfTest() {
     std::cout << "[TEST] Memory Manager self-test...\n";
     try {
-        persona2ep::MemoryManager mgr;
+        personarm::MemoryManager mgr;
         mgr.Initialize(2 * 1024 * 1024); // 2MB
 
-        void* block1 = mgr.Allocate(512, persona2ep::AllocationPolicy::POOLED);
-        void* block2 = mgr.Allocate(1024, persona2ep::AllocationPolicy::DEFAULT);
+        void* block1 = mgr.Allocate(512, personarm::AllocationPolicy::POOLED);
+        void* block2 = mgr.Allocate(1024, personarm::AllocationPolicy::DEFAULT);
 
         if (!block1 || !block2) {
             std::cerr << "[FAIL] Failed to allocate memory blocks.\n";
@@ -209,6 +213,66 @@ static int RunAudioSelfTest() {
     }
 }
 
+static int RunTimSelfTest() {
+    std::cout << "[TEST] TIM Texture Parser self-test...\n";
+    try {
+        std::vector<uint8_t> tim_buf(72, 0);
+        tim_buf[0] = 0x10; // Magic
+        tim_buf[4] = 0x08; // 4-bit with CLUT
+
+        uint32_t clut_size = 44;
+        std::memcpy(&tim_buf[8], &clut_size, 4);
+        uint16_t clut_w = 16, clut_h = 1;
+        std::memcpy(&tim_buf[16], &clut_w, 2);
+        std::memcpy(&tim_buf[18], &clut_h, 2);
+
+        uint32_t img_size = 20;
+        std::memcpy(&tim_buf[52], &img_size, 4);
+        uint16_t img_w = 2, img_h = 2;
+        std::memcpy(&tim_buf[60], &img_w, 2);
+        std::memcpy(&tim_buf[62], &img_h, 2);
+
+        auto img = personarm::TimParser::ParseFromMemory(tim_buf.data(), tim_buf.size());
+        if (!img || img->width != 8 || img->height != 2) {
+            std::cerr << "[FAIL] TIM parser failed to decode synthetic texture.\n";
+            return 1;
+        }
+
+        std::cout << "  - Decoded 4-bit TIM: " << img->width << "x" << img->height << " (" << img->pixels_rgba.size() << " RGBA pixels)\n";
+        std::cout << "[PASS] TIM Texture Parser self-test passed.\n";
+        return 0;
+    } catch (const std::exception& e) {
+        std::cerr << "[FAIL] Exception during TIM test: " << e.what() << "\n";
+        return 1;
+    }
+}
+
+static int RunVagSelfTest() {
+    std::cout << "[TEST] VAG Audio Decoder self-test...\n";
+    try {
+        std::vector<uint8_t> vag_buf(64, 0);
+        vag_buf[0] = 0x56; vag_buf[1] = 0x41; vag_buf[2] = 0x47; vag_buf[3] = 0x70; // "VAGp"
+        vag_buf[7] = 0x20;  // Version
+        vag_buf[15] = 16;   // Data size = 1 block
+        vag_buf[18] = 0xAC; vag_buf[19] = 0x44; // 44100 Hz BE
+        vag_buf[48] = 0x08; // Shift=8, Filter=0
+        vag_buf[49] = 0x01; // Loop End
+
+        auto audio = personarm::VagDecoder::DecodeFromMemory(vag_buf.data(), vag_buf.size());
+        if (!audio || audio->pcm_samples.size() != 28) {
+            std::cerr << "[FAIL] VAG decoder failed to decode synthetic audio block.\n";
+            return 1;
+        }
+
+        std::cout << "  - Decoded VAG Audio: " << audio->pcm_samples.size() << " samples at " << audio->sample_rate << " Hz\n";
+        std::cout << "[PASS] VAG Audio Decoder self-test passed.\n";
+        return 0;
+    } catch (const std::exception& e) {
+        std::cerr << "[FAIL] Exception during VAG test: " << e.what() << "\n";
+        return 1;
+    }
+}
+
 int main(int argc, char* argv[]) {
     personarm::Launcher launcher;
     if (!launcher.Initialize()) {
@@ -252,6 +316,12 @@ int main(int argc, char* argv[]) {
             }
             if (std::strcmp(argv[i], "--test-load") == 0) {
                 return RunLoaderSelfTest();
+            }
+            if (std::strcmp(argv[i], "--test-tim") == 0) {
+                return RunTimSelfTest();
+            }
+            if (std::strcmp(argv[i], "--test-vag") == 0) {
+                return RunVagSelfTest();
             }
             if (std::strcmp(argv[i], "--test-renderer") == 0) {
                 return RunRendererSelfTest();

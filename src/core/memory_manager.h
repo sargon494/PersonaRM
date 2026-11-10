@@ -9,7 +9,7 @@
 #include <optional>
 #include <stdexcept>
 
-namespace persona2ep {
+namespace personarm {
 
 // ───────────────────────────────────────────────────────────────────────
 // Forward Declarations & Common Aliases
@@ -252,4 +252,7 @@ private:
     std::vector<Arena> m_arenas;
 };
 
-}  // namespace persona2ep
+}  // namespace personarm
+
+// Backwards-compatibility alias for legacy code
+namespace persona2ep = personarm;

@@ -12,6 +12,8 @@ set(LAUNCHER_SOURCES
 set(CORE_SOURCES
     core/memory_manager.cpp
     core/memory_manager.h
+    core/logger.cpp
+    core/logger.h
 )
 
 set(INPUT_SOURCES
@@ -22,6 +24,8 @@ set(INPUT_SOURCES
 set(AUDIO_SOURCES
     audio/audio_system.cpp
     audio/audio_system.h
+    audio/vag_decoder.cpp
+    audio/vag_decoder.h
 )
 set(CPU_SOURCES
     cpu/cpu_context.cpp
@@ -30,6 +34,8 @@ set(CPU_SOURCES
 set(LOADER_SOURCES
     loader/disc_reader.cpp
     loader/disc_reader.h
+    loader/tim_parser.cpp
+    loader/tim_parser.h
 )
 set(RENDERING_SOURCES
     rendering/renderer.cpp

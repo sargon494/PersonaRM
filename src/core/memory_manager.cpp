@@ -5,7 +5,7 @@
 #include <cstdlib>
 #include <sstream>
 
-namespace persona2ep {
+namespace personarm {
 
 // ───────────────────────────────────────────────────────────────────────
 // MemoryRegion Implementation
@@ -498,4 +498,4 @@ float MemoryManager::FragmentationRatio() const {
     return (static_cast<float>(total_avail) / static_cast<float>(total_alloc + total_avail)) * 100.0f;
 }
 
-}  // namespace persona2ep
+}  // namespace personarm

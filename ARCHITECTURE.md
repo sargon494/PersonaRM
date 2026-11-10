@@ -46,7 +46,15 @@
 - Full Keyboard & Mouse support: point-and-click menus, mouse look, battle number hotkeys.
 - Detailed in [docs/GAMEPLAY_AND_CONTROLS.md](docs/GAMEPLAY_AND_CONTROLS.md).
 
-### 3. Core Engine Layer (`src/core/`, `src/rendering/`, `src/audio/`)
-- **Memory Manager (`src/core/`)**: Pool, Buddy, and Arena allocators for high performance and low fragmentation.
+### 3. Core Engine Layer (`src/core/`, `src/rendering/`, `src/audio/`, `src/loader/`)
+- **Memory Manager (`src/core/`)**: Pool, Buddy, and Arena allocators for high performance and low fragmentation under `personarm::` namespace.
+- **Diagnostics Logger (`src/core/`)**: Thread-safe multi-sink logging system (`DEBUG`, `INFO`, `WARN`, `ERROR`) outputting to console and logfile.
+- **Resource Parsers (`src/loader/`)**:
+  - `TimParser`: Decodes PlayStation 1 `.TIM` textures (4-bit/8-bit indexed CLUT, 15-bit, 24-bit direct) directly to 32-bit RGBA buffers.
+  - `DiscReader`: Parses ISO 9660 volume descriptors and PS-X executable headers.
+- **Audio Synthesizer (`src/audio/`)**:
+  - `AudioSystem`: 4-channel audio mixing (Master, BGM, SFX, Voice) with dynamic volume scaling.
+  - `VagDecoder`: Decodes PlayStation SPU ADPCM audio (`.VAG`) to 16-bit uncompressed PCM using Sony hardware predictor coefficients.
+- **CPU Context (`src/cpu/`)**: MIPS R3000A register file, cycle tracking, and basic instruction decoder.
 - **Renderer (`src/rendering/`)**: Modern OpenGL 4.6 pipeline supporting high-resolution rendering, anisotropic filtering, and widescreen expansion.
 - **Audio (`src/audio/`)**: OpenAL Soft spatial audio with master, BGM, SFX, and voice channels.
