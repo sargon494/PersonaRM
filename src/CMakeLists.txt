@@ -19,10 +19,22 @@ set(INPUT_SOURCES
     input/input_manager.h
 )
 
-set(AUDIO_SOURCES "")
-set(CPU_SOURCES "")
-set(LOADER_SOURCES "")
-set(RENDERING_SOURCES "")
+set(AUDIO_SOURCES
+    audio/audio_system.cpp
+    audio/audio_system.h
+)
+set(CPU_SOURCES
+    cpu/cpu_context.cpp
+    cpu/cpu_context.h
+)
+set(LOADER_SOURCES
+    loader/disc_reader.cpp
+    loader/disc_reader.h
+)
+set(RENDERING_SOURCES
+    rendering/renderer.cpp
+    rendering/renderer.h
+)
 
 # ───────────────────────────────────────────────────────────────────────
 # Core Engine Static Library: personarm_core (aliased as persona2ep)

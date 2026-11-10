@@ -17,6 +17,9 @@
 #include "launcher/launcher.h"
 #include "core/memory_manager.h"
 #include "input/input_manager.h"
+#include "loader/disc_reader.h"
+#include "rendering/renderer.h"
+#include "audio/audio_system.h"
 
 static constexpr const char* LAUNCHER_NAME    = "PersonaRM - Native Launcher & Hub";
 static constexpr const char* LAUNCHER_VERSION = "0.2.0";
@@ -114,6 +117,98 @@ static int RunInputSelfTest() {
     }
 }
 
+static int RunLoaderSelfTest() {
+    std::cout << "[TEST] Disc & Executable Loader self-test...\n";
+    try {
+        std::vector<uint8_t> psx_header(2048, 0);
+        std::memcpy(psx_header.data(), "PS-X EXE", 8);
+        *reinterpret_cast<uint32_t*>(psx_header.data() + 0x10) = 0x80010000;
+        *reinterpret_cast<uint32_t*>(psx_header.data() + 0x18) = 0x80010000;
+        *reinterpret_cast<uint32_t*>(psx_header.data() + 0x1C) = 512 * 1024;
+
+        auto info = personarm::DiscReader::ParseExecutable(psx_header.data(), psx_header.size());
+        if (!info.valid || info.format != "PS-X EXE" || info.entry_point != 0x80010000) {
+            std::cerr << "[FAIL] Failed to parse PS-X EXE header.\n";
+            return 1;
+        }
+
+        std::cout << "  - Format:      " << info.format << "\n";
+        std::cout << "  - Entry Point: 0x" << std::hex << info.entry_point << std::dec << "\n";
+        std::cout << "  - Segments:    " << info.segments.size() << "\n";
+
+        std::cout << "[PASS] Disc & Loader self-test passed.\n";
+        return 0;
+    } catch (const std::exception& e) {
+        std::cerr << "[FAIL] Exception during loader test: " << e.what() << "\n";
+        return 1;
+    }
+}
+
+static int RunRendererSelfTest() {
+    std::cout << "[TEST] Renderer & Viewport Scaling self-test...\n";
+    try {
+        auto& renderer = personarm::Renderer::Instance();
+        personarm::RendererConfig config;
+        config.window_width = 1920;
+        config.window_height = 1080;
+        config.aspect_ratio = personarm::AspectRatioMode::Widescreen16x9;
+
+        if (!renderer.Initialize(config)) {
+            std::cerr << "[FAIL] Failed to initialize Renderer.\n";
+            return 1;
+        }
+
+        auto vp = renderer.GetCurrentViewport();
+        std::cout << "  - Viewport (16:9 1080p): " << vp.width << "x" << vp.height << " at (" << vp.x << "," << vp.y << ")\n";
+
+        // Test 4:3 letterboxing on 1080p window
+        auto vp_43 = renderer.CalculateLetterboxViewport(1920, 1080, personarm::AspectRatioMode::Original4x3);
+        std::cout << "  - Viewport (4:3 in 1080p): " << vp_43.width << "x" << vp_43.height << " (Pillarboxed at x=" << vp_43.x << ")\n";
+
+        if (vp_43.width != 1440 || vp_43.x != 240) {
+            std::cerr << "[FAIL] Incorrect letterbox calculation.\n";
+            return 1;
+        }
+
+        std::cout << "[PASS] Renderer self-test passed.\n";
+        return 0;
+    } catch (const std::exception& e) {
+        std::cerr << "[FAIL] Exception during renderer test: " << e.what() << "\n";
+        return 1;
+    }
+}
+
+static int RunAudioSelfTest() {
+    std::cout << "[TEST] Audio System self-test...\n";
+    try {
+        auto& audio = personarm::AudioSystem::Instance();
+        personarm::AudioConfig config;
+        config.master_volume = 1.0f;
+        config.bgm_volume = 0.8f;
+        config.sfx_volume = 0.9f;
+
+        if (!audio.Initialize(config)) {
+            std::cerr << "[FAIL] Failed to initialize AudioSystem.\n";
+            return 1;
+        }
+
+        audio.SetChannelVolume(personarm::AudioChannel::BGM, 0.5f);
+        float effective = audio.GetEffectiveVolume(personarm::AudioChannel::BGM);
+        std::cout << "  - BGM Effective Volume (Master 1.0 * BGM 0.5): " << effective << "\n";
+
+        if (effective < 0.49f || effective > 0.51f) {
+            std::cerr << "[FAIL] Incorrect effective volume calculation.\n";
+            return 1;
+        }
+
+        std::cout << "[PASS] Audio System self-test passed.\n";
+        return 0;
+    } catch (const std::exception& e) {
+        std::cerr << "[FAIL] Exception during audio test: " << e.what() << "\n";
+        return 1;
+    }
+}
+
 int main(int argc, char* argv[]) {
     personarm::Launcher launcher;
     if (!launcher.Initialize()) {
@@ -155,10 +250,16 @@ int main(int argc, char* argv[]) {
             if (std::strcmp(argv[i], "--test-input") == 0) {
                 return RunInputSelfTest();
             }
-            if (std::strcmp(argv[i], "--test-renderer") == 0 ||
-                std::strcmp(argv[i], "--test-audio") == 0 ||
-                std::strcmp(argv[i], "--test-load") == 0 ||
-                std::strcmp(argv[i], "--test-save") == 0 ||
+            if (std::strcmp(argv[i], "--test-load") == 0) {
+                return RunLoaderSelfTest();
+            }
+            if (std::strcmp(argv[i], "--test-renderer") == 0) {
+                return RunRendererSelfTest();
+            }
+            if (std::strcmp(argv[i], "--test-audio") == 0) {
+                return RunAudioSelfTest();
+            }
+            if (std::strcmp(argv[i], "--test-save") == 0 ||
                 std::strcmp(argv[i], "--test-performance") == 0) {
                 std::cout << "[STUB] Component self-test (" << argv[i] << ") passed.\n";
                 return EXIT_SUCCESS;

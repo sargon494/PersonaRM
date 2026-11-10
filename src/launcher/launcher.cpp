@@ -1,4 +1,5 @@
 #include "launcher.h"
+#include "loader/disc_reader.h"
 #include <iostream>
 #include <fstream>
 #include <filesystem>
@@ -94,9 +95,22 @@ bool Launcher::VerifyGameCopy(const std::string& path) {
     if (!fs::exists(path)) {
         return false;
     }
+
+    DiscReader reader;
+    if (reader.Open(path)) {
+        std::string boot_exe = reader.DetectBootExecutable();
+        if (!boot_exe.empty()) {
+            m_config.game.legal_rom_path = path;
+            m_config.game.is_verified = true;
+            m_config.game.id = boot_exe;
+            std::cout << "[Launcher] Verified Disc Image: " << path << " (Boot Executable: " << boot_exe << ")\n";
+            SaveConfig();
+            return true;
+        }
+    }
+
     uintmax_t size = fs::file_size(path);
-    // Typical PS1/PS2 CD/DVD disc image is > 100MB
-    if (size > 100 * 1024 * 1024) {
+    if (size > 50 * 1024 * 1024) {
         m_config.game.legal_rom_path = path;
         m_config.game.is_verified = true;
         SaveConfig();
