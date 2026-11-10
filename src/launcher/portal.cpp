@@ -315,3 +315,4 @@ bool Portal::SwapDisc(int target_disc) {
 }
 
 } // namespace personarm
+
