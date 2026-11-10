@@ -374,14 +374,14 @@ int main() {
         int32_t mac0 = static_cast<int32_t>(gte.ReadDataRegister(24));
         assert(mac0 != 0);
 
-        // Test GTE AVSZ3 (Average Z)
+        // Test GTE AVSZ3 (Average Z: (300 + 300 + 300) / 3 ≈ 300)
         gte.WriteControlRegister(29, 0x0555); // ~1/3 in fixed point
         gte.WriteDataRegister(17, 300); // SZ1
         gte.WriteDataRegister(18, 300); // SZ2
         gte.WriteDataRegister(19, 300); // SZ3
         gte.CommandAVSZ3();
         uint32_t otz = gte.ReadDataRegister(20);
-        assert(otz >= 95 && otz <= 105); // Approximate 100
+        assert(otz >= 295 && otz <= 305); // Approximate 300
 
         std::cout << "  ✓ PS1 GTE Coprocessor 2 tests passed.\n";
     }

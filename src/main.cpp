@@ -350,14 +350,14 @@ static int RunGteSelfTest() {
             return 1;
         }
 
-        // Test AVSZ3 (Average Z of 3 vertices)
-        gte.WriteControlRegister(29, 0x0555); // 1/3 fixed point
+        // Test AVSZ3 (Average Z of 3 vertices: (150 + 150 + 150) / 3 ≈ 150)
+        gte.WriteControlRegister(29, 0x0555); // 1/3 fixed point (1365/4096)
         gte.WriteDataRegister(17, 150);
         gte.WriteDataRegister(18, 150);
         gte.WriteDataRegister(19, 150);
         gte.CommandAVSZ3();
         uint32_t otz = gte.ReadDataRegister(20);
-        if (otz < 45 || otz > 55) {
+        if (otz < 145 || otz > 155) {
             std::cerr << "[FAIL] GTE AVSZ3 computed incorrect average Z.\n";
             return 1;
         }
