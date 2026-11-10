@@ -169,3 +169,4 @@ int Launcher::RunDiagnostics() {
 }
 
 } // namespace personarm
+

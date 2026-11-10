@@ -54,3 +54,4 @@ PersonaRM/
   - Implementado almacenamiento real contiguo para `PoolAllocator` mediante `std::vector<uint8_t>`.
   - Erradicadas fugas de memoria garantizando destructores virtuales y llamadas a `std::free`.
 - **Estandarización de Controles**: Documentada la especificación de soporte nativo de ratón, cursores virtuales en menús, botones rápidos de combate y atajos Turbo.
+

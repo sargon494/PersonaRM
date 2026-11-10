@@ -166,3 +166,4 @@ Milestone D: Menú de Ajustes de Controles en Juego & Launcher
   ├── Calibración de zona muerta y sensibilidad
   └── Perfiles de guardado (config.json)
 ```
+
