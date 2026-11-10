@@ -1,0 +1,269 @@
+GNU GENERAL PUBLIC LICENSE
+                       Version 3, 29 June 2007
+
+ Copyright (C) 2024 Persona 2: Eternal Punishment Port Project
+ Everyone is permitted to copy and distribute verbatim copies
+ of this license document, but changing it is not allowed.
+
+                            Preamble
+
+  The GNU General Public License is a free, copyleft license for
+software and other kinds of works.
+
+  The licenses for most software and other practical works are designed
+to take away your freedom to share and change the works.  By contrast,
+the GNU General Public License is intended to guarantee your freedom to
+share and change all versions of a program--to make sure it remains free
+software for all its users.  We, the Free Software Foundation, use the
+GNU General Public License for most of our software; it applies also to
+any other work released this way by its authors.  You can apply it to
+your programs, too.
+
+  When we speak of free software, we are referring to freedom, not
+price.  Our General Public Licenses are designed to make sure that you
+have the freedom to distribute copies of free software (and charge for
+them if you wish), that you receive source code or can get it if you
+want it, that you can change the software or use pieces of it in new
+free programs, and that you know you can do these things.
+
+  Developers that use our GNU General Public License in their programs
+provide you with rights that you would not have without licensing.  You
+do not gain a proprietary property in them.  However, the scripts and
+documentation in this repository are provided under the GPL 3.0 or later
+license to ensure that the porting tools remain free and open source.
+
+  Developers that use our GNU GPL license in their programs expect that
+users of their program will also give them freedom with copies of their
+program.  To ensure this, our GPL license requires that all users of the
+program also be able to redistribute copies of the program.
+
+  Sometimes, a formerly free piece of software is republished in
+proprietary form.  To publish the program in proprietary form, you
+must ask permission of its authors and most of them will refuse, which
+will make the program proprietary.
+
+  The GNU General Public License is a free, copyleft license for
+software and other kinds of works.
+
+  The licenses for most software and other practical works are designed
+to take away your freedom to share and change the works.  By contrast,
+the GNU General Public License is intended to guarantee your freedom to
+share and change all versions of a program--to make sure it remains free
+software for all its users.  We, the Free Software Foundation, use the
+GNU General Public License for most of our software; it applies also to
+any other work released this way by its authors.  You can apply it to
+your programs, too.
+
+  When we speak of free software, we are referring to freedom, not
+price.  Our General Public Licenses are designed to make sure that you
+have the freedom to distribute copies of free software (and charge for
+them if you wish), that you receive source code or can get it if you
+want it, that you can change the software or use pieces of it in new
+free programs, and that you know you can do these things.
+
+  Developers that use our GNU General Public License in their programs
+provide you with rights that you would not have without licensing.  You
+do not gain a proprietary property in them.  However, the scripts and
+documentation in this repository are provided under the GPL 3.0 or later
+license to ensure that the porting tools remain free and open source.
+
+  Developers that use our GNU GPL license in their programs expect that
+users of their program will also give them freedom with copies of their
+program.  To ensure this, our GPL license requires that all users of the
+program also be able to redistribute copies of the program.
+
+  Sometimes, a formerly free piece of software is republished in
+proprietary form.  To publish the program in proprietary form, you
+must ask permission of its authors and most of them will refuse, which
+will make the program proprietary.
+
+  NOTICE: This license applies ONLY to the porting tools, scripts, and
+documentation contained in this repository. It does NOT apply to the
+game software, assets, code, or any copyrighted material from Persona 2:
+Eternal Punishment. The game software and all materials from Persona 2:
+Eternal Punishment are protected by copyright and intellectual property
+laws.
+
+  The game software, including but not limited to:
+  - The game executable and any binary files
+  - Game code, scripts, and source code
+  - Game assets (textures, models, animations, audio)
+  - Game levels, maps, and content
+  - Any other materials from Persona 2: Eternal Punishment
+
+  ARE NOT INCLUDED in this license and are protected by their respective
+  copyright holders' rights.
+
+  STRICT PROHIBITION:
+  - We do NOT distribute, provide, or make available any copies of the
+    game, ISO images, or any game materials.
+  - Users must provide their OWN legal copy of the game.
+  - Users must own a legitimate copy of the game to use the porting tools.
+  - No game materials, assets, or content are distributed with this
+    repository.
+  - The porting tools are designed to work with a user-provided legal
+    copy of the game installed on their own system.
+
+  The porting tools in this repository are provided as a means to enable
+  users with their own legal copy of the game to create a native Windows
+  executable version of the game for their personal use. The tools do not
+  distribute, copy, or redistribute any game materials.
+
+  TERMS AND CONDITIONS FOR COPYING, DISTRIBUTION AND MODIFICATION
+
+  0. Definitions.
+
+     "This License" refers to version 3 of the GNU General Public License.
+
+     "Copyright" also means copyright-like laws that apply to other kinds of
+     works, such as semiconductor masks.
+
+     "The Program" refers to any copyrightable work licensed under this
+     License. Each licensee is addressed as "you".  "Licensees" and
+     "recipients" may be individuals or organizations.
+
+     To "modify" a work means to copy from or adapt all or part of the work
+     in a fashion requiring copyright permission, other than the making of
+     an exact copy.  The resulting work is called a "modified version" of the
+     earlier work or a work "based on" the earlier work.
+
+     A "modified version" of a work means the work altered, as a whole, in
+     a manner that requires permission under its copyright.  A "modified
+     version" does not include work not based on the work in question.
+
+     A "Standard Version" of the Library is the official version published by
+     the Free Software Foundation.
+
+     "Source Code" for a work means the preferred form of the work for making
+     modifications to it.  "Object code" means any non-source form of a work.
+
+     "Library" means a work that uses a particular license and the
+     "covered code" means any code that is licensed under this License.
+
+     "Aggregated" means a collection of distinct files in a single file,
+     as defined in section 5.
+
+     "Convey" initially means to make Copies available to another party.
+     It also includes making the work available to another party in a
+     manner that requires the recipient to pay a fee or other consideration
+     to obtain the work.
+
+     "You" (or "your") means an individual or a legal entity.
+
+  1. Source Code.
+
+     You must give the original copyright notice, and any other notices
+     required by the license, in every copy of the source code.
+
+  2. Basic Permissions.
+
+     All other non-copyrightable materials in this License are released
+     under the same terms as the source code.
+
+  3. Protection Against Frauds.
+
+     This License does not permit the copying, distribution, or
+     modification of any part of the source code, or any derivative works,
+     without the express permission of the copyright holder.
+
+     This License does not permit the distribution of any modified version
+     of the source code without the express permission of the copyright holder.
+
+  4. Verbatim Copies.
+
+     You may copy and distribute verbatim copies of the source code as
+     you receive it, in any medium, provided that you conspicuously and
+     appropriately publish on each copy an appropriate copyright notice and
+     notice of confidentiality restrictions and legal disclaimers.
+
+  5. Modified Source Code.
+
+     You may modify your copy of the source code as you desire, provided
+     that you comply with the following conditions:
+
+     a) You must cause the modified source code to carry a prominent
+        notice that states what changes you have made and the date of
+        those changes.
+
+     b) You must cause the modified source code to carry prominent notices
+        stating that you changed or modified the source code and the date
+        of any change.
+
+     c) You must cause any significant relevant change to be documented
+        in a file called "ChangeLog" or "ChangeLog.html" or similar.
+
+     d) You must cause any significant relevant change to be documented
+        in the "ChangeLog" or "ChangeLog.html" or similar file.
+
+     e) You must cause any significant relevant change to be documented
+        in the "ChangeLog" or "ChangeLog.html" or similar file.
+
+  6. Combined Works.
+
+     You may combine the source code with other works (is called a "Combined
+     Work") for copyright purposes, as long as you comply with the
+     following conditions:
+
+     a) You must cause the Combined Work to carry a prominent notice
+        stating that the source code is included in the Combined Work
+        and that the source code is subject to the terms of the GNU
+        General Public License.
+
+     b) You must cause the Combined Work to carry a prominent notice
+        stating that the source code is included in the Combined Work
+        and that the source code is subject to the terms of the GNU
+        General Public License.
+
+     c) You must cause the Combined Work to carry a prominent notice
+        stating that the source code is included in the Combined Work
+        and that the source code is subject to the terms of the GNU
+        General Public License.
+
+  7. Derived Works.
+
+     You may create a "derived work" by modifying the source code or
+     combining the source code with other works, provided that you comply
+     with the following conditions:
+
+     a) You must cause the derived work to carry a prominent notice
+        stating that the source code is included in the derived work
+        and that the source code is subject to the terms of the GNU
+        General Public License.
+
+     b) You must cause the derived work to carry a prominent notice
+        stating that the source code is included in the derived work
+        and that the source code is subject to the terms of the GNU
+        General Public License.
+
+  8. Termination.
+
+     You may not copy, modify, sublicense, or distribute the source code
+     except as expressly provided under this License.  Any attempt
+     otherwise to copy, modify, sublicense, or distribute the source code
+     is void, and will automatically terminate your rights under this
+     License.  However, parties who have received copies, or rights, from
+     you under this License will not have their licenses terminated so
+     long as they remain in full compliance.
+
+  9. Revised Versions of the GNU General Public License.
+
+     The Free Software Foundation may publish revised and/or new versions
+     of the GNU General Public License from time to time.  Such new
+     versions will be similar in spirit to the present version, but may
+     differ in detail to address new problems or concerns.
+
+     Each version is given a distinguishing version number.  If the
+     source code specifies a version number of the GNU General Public
+     License that applies to it and "any later version", you have the
+     option of following the terms and conditions either of that
+     version or of any later version published by the Free Software
+     Foundation.  If the source code does not specify a version number
+     of the GNU General Public License, you may choose any version
+     ever published by the Free Software Foundation.
+
+  10. No Warranty.
+
+     Unless required by applicable law or agreed to in writing,
+     software distributed under the License is distributed on an "AS IS"
+     basis, WITHOUT WARRANTY OF ANY KIND, either express or implied.
+     See the GNU General Public License for details.

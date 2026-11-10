@@ -1,0 +1,170 @@
+# ═══════════════════════════════════════════════════════════════════════
+# Persona 2: Eternal Punishment - Native Port
+# .gitignore
+# ═══════════════════════════════════════════════════════════════════════
+
+# ───────────────────────────────────────────────────────────────────────
+# Team & Internal Files (CONFIDENTIAL)
+# ───────────────────────────────────────────────────────────────────────
+TEAM_ROLES.md
+team_roles.*
+.team/
+
+# ───────────────────────────────────────────────────────────────────────
+# Build Directories
+# ───────────────────────────────────────────────────────────────────────
+build/
+out/
+cmake-build-*/
+.cmake/
+
+# ───────────────────────────────────────────────────────────────────────
+# CMake Generated Files
+# ───────────────────────────────────────────────────────────────────────
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+CTestTestfile.cmake
+compile_commands.json
+install_manifest.txt
+*.cmake.in
+
+# ───────────────────────────────────────────────────────────────────────
+# Compiled Objects / Binaries
+# ───────────────────────────────────────────────────────────────────────
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+*.exe
+*.out
+*.pdb
+*.ilk
+*.exp
+*.idb
+
+# ───────────────────────────────────────────────────────────────────────
+# IDE / Editor Files
+# ───────────────────────────────────────────────────────────────────────
+# Visual Studio
+.vs/
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.suo
+*.opensdf
+*.sdf
+*.VC.db
+*.VC.opendb
+encproj/
+
+# VS Code
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# JetBrains (CLion, etc.)
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Xcode
+*.xcworkspace
+*.xcodeproj
+xcuserdata/
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# ───────────────────────────────────────────────────────────────────────
+# OS Files
+# ───────────────────────────────────────────────────────────────────────
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+.directory
+
+# ───────────────────────────────────────────────────────────────────────
+# Dependencies / Package Managers
+# ───────────────────────────────────────────────────────────────────────
+vcpkg_installed/
+conan/
+conanbuildinfo.*
+conaninfo.txt
+graph_info.json
+
+# ───────────────────────────────────────────────────────────────────────
+# Python
+# ───────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+venv/
+.venv/
+env/
+.env
+
+# ───────────────────────────────────────────────────────────────────────
+# Test & Coverage
+# ───────────────────────────────────────────────────────────────────────
+Testing/
+coverage/
+*.gcov
+*.gcda
+*.gcno
+*.lcov
+htmlcov/
+performance_report.md
+
+# ───────────────────────────────────────────────────────────────────────
+# Documentation Build
+# ───────────────────────────────────────────────────────────────────────
+site/
+
+# ───────────────────────────────────────────────────────────────────────
+# Game Files (NEVER commit these)
+# ───────────────────────────────────────────────────────────────────────
+*.iso
+*.bin
+*.cue
+*.img
+*.mdf
+*.mds
+*.nrg
+*.elf
+*.irx
+game_data/
+roms/
+
+# ───────────────────────────────────────────────────────────────────────
+# Logs & Temp
+# ───────────────────────────────────────────────────────────────────────
+*.log
+*.tmp
+*.temp
+*.swp
+*.swo
+*.bak
+

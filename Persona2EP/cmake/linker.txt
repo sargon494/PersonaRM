@@ -1,0 +1,109 @@
+# Linker script for Persona 2: Eternal Punishment Native Port
+# This script defines the memory layout of the executable.
+
+/* Memory Layout */
+SECTIONS
+{
+    /* .text section - code */
+    .text :
+    {
+        *(.text)
+        *(.text.*)
+        *(.text.unlikely)
+        *(.text.glink)
+        *(.text.glue_7)
+        *(.text.glue_7_noreturn)
+        *(.text.lock)
+        *(.text.unlikely)
+    } > 0x00400000
+
+    /* .rodata section - read-only data */
+    .rodata :
+    {
+        *(.rodata)
+        *(.rodata.*)
+    } > 0x00401000
+
+    /* .data section - initialized data */
+    .data :
+    {
+        *(.data)
+        *(.data.*)
+    } > 0x00402000
+
+    /* .bss section - uninitialized data */
+    .bss :
+    {
+        *(.bss)
+        *(.bss.*)
+    } > 0x00403000
+
+    /* .data.rel.ro section */
+    .data.rel.ro :
+    {
+        *(.data.rel.ro)
+        *(.data.rel.ro.*)
+    } > 0x00404000
+
+    /* .init section */
+    .init :
+    {
+        *(.init)
+        *(.init.*)
+    }
+
+    /* .fini section */
+    .fini :
+    {
+        *(.fini)
+        *(.fini.*)
+    }
+
+    /* .plt section */
+    .plt :
+    {
+        *(.plt)
+        *(.plt.*)
+    }
+
+    /* .plt.got section */
+    .plt.got :
+    {
+        *(.plt.got)
+        *(.plt.got.*)
+    }
+
+    /* .got section */
+    .got :
+    {
+        *(.got)
+        *(.got.*)
+    }
+
+    /* .got.plt section */
+    .got.plt :
+    {
+        *(.got.plt)
+        *(.got.plt.*)
+    }
+
+    /* .eh_frame section - exception handling */
+    .eh_frame :
+    {
+        *(.eh_frame)
+        *(.eh_frame.*)
+    }
+
+    /* .eh_frame_hdr section */
+    .eh_frame_hdr :
+    {
+        *(.eh_frame_hdr)
+    }
+
+    /* .discarded section */
+    /DISCARD/ :
+    {
+        *(.discard)
+        *(.discard.*)
+    }
+}
