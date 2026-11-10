@@ -56,6 +56,8 @@ set(RENDERING_SOURCES
     rendering/window_context.h
     rendering/gl_renderer.cpp
     rendering/gl_renderer.h
+    rendering/mdec_decoder.cpp
+    rendering/mdec_decoder.h
 )
 set(ENGINE_SOURCES
     engine/engine.cpp

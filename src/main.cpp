@@ -31,6 +31,7 @@
 #include "engine/engine.h"
 #include "rendering/window_context.h"
 #include "rendering/gl_renderer.h"
+#include "rendering/mdec_decoder.h"
 
 static constexpr const char* LAUNCHER_NAME    = "PersonaRM - Native Launcher & Hub";
 static constexpr const char* LAUNCHER_VERSION = "0.2.0";
@@ -69,6 +70,7 @@ static void PrintUsage(const char* prog) {
               << "  --test-str         Verify PS1 STR/MDEC CD-ROM XA video demuxer\n"
               << "  --test-engine      Verify PersonaRM unified core engine & frame loop\n"
               << "  --test-window      Verify Window Context & GL presentation pipeline\n"
+              << "  --test-mdec        Verify PS1 MDEC video macroblock IDCT decoder\n"
               << "  --test-save        Verify modern save state system\n"
               << "  --test-performance Run engine frametime benchmarks\n";
 }
@@ -567,6 +569,48 @@ static int RunWindowSelfTest() {
     }
 }
 
+static int RunMdecSelfTest() {
+    std::cout << "[TEST] PS1 MDEC Video Macroblock IDCT Decoder self-test...\n";
+    try {
+        personarm::MdecDecoder mdec;
+
+        // Verify IDCT 8x8 baseline (zero AC gives mid-scale 128)
+        int16_t coeff[64] = {0};
+        uint8_t pixels[64] = {0};
+        personarm::MdecDecoder::PerformIdct8x8(coeff, pixels);
+        if (pixels[0] != 128) {
+            std::cerr << "[FAIL] MDEC IDCT baseline check failed: expected 128, got " << (int)pixels[0] << "\n";
+            return 1;
+        }
+
+        // Verify Color space conversion
+        uint32_t black = personarm::MdecDecoder::YCbCrToRgba(0, 128, 128);
+        if ((black & 0x00FFFFFF) != 0x000000) {
+            std::cerr << "[FAIL] MDEC YCbCr conversion failed for black pixel.\n";
+            return 1;
+        }
+
+        // Verify full frame decoding
+        personarm::MdecFrame frame;
+        if (!mdec.DecodeFrame(nullptr, 0, 320, 240, frame)) {
+            std::cerr << "[FAIL] MDEC frame decoding failed.\n";
+            return 1;
+        }
+
+        if (frame.width != 320 || frame.height != 240 || frame.pixels_rgba.size() != 320 * 240) {
+            std::cerr << "[FAIL] MDEC frame dimensions mismatch.\n";
+            return 1;
+        }
+
+        std::cout << "  - MDEC Frame Decoded: " << frame.width << "x" << frame.height << " (" << frame.pixels_rgba.size() << " pixels)\n";
+        std::cout << "[PASS] PS1 MDEC Video Decoder self-test passed.\n";
+        return 0;
+    } catch (const std::exception& e) {
+        std::cerr << "[FAIL] Exception during MDEC test: " << e.what() << "\n";
+        return 1;
+    }
+}
+
 int main(int argc, char* argv[]) {
     personarm::Launcher launcher;
     if (!launcher.Initialize()) {
@@ -640,6 +684,9 @@ int main(int argc, char* argv[]) {
             }
             if (std::strcmp(argv[i], "--test-window") == 0) {
                 return RunWindowSelfTest();
+            }
+            if (std::strcmp(argv[i], "--test-mdec") == 0) {
+                return RunMdecSelfTest();
             }
             if (std::strcmp(argv[i], "--test-renderer") == 0) {
                 return RunRendererSelfTest();

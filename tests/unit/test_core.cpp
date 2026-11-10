@@ -20,6 +20,7 @@
 #include "engine/engine.h"
 #include "rendering/window_context.h"
 #include "rendering/gl_renderer.h"
+#include "rendering/mdec_decoder.h"
 
 int main() {
     std::cout << "[UNIT TEST] Running Core and Input Unit Tests...\n";
@@ -329,6 +330,33 @@ int main() {
 
         assert(bios.GetInterceptedCallCount() == 2);
 
+        // Test direct RAM memcpy & memset via Vector A
+        std::vector<uint8_t> ram(1024 * 1024, 0);
+        ram[0x1000] = 0xAA;
+        ram[0x1001] = 0xBB;
+        cpu.SetGPR(4, 0x80002000); // dst
+        cpu.SetGPR(5, 0x80001000); // src
+        cpu.SetGPR(6, 2);          // count
+        cpu.SetGPR(9, 0x2A);       // memcpy func 0x2A
+        cpu.SetGPR(31, 0x80010070);
+        cpu.SetPC(0x000000A0);
+        handled = bios.HandleBiosHook(cpu, ram.data(), ram.size());
+        assert(handled == true);
+        assert(ram[0x2000] == 0xAA);
+        assert(ram[0x2001] == 0xBB);
+
+        // Test memset func 0x2B
+        cpu.SetGPR(4, 0x80003000); // dst
+        cpu.SetGPR(5, 0x77);       // val
+        cpu.SetGPR(6, 4);          // count
+        cpu.SetGPR(9, 0x2B);       // memset func 0x2B
+        cpu.SetGPR(31, 0x80010080);
+        cpu.SetPC(0x000000A0);
+        handled = bios.HandleBiosHook(cpu, ram.data(), ram.size());
+        assert(handled == true);
+        assert(ram[0x3000] == 0x77);
+        assert(ram[0x3003] == 0x77);
+
         std::cout << "  ✓ PS1 BIOS HLE Dispatcher tests passed.\n";
     }
 
@@ -530,6 +558,64 @@ int main() {
         assert(window.IsOpen() == false);
 
         std::cout << "  ✓ Window Context & GL Renderer tests passed.\n";
+    }
+
+    // 18. MDEC Decoder & MIPS RFE Instruction Tests
+    {
+        // 18.1 IDCT 8x8 with zero AC coefficients
+        int16_t coeff[64] = {0};
+        uint8_t pixels[64] = {0};
+        personarm::MdecDecoder::PerformIdct8x8(coeff, pixels);
+        for (int i = 0; i < 64; ++i) {
+            assert(pixels[i] == 128); // Level shift with 0 DC/AC produces mid-scale 128
+        }
+
+        // 18.2 YCbCr to RGBA color space conversion
+        uint32_t black = personarm::MdecDecoder::YCbCrToRgba(0, 128, 128);
+        assert((black & 0x00FFFFFF) == 0x000000); // R=0, G=0, B=0
+
+        uint32_t white = personarm::MdecDecoder::YCbCrToRgba(255, 128, 128);
+        assert((white & 0x00FFFFFF) == 0xFFFFFF); // R=255, G=255, B=255
+
+        // 18.3 Frame decoding
+        personarm::MdecDecoder mdec;
+        personarm::MdecFrame frame;
+        bool decoded = mdec.DecodeFrame(nullptr, 0, 320, 240, frame);
+        assert(decoded == true);
+        assert(frame.width == 320);
+        assert(frame.height == 240);
+        assert(frame.pixels_rgba.size() == 320 * 240);
+        assert(mdec.GetDecodedFrameCount() == 1);
+
+        // 18.4 MIPS RFE (Restore From Exception) instruction
+        personarm::CpuContext cpu;
+        // Status with IEc=0, KUc=0, IEp=1, KUp=0, IEo=1, KUo=1 -> binary ...110100
+        // We set cp0_status via MTC0 or direct instruction
+        // Opcode MTC0 rt=1, rd=12: (0x10 << 26) | (0x04 << 21) | (1 << 16) | (12 << 11)
+        uint32_t mtc0_op = (0x10 << 26) | (0x04 << 21) | (1 << 16) | (12 << 11);
+        // Opcode RFE: 0x42000010 (cop0, bit 25=1, funct=0x10)
+        uint32_t rfe_op = 0x42000010;
+
+        std::vector<uint32_t> code = { mtc0_op, rfe_op };
+        cpu.SetGPR(1, 0x34); // 0b110100 -> IEp=1, KUp=0, IEo=1, KUo=1
+        cpu.SetMemoryHooks(
+            [&code](uint32_t addr, uint32_t) -> uint32_t {
+                uint32_t idx = (addr - 0x80010000) / 4;
+                if (idx < code.size()) return code[idx];
+                return 0;
+            },
+            nullptr
+        );
+        cpu.SetPC(0x80010000);
+        cpu.Step(); // Execute MTC0
+        assert((cpu.GetRegisters().cp0_status & 0x3F) == 0x34);
+
+        cpu.Step(); // Execute RFE
+        // After RFE, bits 2..5 (0b1101) are shifted right into bits 0..3 (0b1101)
+        // so IEc becomes 1, KUc becomes 0!
+        assert((cpu.GetRegisters().cp0_status & 0x03) == 0x01); // IEc=1, KUc=0
+
+        std::cout << "  ✓ MDEC Decoder & MIPS RFE tests passed.\n";
     }
 
     std::cout << "[PASS] All unit tests completed successfully!\n";

@@ -288,6 +288,8 @@ void CpuContext::ExecuteInstruction(uint32_t opcode) {
                 if (rd == 12) m_regs.cp0_status = rt_val;
                 else if (rd == 13) m_regs.cp0_cause = rt_val;
                 else if (rd == 14) m_regs.cp0_epc = rt_val;
+            } else if (funct == 0x10 && (opcode & 0x02000000) != 0) { // RFE (Restore From Exception)
+                m_regs.cp0_status = (m_regs.cp0_status & ~0x0F) | ((m_regs.cp0_status >> 2) & 0x0F);
             }
             break;
 

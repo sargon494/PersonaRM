@@ -27,6 +27,7 @@ bool Engine::Initialize(const EngineBootConfig& config) {
 
     if (m_config.enable_bios_hle) {
         m_bios.Initialize();
+        m_bios.SetDiscReader(&m_disc_reader);
     }
 
     m_state = EngineState::Idle;
@@ -237,10 +238,12 @@ void Engine::RunFrame() {
     uint64_t target_cycles = start_cycles + PS1_CYCLES_PER_FRAME_NTSC;
 
     while (m_cpu.GetCycleCount() < target_cycles && m_state == EngineState::Running) {
-        // Check BIOS HLE hooks
+        // Fast BIOS HLE hook check: only intercept at vectors 0xA0, 0xB0, 0xC0
         if (m_config.enable_bios_hle) {
-            MemoryManager mem_mgr; // HLE wrapper
-            m_bios.HandleBiosHook(m_cpu, mem_mgr);
+            uint32_t masked_pc = m_cpu.GetPC() & 0x1FFFFFFF;
+            if (masked_pc == 0x000000A0 || masked_pc == 0x000000B0 || masked_pc == 0x000000C0) {
+                m_bios.HandleBiosHook(m_cpu, m_ram.data(), m_ram.size());
+            }
         }
 
         m_cpu.Step();

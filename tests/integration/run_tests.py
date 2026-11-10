@@ -87,6 +87,7 @@ class IntegrationTestSuite:
             self.test_str,
             self.test_engine,
             self.test_window,
+            self.test_mdec,
             self.test_game_loading,
             self.test_save_system,
             self.test_performance,
@@ -178,6 +179,10 @@ class IntegrationTestSuite:
     def test_window(self) -> TestResult:
         print("\n[INFO] Testing Window Context & GL Presentation pipeline...")
         return self._run_subcommand("window", "--test-window")
+
+    def test_mdec(self) -> TestResult:
+        print("\n[INFO] Testing PS1 MDEC Video Macroblock Decoder...")
+        return self._run_subcommand("mdec", "--test-mdec")
 
     def test_game_loading(self) -> TestResult:
         print("\n[INFO] Testing disc/game loader...")
