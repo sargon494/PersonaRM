@@ -13,6 +13,8 @@
 #include "audio/audio_system.h"
 #include "audio/vag_decoder.h"
 #include "cpu/cpu_context.h"
+#include "cpu/gte.h"
+#include "loader/exe_loader.h"
 
 int main() {
     std::cout << "[UNIT TEST] Running Core and Input Unit Tests...\n";
@@ -323,6 +325,94 @@ int main() {
         assert(bios.GetInterceptedCallCount() == 2);
 
         std::cout << "  ✓ PS1 BIOS HLE Dispatcher tests passed.\n";
+    }
+
+    // 12. GTE (Geometry Transformation Engine) & Unaligned Memory Tests
+    {
+        personarm::CpuContext cpu;
+
+        // Unaligned memory store/load simulation using 64KB RAM
+        std::vector<uint8_t> ram(65536, 0);
+        cpu.SetMemoryHooks(
+            [&ram](uint32_t addr, uint32_t size) -> uint32_t {
+                uint32_t offset = addr & 0xFFFF;
+                if (size == 1) return ram[offset];
+                if (size == 2) return ram[offset] | (static_cast<uint32_t>(ram[(offset + 1) & 0xFFFF]) << 8);
+                if (size == 4) {
+                    return ram[offset] |
+                           (static_cast<uint32_t>(ram[(offset + 1) & 0xFFFF]) << 8) |
+                           (static_cast<uint32_t>(ram[(offset + 2) & 0xFFFF]) << 16) |
+                           (static_cast<uint32_t>(ram[(offset + 3) & 0xFFFF]) << 24);
+                }
+                return 0;
+            },
+            [&ram](uint32_t addr, uint32_t val, uint32_t size) {
+                uint32_t offset = addr & 0xFFFF;
+                if (size == 1) ram[offset] = static_cast<uint8_t>(val);
+                else if (size == 2) {
+                    ram[offset] = static_cast<uint8_t>(val & 0xFF);
+                    ram[(offset + 1) & 0xFFFF] = static_cast<uint8_t>((val >> 8) & 0xFF);
+                } else if (size == 4) {
+                    ram[offset] = static_cast<uint8_t>(val & 0xFF);
+                    ram[(offset + 1) & 0xFFFF] = static_cast<uint8_t>((val >> 8) & 0xFF);
+                    ram[(offset + 2) & 0xFFFF] = static_cast<uint8_t>((val >> 16) & 0xFF);
+                    ram[(offset + 3) & 0xFFFF] = static_cast<uint8_t>((val >> 24) & 0xFF);
+                }
+            }
+        );
+
+        // Test GTE NCLIP normal clipping (backface culling)
+        auto& gte = cpu.GetGTE();
+        // Set SXY0 (reg 12) = (0, 0), SXY1 (reg 13) = (10, 0), SXY2 (reg 14) = (0, 10)
+        gte.WriteDataRegister(12, 0);
+        gte.WriteDataRegister(13, (0 << 16) | 10);
+        gte.WriteDataRegister(14, (10 << 16) | 0);
+        gte.CommandNCLIP();
+        // MAC0 (reg 24) should be positive for clockwise/counter-clockwise winding
+        int32_t mac0 = static_cast<int32_t>(gte.ReadDataRegister(24));
+        assert(mac0 != 0);
+
+        // Test GTE AVSZ3 (Average Z)
+        gte.WriteControlRegister(29, 0x0555); // ~1/3 in fixed point
+        gte.WriteDataRegister(17, 300); // SZ1
+        gte.WriteDataRegister(18, 300); // SZ2
+        gte.WriteDataRegister(19, 300); // SZ3
+        gte.CommandAVSZ3();
+        uint32_t otz = gte.ReadDataRegister(20);
+        assert(otz >= 95 && otz <= 105); // Approximate 100
+
+        std::cout << "  ✓ PS1 GTE Coprocessor 2 tests passed.\n";
+    }
+
+    // 13. PS-X EXE Loader Tests
+    {
+        std::vector<uint8_t> dummy_exe(4096, 0);
+        personarm::PsxExeHeader header{};
+        std::memcpy(header.magic, "PS-X EXE", 8);
+        header.initial_pc = 0x80010000;
+        header.destination_ram = 0x80010000;
+        header.file_size = 2048;
+        header.initial_sp_base = 0x801FFF00;
+        header.initial_gp = 0x80080000;
+        std::memcpy(dummy_exe.data(), &header, sizeof(header));
+
+        personarm::CpuContext cpu;
+        std::vector<uint8_t> ram(2 * 1024 * 1024, 0);
+        personarm::PsxExeInfo info{};
+
+        bool loaded = personarm::ExeLoader::LoadExe(dummy_exe.data(), dummy_exe.size(), cpu, ram, info);
+        assert(loaded == true);
+        assert(info.entry_point == 0x80010000);
+        assert(cpu.GetPC() == 0x80010000);
+        assert(cpu.GetGPR(28) == 0x80080000); // $gp
+        assert(cpu.GetGPR(29) == 0x801FFF00); // $sp
+
+        // SYSTEM.CNF parser test
+        std::string cnf = "BOOT = cdrom:\\SLUS_011.58;1\r\nTCB = 4\r\nEVENT = 16\r\nSTACK = 801FFF00\r\n";
+        std::string boot_file = personarm::ExeLoader::ExtractBootExecutable(cnf);
+        assert(boot_file == "SLUS_011.58");
+
+        std::cout << "  ✓ PS-X EXE Loader & SYSTEM.CNF parser tests passed.\n";
     }
 
     std::cout << "[PASS] All unit tests completed successfully!\n";

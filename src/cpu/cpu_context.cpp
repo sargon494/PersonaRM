@@ -22,6 +22,7 @@ void CpuContext::Reset() {
     m_in_delay_slot = false;
     m_load_delay_reg = 0;
     m_load_delay_val = 0;
+    m_gte.Reset();
 }
 
 uint32_t CpuContext::GetGPR(uint32_t index) const {
@@ -290,6 +291,30 @@ void CpuContext::ExecuteInstruction(uint32_t opcode) {
             }
             break;
 
+        case 0x12: // COP2 (Coprocessor 2 - GTE)
+            if ((opcode & 0x02000000) != 0) {
+                // GTE Command execution (bit 25 is set)
+                m_gte.ExecuteCommand(opcode);
+            } else {
+                switch (rs) {
+                    case 0x00: // MFC2 rt, rd
+                        SetGPR(rt, m_gte.ReadDataRegister(rd));
+                        break;
+                    case 0x02: // CFC2 rt, rd
+                        SetGPR(rt, m_gte.ReadControlRegister(rd));
+                        break;
+                    case 0x04: // MTC2 rt, rd
+                        m_gte.WriteDataRegister(rd, rt_val);
+                        break;
+                    case 0x06: // CTC2 rt, rd
+                        m_gte.WriteControlRegister(rd, rt_val);
+                        break;
+                    default:
+                        break;
+                }
+            }
+            break;
+
         // Memory Loads (with Load Delay Slot simulation)
         case 0x20: { // LB (Load Byte signed)
             if (m_read_memory) {
@@ -306,6 +331,22 @@ void CpuContext::ExecuteInstruction(uint32_t opcode) {
                 int16_t val = static_cast<int16_t>(m_read_memory(addr, 2));
                 m_load_delay_reg = rt;
                 m_load_delay_val = static_cast<int32_t>(val);
+            }
+            break;
+        }
+        case 0x22: { // LWL (Load Word Left - Little Endian)
+            if (m_read_memory) {
+                uint32_t addr = rs_val + simm;
+                uint32_t aligned_addr = addr & ~3;
+                uint32_t shift = (addr & 3) * 8;
+                uint32_t aligned_val = m_read_memory(aligned_addr, 4);
+
+                uint32_t cur_val = (m_load_delay_reg == rt) ? m_load_delay_val : rt_val;
+                uint32_t mask = 0x00FFFFFF >> (24 - shift);
+                uint32_t result = (cur_val & mask) | (aligned_val << (24 - shift));
+
+                m_load_delay_reg = rt;
+                m_load_delay_val = result;
             }
             break;
         }
@@ -336,6 +377,22 @@ void CpuContext::ExecuteInstruction(uint32_t opcode) {
             }
             break;
         }
+        case 0x26: { // LWR (Load Word Right - Little Endian)
+            if (m_read_memory) {
+                uint32_t addr = rs_val + simm;
+                uint32_t aligned_addr = addr & ~3;
+                uint32_t shift = (addr & 3) * 8;
+                uint32_t aligned_val = m_read_memory(aligned_addr, 4);
+
+                uint32_t cur_val = (m_load_delay_reg == rt) ? m_load_delay_val : rt_val;
+                uint32_t mask = (shift == 0) ? 0x00000000 : (0xFFFFFF00 << (24 - shift));
+                uint32_t result = (cur_val & mask) | (aligned_val >> shift);
+
+                m_load_delay_reg = rt;
+                m_load_delay_val = result;
+            }
+            break;
+        }
 
         // Memory Stores
         case 0x28: // SB (Store Byte)
@@ -350,11 +407,56 @@ void CpuContext::ExecuteInstruction(uint32_t opcode) {
             }
             break;
 
+        case 0x2A: { // SWL (Store Word Left - Little Endian)
+            if (m_read_memory && m_write_memory) {
+                uint32_t addr = rs_val + simm;
+                uint32_t aligned_addr = addr & ~3;
+                uint32_t shift = (addr & 3) * 8;
+                uint32_t cur_mem = m_read_memory(aligned_addr, 4);
+
+                uint32_t mask = 0xFFFFFF00 << shift;
+                uint32_t result = (cur_mem & mask) | (rt_val >> (24 - shift));
+                m_write_memory(aligned_addr, result, 4);
+            }
+            break;
+        }
+
         case 0x2B: // SW (Store Word)
             if (m_write_memory) {
                 m_write_memory(rs_val + simm, rt_val, 4);
             }
             break;
+
+        case 0x2E: { // SWR (Store Word Right - Little Endian)
+            if (m_read_memory && m_write_memory) {
+                uint32_t addr = rs_val + simm;
+                uint32_t aligned_addr = addr & ~3;
+                uint32_t shift = (addr & 3) * 8;
+                uint32_t cur_mem = m_read_memory(aligned_addr, 4);
+
+                uint32_t mask = (shift == 0) ? 0x00000000 : (0x00FFFFFF >> (24 - shift));
+                uint32_t result = (cur_mem & mask) | (rt_val << shift);
+                m_write_memory(aligned_addr, result, 4);
+            }
+            break;
+        }
+
+        case 0x32: { // LWC2 (Load Word to Coprocessor 2 Data Register)
+            if (m_read_memory) {
+                uint32_t addr = rs_val + simm;
+                uint32_t val = m_read_memory(addr, 4);
+                m_gte.WriteDataRegister(rt, val);
+            }
+            break;
+        }
+
+        case 0x3A: { // SWC2 (Store Word from Coprocessor 2 Data Register)
+            if (m_write_memory) {
+                uint32_t addr = rs_val + simm;
+                m_write_memory(addr, m_gte.ReadDataRegister(rt), 4);
+            }
+            break;
+        }
 
         default:
             PRM_LOG_WARN("CPU", "Unimplemented opcode: 0x" + std::to_string(op));

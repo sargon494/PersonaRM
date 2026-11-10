@@ -30,6 +30,8 @@ set(AUDIO_SOURCES
 set(CPU_SOURCES
     cpu/cpu_context.cpp
     cpu/cpu_context.h
+    cpu/gte.cpp
+    cpu/gte.h
 )
 set(LOADER_SOURCES
     loader/disc_reader.cpp
@@ -38,6 +40,8 @@ set(LOADER_SOURCES
     loader/tim_parser.h
     loader/ps1_bios_hle.cpp
     loader/ps1_bios_hle.h
+    loader/exe_loader.cpp
+    loader/exe_loader.h
 )
 set(RENDERING_SOURCES
     rendering/renderer.cpp

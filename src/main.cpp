@@ -24,6 +24,8 @@
 #include "rendering/ps1_gpu.h"
 #include "audio/audio_system.h"
 #include "audio/vag_decoder.h"
+#include "cpu/gte.h"
+#include "loader/exe_loader.h"
 
 static constexpr const char* LAUNCHER_NAME    = "PersonaRM - Native Launcher & Hub";
 static constexpr const char* LAUNCHER_VERSION = "0.2.0";
@@ -56,6 +58,8 @@ static void PrintUsage(const char* prog) {
               << "  --test-vag         Verify VAG SPU audio decoder\n"
               << "  --test-gpu         Verify PS1 GPU VRAM & GP0/GP1 commands\n"
               << "  --test-bios        Verify PS1 BIOS HLE system call dispatcher\n"
+              << "  --test-gte         Verify PS1 Geometry Transformation Engine math\n"
+              << "  --test-exe         Verify PS-X EXE header and payload loader\n"
               << "  --test-save        Verify modern save state system\n"
               << "  --test-performance Run engine frametime benchmarks\n";
 }
@@ -327,6 +331,82 @@ static int RunBiosSelfTest() {
     }
 }
 
+static int RunGteSelfTest() {
+    std::cout << "[TEST] PS1 GTE Geometry Transformation Engine self-test...\n";
+    try {
+        personarm::Gte gte;
+        // Test Normal Clipping (NCLIP)
+        gte.WriteDataRegister(12, 0);                 // SXY0 = (0, 0)
+        gte.WriteDataRegister(13, (0 << 16) | 20);    // SXY1 = (20, 0)
+        gte.WriteDataRegister(14, (20 << 16) | 0);    // SXY2 = (0, 20)
+        gte.CommandNCLIP();
+        int32_t mac0 = static_cast<int32_t>(gte.ReadDataRegister(24));
+        if (mac0 == 0) {
+            std::cerr << "[FAIL] GTE NCLIP produced zero normal.\n";
+            return 1;
+        }
+
+        // Test AVSZ3 (Average Z of 3 vertices)
+        gte.WriteControlRegister(29, 0x0555); // 1/3 fixed point
+        gte.WriteDataRegister(17, 150);
+        gte.WriteDataRegister(18, 150);
+        gte.WriteDataRegister(19, 150);
+        gte.CommandAVSZ3();
+        uint32_t otz = gte.ReadDataRegister(20);
+        if (otz < 45 || otz > 55) {
+            std::cerr << "[FAIL] GTE AVSZ3 computed incorrect average Z.\n";
+            return 1;
+        }
+
+        std::cout << "  - GTE NCLIP cross product: " << mac0 << "\n";
+        std::cout << "  - GTE AVSZ3 average OTZ:   " << otz << "\n";
+        std::cout << "[PASS] PS1 GTE self-test passed.\n";
+        return 0;
+    } catch (const std::exception& e) {
+        std::cerr << "[FAIL] Exception during GTE test: " << e.what() << "\n";
+        return 1;
+    }
+}
+
+static int RunExeSelfTest() {
+    std::cout << "[TEST] PS-X EXE Loader self-test...\n";
+    try {
+        std::vector<uint8_t> dummy_exe(4096, 0);
+        personarm::PsxExeHeader header{};
+        std::memcpy(header.magic, "PS-X EXE", 8);
+        header.initial_pc = 0x80010000;
+        header.destination_ram = 0x80010000;
+        header.file_size = 2048;
+        header.initial_sp_base = 0x801FFF00;
+        header.initial_gp = 0x80080000;
+        std::memcpy(dummy_exe.data(), &header, sizeof(header));
+
+        personarm::CpuContext cpu;
+        std::vector<uint8_t> ram(2 * 1024 * 1024, 0);
+        personarm::PsxExeInfo info{};
+
+        if (!personarm::ExeLoader::LoadExe(dummy_exe.data(), dummy_exe.size(), cpu, ram, info)) {
+            std::cerr << "[FAIL] ExeLoader failed to parse valid PS-X EXE.\n";
+            return 1;
+        }
+
+        std::string cnf = "BOOT = cdrom:\\SLUS_011.58;1\r\n";
+        std::string boot_bin = personarm::ExeLoader::ExtractBootExecutable(cnf);
+        if (boot_bin != "SLUS_011.58") {
+            std::cerr << "[FAIL] Failed to extract boot executable from SYSTEM.CNF.\n";
+            return 1;
+        }
+
+        std::cout << "  - Extracted Boot EXE: " << boot_bin << "\n";
+        std::cout << "  - Configured Entry Point: 0x" << std::hex << info.entry_point << std::dec << "\n";
+        std::cout << "[PASS] PS-X EXE Loader self-test passed.\n";
+        return 0;
+    } catch (const std::exception& e) {
+        std::cerr << "[FAIL] Exception during EXE test: " << e.what() << "\n";
+        return 1;
+    }
+}
+
 int main(int argc, char* argv[]) {
     personarm::Launcher launcher;
     if (!launcher.Initialize()) {
@@ -382,6 +462,12 @@ int main(int argc, char* argv[]) {
             }
             if (std::strcmp(argv[i], "--test-bios") == 0) {
                 return RunBiosSelfTest();
+            }
+            if (std::strcmp(argv[i], "--test-gte") == 0) {
+                return RunGteSelfTest();
+            }
+            if (std::strcmp(argv[i], "--test-exe") == 0) {
+                return RunExeSelfTest();
             }
             if (std::strcmp(argv[i], "--test-renderer") == 0) {
                 return RunRendererSelfTest();

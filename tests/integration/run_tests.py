@@ -81,6 +81,8 @@ class IntegrationTestSuite:
             self.test_vag_decoder,
             self.test_gpu,
             self.test_bios,
+            self.test_gte,
+            self.test_exe,
             self.test_game_loading,
             self.test_save_system,
             self.test_performance,
@@ -148,6 +150,14 @@ class IntegrationTestSuite:
     def test_bios(self) -> TestResult:
         print("\n[INFO] Testing PS1 BIOS HLE Dispatcher...")
         return self._run_subcommand("bios", "--test-bios")
+
+    def test_gte(self) -> TestResult:
+        print("\n[INFO] Testing PS1 GTE Geometry Transformation Engine...")
+        return self._run_subcommand("gte", "--test-gte")
+
+    def test_exe(self) -> TestResult:
+        print("\n[INFO] Testing PS-X EXE Loader & SYSTEM.CNF parser...")
+        return self._run_subcommand("exe", "--test-exe")
 
     def test_game_loading(self) -> TestResult:
         print("\n[INFO] Testing disc/game loader...")

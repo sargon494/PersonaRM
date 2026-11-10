@@ -5,6 +5,7 @@
 #include <string>
 #include <functional>
 #include <optional>
+#include "cpu/gte.h"
 
 namespace personarm {
 
@@ -58,6 +59,10 @@ public:
 
     const CpuRegisters& GetRegisters() const { return m_regs; }
 
+    // Coprocessor 2 (GTE) Access
+    Gte& GetGTE() { return m_gte; }
+    const Gte& GetGTE() const { return m_gte; }
+
 private:
     void ExecuteInstruction(uint32_t opcode);
 
@@ -65,6 +70,7 @@ private:
     void ScheduleBranch(uint32_t target_address);
 
     CpuRegisters m_regs;
+    Gte m_gte;
     uint64_t m_cycles = 0;
 
     uint32_t m_next_pc = 0;
