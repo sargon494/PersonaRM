@@ -31,3 +31,4 @@ if ($RunTests) {
 } else {
     Write-Host "`n[3/3] Build finished successfully! Executable: .\build\$BuildType\personarm.exe" -ForegroundColor Green
 }
+

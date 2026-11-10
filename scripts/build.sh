@@ -37,3 +37,4 @@ elif [ "$LAUNCH" = true ]; then
 else
     echo -e "\n\033[0;32m[3/3] Build finished successfully! Executable: ./build/Release/personarm\033[0m"
 fi
+
