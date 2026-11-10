@@ -13,6 +13,17 @@ namespace personarm {
 constexpr size_t PS1_XA_SECTOR_SIZE = 2336; // Data payload of Mode 2 Form 2 sector
 constexpr uint16_t STR_MAGIC        = 0x0160;
 
+// CD-ROM XA subheader "submode" byte (PSX-SPX: bit 7 = EOF ... bit 0 = EOR).
+// Verify against https://psx-spx.consoledev.net/ before relying on it.
+constexpr uint8_t XA_SUBMODE_EOR      = 1u << 0; // End of Record
+constexpr uint8_t XA_SUBMODE_VIDEO    = 1u << 1;
+constexpr uint8_t XA_SUBMODE_AUDIO    = 1u << 2;
+constexpr uint8_t XA_SUBMODE_DATA     = 1u << 3;
+constexpr uint8_t XA_SUBMODE_TRIGGER  = 1u << 4;
+constexpr uint8_t XA_SUBMODE_FORM2    = 1u << 5; // 0 = Form 1, 1 = Form 2
+constexpr uint8_t XA_SUBMODE_REALTIME = 1u << 6;
+constexpr uint8_t XA_SUBMODE_EOF      = 1u << 7; // End of File
+
 #pragma pack(push, 1)
 struct StrSectorHeader {
     uint8_t  file_number;

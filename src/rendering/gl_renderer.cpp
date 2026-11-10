@@ -33,7 +33,7 @@ void GlRenderer::UploadFrame(const uint32_t* rgba_data, uint32_t width, uint32_t
 void GlRenderer::CalculateViewport(uint32_t win_w, uint32_t win_h, uint32_t frame_w, uint32_t frame_h) {
     if (win_w == 0 || win_h == 0 || frame_w == 0 || frame_h == 0) return;
 
-    if (m_aspect_mode == AspectRatioMode::FillWindow) {
+    if (m_aspect_mode == AspectRatioMode::StretchToWindow) {
         m_viewport.x = 0;
         m_viewport.y = 0;
         m_viewport.width = win_w;
@@ -43,9 +43,9 @@ void GlRenderer::CalculateViewport(uint32_t win_w, uint32_t win_h, uint32_t fram
 
     // Determine target aspect ratio based on user configuration
     float target_aspect = 4.0f / 3.0f; // Default authentic PS1 4:3
-    if (m_aspect_mode == AspectRatioMode::Widescreen16_9) {
+    if (m_aspect_mode == AspectRatioMode::Widescreen16x9) {
         target_aspect = 16.0f / 9.0f;
-    } else if (m_aspect_mode == AspectRatioMode::UltraWide21_9) {
+    } else if (m_aspect_mode == AspectRatioMode::Ultrawide21x9) {
         target_aspect = 21.0f / 9.0f;
     }
 

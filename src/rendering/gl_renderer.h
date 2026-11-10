@@ -15,13 +15,6 @@ struct ViewportRect {
     uint32_t height = 0;
 };
 
-enum class AspectRatioMode {
-    Original4_3,    // Authentic 4:3 with letterboxing/pillarboxing
-    Widescreen16_9, // 16:9 widescreen presentation
-    UltraWide21_9,  // 21:9 ultrawide viewport
-    FillWindow      // Stretch to entire window
-};
-
 class GlRenderer {
 public:
     GlRenderer() = default;
@@ -45,7 +38,7 @@ private:
     void CalculateViewport(uint32_t win_w, uint32_t win_h, uint32_t frame_w, uint32_t frame_h);
 
     bool m_initialized = false;
-    AspectRatioMode m_aspect_mode = AspectRatioMode::Original4_3;
+    AspectRatioMode m_aspect_mode = AspectRatioMode::Original4x3;
     uint32_t m_current_frame_w = 320;
     uint32_t m_current_frame_h = 240;
     ViewportRect m_viewport;

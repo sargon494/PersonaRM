@@ -82,7 +82,7 @@ std::optional<VagAudioData> VagDecoder::DecodeFromMemory(const uint8_t* data, si
             int nibbles[2] = { nibble0, nibble1 };
 
             for (int n = 0; n < 2; ++n) {
-                int s_unscaled = nibbles[n] << (12 - shift);
+                int s_unscaled = (nibbles[n] * 4096) >> shift; // == (nibble << 12) >> shift, no UB for shift > 12
                 double sample = static_cast<double>(s_unscaled) + (s_1 * k0) + (s_2 * k1);
 
                 s_2 = s_1;

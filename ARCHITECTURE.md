@@ -19,12 +19,13 @@
 │  │                    Application Layer                      │  │
 │  │  ┌─────────────┐ ┌─────────────────┐ ┌─────────────────┐  │  │
 │  │  │   Renderer  │ │ Virtual Input   │ │     Audio       │  │  │
-│  │  │   (OpenGL)  │ │ (SDL2 Abstr.)   │ │ (OpenAL Soft)   │  │  │
+│  │  │ (OpenGL,    │ │ (SDL2 Abstr.,   │ │ (SDL Audio /    │  │  │
+│  │  planned)   │ │  planned)       │ │  miniaudio)     │  │  │
 │  │  └─────────────┘ └─────────────────┘ └─────────────────┘  │  │
 │  └──────────────────────────────┬────────────────────────────┘  │
 │                                 │                               │
 │  ┌──────────────────────────────▼────────────────────────────┐  │
-│  │                  Emulation & Recompiler                   │  │
+│  │              Emulation (interpreter, HLE BIOS)            │  │
 │  │  ┌─────────────┐ ┌─────────────────┐ ┌─────────────────┐  │  │
 │  │  │   Memory    │ │ Instruction     │ │ Disc / ELF      │  │  │
 │  │  │   Manager   │ │ Execution / JIT │ │ Loader          │  │  │
@@ -56,5 +57,5 @@
   - `AudioSystem`: 4-channel audio mixing (Master, BGM, SFX, Voice) with dynamic volume scaling.
   - `VagDecoder`: Decodes PlayStation SPU ADPCM audio (`.VAG`) to 16-bit uncompressed PCM using Sony hardware predictor coefficients.
 - **CPU Context (`src/cpu/`)**: MIPS R3000A register file, cycle tracking, and basic instruction decoder.
-- **Renderer (`src/rendering/`)**: Modern OpenGL 4.6 pipeline supporting high-resolution rendering, anisotropic filtering, and widescreen expansion.
-- **Audio (`src/audio/`)**: OpenAL Soft spatial audio with master, BGM, SFX, and voice channels.
+- **Renderer (`src/rendering/`)**: Planned OpenGL 3.3-core pipeline (not implemented yet) supporting high-resolution rendering, anisotropic filtering, and widescreen expansion.
+- **Audio (`src/audio/`)**: Planned audio output via SDL Audio or miniaudio with an in-house mixer (master, BGM, SFX, voice channels). Currently a stub.

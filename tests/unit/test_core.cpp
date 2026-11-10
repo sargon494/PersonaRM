@@ -1,5 +1,10 @@
+// Tests rely on assert(); keep them active in Release builds (CI uses Release).
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
 #include <iostream>
 #include <cassert>
+#include <cstddef>
 #include <cstring>
 #include <vector>
 #include "core/memory_manager.h"
@@ -555,7 +560,7 @@ int main() {
         assert(vp.y == 0);
 
         // Test 16:9 widescreen mode
-        gl_renderer.SetAspectRatioMode(personarm::AspectRatioMode::Widescreen16_9);
+        gl_renderer.SetAspectRatioMode(personarm::AspectRatioMode::Widescreen16x9);
         gl_renderer.Render(1920, 1080);
         vp = gl_renderer.GetCurrentViewport();
         assert(vp.width == 1920);
@@ -564,14 +569,14 @@ int main() {
         assert(vp.y == 0);
 
         // Test 21:9 ultrawide mode
-        gl_renderer.SetAspectRatioMode(personarm::AspectRatioMode::UltraWide21_9);
+        gl_renderer.SetAspectRatioMode(personarm::AspectRatioMode::Ultrawide21x9);
         gl_renderer.Render(2560, 1080);
         vp = gl_renderer.GetCurrentViewport();
         assert(vp.width == 2520); // 1080 * 21 / 9 = 2520
         assert(vp.x == 20);
 
-        // Test FillWindow
-        gl_renderer.SetAspectRatioMode(personarm::AspectRatioMode::FillWindow);
+        // Test StretchToWindow
+        gl_renderer.SetAspectRatioMode(personarm::AspectRatioMode::StretchToWindow);
         gl_renderer.Render(1920, 1080);
         vp = gl_renderer.GetCurrentViewport();
         assert(vp.width == 1920);
@@ -705,8 +710,8 @@ int main() {
         engine.SetSpeedMultiplier(1.0f);
 
         // 20.2 Test Controller Hardware Port 0x1F801040 (JOY_DATA) via MIPS instructions
-        engine.GetInput().SetActionState(personarm::VirtualAction::Confirm, true);
-        engine.GetInput().SetActionState(personarm::VirtualAction::MoveUp, true);
+        engine.GetInput().SimulateActionPress(personarm::VirtualAction::Confirm);
+        engine.GetInput().SimulateActionPress(personarm::VirtualAction::MoveUp);
 
         // SB $1, 0($2): opcode (0x28 << 26) | (2 << 21) | (1 << 16)
         // LBU $3, 0($2): opcode (0x24 << 26) | (2 << 21) | (3 << 16)
@@ -724,7 +729,8 @@ int main() {
         engine.GetCpu().SetGPR(1, 0x01);
         engine.GetCpu().SetPC(0x80001000);
         engine.GetCpu().Step(); // Executes SB 0x01
-        engine.GetCpu().Step(); // Executes LBU
+        engine.GetCpu().Step(); // Executes LBU (result lands after the load delay slot)
+        engine.GetCpu().Step(); // Delay slot: delayed load is committed
         assert(engine.GetCpu().GetGPR(3) == 0xFF);
 
         // Step 2: Send 0x42 (Poll command 'B') -> responds 0x41 (Digital Pad ID)
@@ -732,6 +738,7 @@ int main() {
         engine.GetCpu().SetPC(0x80001000);
         engine.GetCpu().Step();
         engine.GetCpu().Step();
+        engine.GetCpu().Step(); // load delay slot
         assert(engine.GetCpu().GetGPR(3) == 0x41);
 
         // Step 3: Send 0x00 -> Header End (0x5A)
@@ -739,6 +746,7 @@ int main() {
         engine.GetCpu().SetPC(0x80001000);
         engine.GetCpu().Step();
         engine.GetCpu().Step();
+        engine.GetCpu().Step(); // load delay slot
         assert(engine.GetCpu().GetGPR(3) == 0x5A);
 
         // Step 4: Send 0x00 -> Buttons Byte 1 (MoveUp was active -> bit 4 is 0)
@@ -746,6 +754,7 @@ int main() {
         engine.GetCpu().SetPC(0x80001000);
         engine.GetCpu().Step();
         engine.GetCpu().Step();
+        engine.GetCpu().Step(); // load delay slot
         uint32_t btn1 = engine.GetCpu().GetGPR(3);
         assert((btn1 & (1 << 4)) == 0); // Up pressed
         assert((btn1 & (1 << 5)) != 0); // Right released
@@ -755,11 +764,58 @@ int main() {
         engine.GetCpu().SetPC(0x80001000);
         engine.GetCpu().Step();
         engine.GetCpu().Step();
+        engine.GetCpu().Step(); // load delay slot
         uint32_t btn2 = engine.GetCpu().GetGPR(3);
         assert((btn2 & (1 << 6)) == 0); // Cross pressed
         assert((btn2 & (1 << 5)) != 0); // Circle released
 
         std::cout << "  ✓ PS1 Controller Hardware Port & Turbo tests passed.\n";
+    }
+
+    // 21. Persona 2 EP disc identification (serials from community databases; see errata G1/G2)
+    {
+        using personarm::DiscReader;
+        auto us1 = DiscReader::IdentifyPersona2("SLUS_011.58");
+        assert(us1.recognized && us1.region == "US" && us1.disc_number == 1 && us1.product_id == "SLUS-01158");
+        auto us2 = DiscReader::IdentifyPersona2("SLUS-01339");
+        assert(us2.recognized && us2.disc_number == 2 && us2.boot_exe == "SLUS_013.39"); // disc 2 is part of the game, not a bonus disc
+        auto jp = DiscReader::IdentifyPersona2("slps_027.85;1");
+        assert(jp.recognized && jp.region == "JP" && jp.edition == "Deluxe Pack" && jp.boot_exe == "SLPS_027.85");
+        assert(DiscReader::IdentifyPersona2("SLPS_028.26").disc_number == 2);
+        assert(DiscReader::IdentifyPersona2("SLPM_869.67").recognized);
+        assert(!DiscReader::IdentifyPersona2("SLPS_027.70").recognized); // old, incorrect serial
+        assert(!DiscReader::IdentifyPersona2("SLPS_027.71").recognized);
+        assert(!DiscReader::IdentifyPersona2("").recognized);
+        assert(DiscReader::KnownPersona2BootExecutables().size() == 9);
+        std::cout << "  ✓ Persona 2 disc identification tests passed.\n";
+    }
+
+    // 22. PS-X EXE header layout (PSX-SPX offsets) and memfill
+    {
+        static_assert(offsetof(personarm::PsxExeHeader, memfill_start) == 0x28, "memfill_start offset");
+        static_assert(offsetof(personarm::PsxExeHeader, initial_sp_base) == 0x30, "sp base offset");
+
+        std::vector<uint8_t> exe(4096, 0);
+        std::memcpy(exe.data(), "PS-X EXE", 8);
+        auto put32 = [&](size_t off, uint32_t v) { std::memcpy(exe.data() + off, &v, 4); };
+        put32(0x10, 0x80010000); // PC
+        put32(0x14, 0x80080000); // GP
+        put32(0x18, 0x80010000); // destination
+        put32(0x1C, 2048);       // size
+        put32(0x28, 0x80010100); // memfill start
+        put32(0x2C, 16);         // memfill size
+        put32(0x30, 0x801FFF00); // SP base
+        put32(0x34, 0x10);       // SP offset
+        for (size_t i = 2048; i < 4096; ++i) exe[i] = 0xAA;
+
+        personarm::CpuContext cpu;
+        std::vector<uint8_t> ram(2 * 1024 * 1024, 0);
+        personarm::PsxExeInfo info{};
+        assert(personarm::ExeLoader::LoadExe(exe.data(), exe.size(), cpu, ram, info));
+        assert(info.initial_sp == 0x801FFF10);
+        assert(cpu.GetGPR(29) == 0x801FFF10);
+        assert(ram[0x10000] == 0xAA && ram[0x10100] == 0 && ram[0x1010F] == 0 && ram[0x10110] == 0xAA);
+        std::cout << "  ✓ PS-X EXE header layout & memfill tests passed.\n";
     }
 
     std::cout << "[PASS] All unit tests completed successfully!\n";

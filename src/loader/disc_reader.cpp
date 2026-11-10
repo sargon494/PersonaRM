@@ -1,3 +1,4 @@
+#include <cctype>
 #include "disc_reader.h"
 #include <iostream>
 #include <cstring>
@@ -226,22 +227,80 @@ std::string DiscReader::DetectBootExecutable() {
         }
     }
 
-    // Common Persona 2 serials fallback
-    static const char* known_serials[] = {
-        "SLUS_011.58",  // Persona 2: Eternal Punishment (US)
-        "SLPS_027.60",  // Persona 2: Batsu / Eternal Punishment (JP)
-        "SLPS_021.80",  // Persona 2: Tsumi / Innocent Sin (JP)
-        "EBOOT.BIN",
-        "BOOT.BIN"
-    };
-
-    for (const char* serial : known_serials) {
-        if (FileExists(serial)) {
-            return serial;
+    // Fallback: probe for the boot executable of every known Persona 2 EP disc
+    for (const std::string& exe : KnownPersona2BootExecutables()) {
+        if (FileExists(exe)) {
+            return exe;
         }
     }
 
     return "";
+}
+
+namespace {
+
+struct Persona2Entry {
+    const char* product_id;   // canonical "XXXX-NNNNN"
+    const char* region;
+    const char* edition;
+    int disc_number;          // 0 = unknown
+};
+
+// Source: psxdatacenter / libretro database (community, unverified against media).
+const Persona2Entry kPersona2Discs[] = {
+    {"SLUS-01158", "US", "Standard",              1},
+    {"SLUS-01339", "US", "Standard",              2},
+    {"SLPS-02785", "JP", "Deluxe Pack",           1},
+    {"SLPS-02786", "JP", "Deluxe Pack",           2},
+    {"SLPS-02825", "JP", "Standard",              1},
+    {"SLPS-02826", "JP", "Standard",              2},
+    {"SCPS-45495", "JP", "SCPS release",          1},
+    {"SCPS-45496", "JP", "SCPS release",          2},
+    {"SLPM-86967", "JP", "Atlus Best Collection", 0},
+};
+
+// "SLUS_011.58" / "slus-01158" / "SLUS01158;1" -> "SLUS01158"
+std::string NormalizeSerial(const std::string& in) {
+    std::string out;
+    for (char c : in) {
+        if (c == ';') break;
+        if (c == '_' || c == '.' || c == '-' || c == ' ') continue;
+        out.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
+    }
+    return out;
+}
+
+// "SLUS-01158" -> "SLUS_011.58"
+std::string ToBootExeName(const char* product_id) {
+    std::string digits = NormalizeSerial(product_id).substr(4); // 5 digits
+    return std::string(product_id, 4) + "_" + digits.substr(0, 3) + "." + digits.substr(3);
+}
+
+} // namespace
+
+Persona2DiscInfo DiscReader::IdentifyPersona2(const std::string& boot_exe_or_product_id) {
+    Persona2DiscInfo info;
+    const std::string key = NormalizeSerial(boot_exe_or_product_id);
+    for (const auto& entry : kPersona2Discs) {
+        if (NormalizeSerial(entry.product_id) == key) {
+            info.recognized = true;
+            info.product_id = entry.product_id;
+            info.boot_exe = ToBootExeName(entry.product_id);
+            info.region = entry.region;
+            info.edition = entry.edition;
+            info.disc_number = entry.disc_number;
+            return info;
+        }
+    }
+    return info;
+}
+
+std::vector<std::string> DiscReader::KnownPersona2BootExecutables() {
+    std::vector<std::string> names;
+    for (const auto& entry : kPersona2Discs) {
+        names.push_back(ToBootExeName(entry.product_id));
+    }
+    return names;
 }
 
 ExecutableInfo DiscReader::ParseExecutable(const uint8_t* data, size_t size) {

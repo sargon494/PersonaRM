@@ -146,6 +146,7 @@ private:
 
     std::vector<bool> m_action_states;
     std::vector<bool> m_previous_action_states;
+    std::vector<bool> m_last_update_states; // snapshot taken at the last Update()
 
     AnalogAxes m_axes;
     MouseState m_mouse;

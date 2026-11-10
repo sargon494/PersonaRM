@@ -54,6 +54,16 @@ bool ExeLoader::LoadExe(const uint8_t* buffer, size_t size, CpuContext& cpu, std
         PRM_LOG_WARN("EXE", "Payload exceeds physical RAM buffer size.");
     }
 
+    // Memfill: zero the requested range (header 0x28/0x2C). Usually 0/0 in commercial EXEs.
+    if (header.memfill_size != 0) {
+        uint32_t fill_offset = header.memfill_start & 0x1FFFFF;
+        if (static_cast<size_t>(fill_offset) + header.memfill_size <= ram.size()) {
+            std::memset(ram.data() + fill_offset, 0, header.memfill_size);
+        } else {
+            PRM_LOG_WARN("EXE", "Memfill range exceeds physical RAM buffer size.");
+        }
+    }
+
     // Initialize CPU registers according to EXE header
     cpu.SetPC(out_info.entry_point);
     if (out_info.initial_gp != 0) {

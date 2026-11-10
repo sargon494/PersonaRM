@@ -10,27 +10,38 @@
 
 ## 📖 About PersonaRM
 
-**PersonaRM** is a native PC launcher and runtime engine designed to run **Persona 2: Eternal Punishment** natively on modern Windows and Linux PCs without relying on heavy emulators.
+**PersonaRM** es un proyecto en desarrollo temprano cuyo objetivo es ejecutar **Persona 2: Eternal Punishment** en PC moderno (Windows y Linux) sin depender de un emulador genérico. La dirección técnica actual es un **emulador de PS1 con BIOS en HLE y renderer propio**; la decisión de fondo (emulador vs. reimplementación) sigue abierta, ver [docs/research](docs/research/).
 
-PersonaRM provides:
-1. **The PersonaRM Launcher**: A modern interface for selecting display resolutions (1080p, 1440p, 4K), 60 FPS / VSync settings, native 16:9/21:9 widescreen expansion, audio mixing, and input profile mapping.
-2. **Modern Controller & KBM Architecture**: Full support for Keyboard + Mouse (interactive pointer in menus, scroll wheel, combat shortcuts) and modern gamepads (Xbox, DualSense, Switch Pro) with dynamic button glyphs.
-3. **Native Recompiled Runtime**: Direct C++17 execution with high performance, instant loading times, and zero emulation lag.
+## 🚦 Estado actual
+
+Hoy el proyecto es un **launcher de consola y un conjunto de prototipos de componentes**. **No ejecuta el juego todavía.**
+
+| Componente | Estado |
+|---|---|
+| Launcher de consola (escaneo de discos, configuración JSON) | Prototype |
+| Cargador PS-X EXE e identificación de discos Persona 2 EP | Prototype (con tests) |
+| Lector ISO 9660 / BIN de 2352 bytes | Prototype (sin XA Form 2) |
+| CPU MIPS-I, GTE, GPU GP0/GP1, SPU, MDEC, BIOS HLE | Prototype parcial |
+| Bus de PS1: IRQ, DMA, timers, CD-ROM | **Not started** |
+| Ventana SDL2, renderer OpenGL, salida de audio real | **Not started** (hoy son stubs) |
 
 > ⚠️ **Important Legal Notice**: This project **does NOT distribute** any copyrighted game files, ISOs, audio, or assets. PersonaRM requires a **user-provided legitimate copy** of the game to extract and execute assets locally.
 
 ---
 
-## 🎯 Key Features & Modernization
+## 🎯 Objetivos y estado
 
-| Feature | PersonaRM Implementation |
+| Característica | Estado |
 |---|---|
-| **Launcher Hub** | Centralized configuration for graphics, audio, game directories, and mods |
-| **Input Support** | Full Keyboard & Mouse (point-and-click menus, WASD) + Gamepad Hot-plugging |
-| **Display** | Native 16:9 / 21:9 Widescreen, 4K internal resolution scaling, 60+ FPS |
-| **Quality of Life** | Turbo mode (2x/4x toggle), Instant text, Dialogue backlog, Unlimited quick saves |
-| **Audio** | Spatial OpenAL Soft 3D audio, independent volume channels |
-| **Cross-Platform** | Native Windows (MSVC 2022) & Linux (Clang/GCC) |
+| Launcher centralizado (gráficos, audio, directorios) | Prototype (consola) |
+| Teclado y ratón + mandos con glifos dinámicos | Prototype (lógica sin SDL) |
+| Widescreen 16:9 / 21:9 | Prototype (cálculo de viewport); requiere parches por juego en el juego real |
+| Resolución interna 4K, 60+ FPS | Planned |
+| Turbo (2x/4x) | Prototype (multiplicador en el engine) |
+| Texto instantáneo, backlog de diálogos | Planned |
+| Quicksaves ilimitados | Prototype (`SaveManager`) |
+| Audio (salida mediante SDL Audio o miniaudio; mezclador propio) | Planned |
+| Windows (MSVC 2022) y Linux (GCC/Clang) | CI en configuración |
 
 For in-depth specifications, read [docs/GAMEPLAY_AND_CONTROLS.md](docs/GAMEPLAY_AND_CONTROLS.md).
 
@@ -52,11 +63,12 @@ For in-depth specifications, read [docs/GAMEPLAY_AND_CONTROLS.md](docs/GAMEPLAY_
 │                   Engine & Emulation Layer                  │
 │  ┌─────────────┐ ┌─────────────┐ ┌───────────────────────┐  │
 │  │   Renderer  │ │ Audio Engine│ │  Virtual Action       │  │
-│  │ (OpenGL 4.6)│ │(OpenAL Soft)│ │  Mapper (SDL2)        │  │
+│  │  (OpenGL)   │ │ (SDL / mini-│ │  Mapper (SDL2)        │  │
+│  │  [planned]  │ │  audio)     │ │  [planned]            │  │
 │  └─────────────┘ └─────────────┘ └───────────────────────┘  │
 │  ┌─────────────┐ ┌─────────────┐ ┌───────────────────────┐  │
-│  │   Memory    │ │ Instruction │ │ Disc / ELF Loader     │  │
-│  │   Manager   │ │ Recompiler  │ │ & Asset Streamer      │  │
+│  │   Memory    │ │ MIPS-I CPU  │ │ PS-X EXE / ISO 9660   │  │
+│  │   Manager   │ │ (interprete)│ │ loader                │  │
 │  └─────────────┘ └─────────────┘ └───────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -65,20 +77,32 @@ For in-depth specifications, read [docs/GAMEPLAY_AND_CONTROLS.md](docs/GAMEPLAY_
 
 ## 🛠️ Build & Installation
 
-### Prerequisites (Windows)
+### Prerequisites
+
+- CMake ≥ 3.20, Ninja, Python 3
+- Windows: **Visual Studio 2022 Build Tools (MSVC)** y compilar desde un *Developer PowerShell for VS 2022* (o LLVM/Clang)
+- Linux: GCC ≥ 9 o Clang
 
 ```powershell
-# Install build tools
+# Windows
 choco install cmake ninja python3
 ```
 
 ### Build
 
 ```powershell
-mkdir build
-cd build
-cmake .. -G Ninja
-cmake --build . --config Release
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+```
+
+El ejecutable se genera en `build/Release/personarm` (`build\Release\personarm.exe` en Windows) porque el proyecto fija ese directorio de salida. Con el generador de Visual Studio (`-G "Visual Studio 17 2022"` y `--config Release`) la ruta sería `build\Release\Release\`.
+
+### Tests
+
+```powershell
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON
+cmake --build build
+ctest --test-dir build --output-on-failure
 ```
 
 ### Run the Launcher
@@ -102,10 +126,11 @@ cmake --build . --config Release
 |---|---|
 | [docs/GAMEPLAY_AND_CONTROLS.md](docs/GAMEPLAY_AND_CONTROLS.md) | Official Controls, KBM, Gamepad, and QoL Specification |
 | [docs/PROJECT_AUDIT.md](docs/PROJECT_AUDIT.md) | Architecture audit & component directory map |
+| [docs/research/](docs/research/) | Investigación técnica (hardware, formatos, discos, arquitectura, roadmap, auditoría, bibliografía) y errata |
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | Technical system architecture & subsystem breakdown |
 | [CONTRIBUTING.md](./CONTRIBUTING.md) | Contribution guidelines and style guide |
 | [LICENSE](./LICENSE) | GNU General Public License v3.0 |
 
 ---
 
-Made with ❤️ by the PersonaRM Team.
+Made with ❤️ by the PersonaRM contributors.

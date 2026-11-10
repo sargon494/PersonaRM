@@ -254,5 +254,3 @@ private:
 
 }  // namespace personarm
 
-// Backwards-compatibility alias for legacy code
-namespace persona2ep = personarm;
