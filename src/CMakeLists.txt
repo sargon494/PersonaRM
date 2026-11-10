@@ -14,6 +14,8 @@ set(CORE_SOURCES
     core/memory_manager.h
     core/logger.cpp
     core/logger.h
+    core/save_manager.cpp
+    core/save_manager.h
 )
 
 set(INPUT_SOURCES

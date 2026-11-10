@@ -3,6 +3,7 @@
 #include <cstring>
 #include <vector>
 #include "core/memory_manager.h"
+#include "core/save_manager.h"
 #include "core/logger.h"
 #include "input/input_manager.h"
 #include "loader/disc_reader.h"
@@ -616,6 +617,58 @@ int main() {
         assert((cpu.GetRegisters().cp0_status & 0x03) == 0x01); // IEc=1, KUc=0
 
         std::cout << "  ✓ MDEC Decoder & MIPS RFE tests passed.\n";
+    }
+
+    // 19. PS1 Virtual Memory Card & QuickSave Manager Tests
+    {
+        personarm::SaveManager save_mgr;
+        assert(save_mgr.IsFormatted() == true);
+        assert(save_mgr.GetCardData().size() == 131072);
+
+        // Write a test slot
+        std::vector<uint8_t> p2_save_payload(256, 0x5A);
+        bool write_ok = save_mgr.WriteSlot(3, "Persona 2: EP - Seven Sisters", "BASLUS-01158GAME",
+                                           p2_save_payload.data(), p2_save_payload.size());
+        assert(write_ok == true);
+
+        // List slots
+        auto slots = save_mgr.ListSlots();
+        assert(slots.size() == 15);
+        assert(slots[3].is_in_use == true);
+        assert(slots[3].product_code == "BASLUS-01158GAME");
+        assert(slots[3].title == "Persona 2: EP - Seven Sisters");
+        assert(slots[0].is_in_use == false);
+
+        // Read slot back
+        std::vector<uint8_t> read_payload;
+        bool read_ok = save_mgr.ReadSlot(3, read_payload);
+        assert(read_ok == true);
+        assert(read_payload.size() >= 256);
+        assert(std::memcmp(read_payload.data(), p2_save_payload.data(), 256) == 0);
+
+        // Test QuickSave / QuickLoad
+        auto& engine = personarm::Engine::Instance();
+        engine.Initialize();
+        engine.GetCpu().SetPC(0x80020080);
+        engine.GetCpu().SetGPR(2, 999);
+        engine.SetFrameCount(1234);
+
+        std::vector<uint8_t> snapshot;
+        assert(save_mgr.CaptureQuickSave(engine, snapshot) == true);
+        assert(snapshot.size() > 1024);
+
+        // Mutate engine state
+        engine.GetCpu().SetPC(0x80000000);
+        engine.GetCpu().SetGPR(2, 0);
+        engine.SetFrameCount(0);
+
+        // Restore
+        assert(save_mgr.RestoreQuickSave(engine, snapshot.data(), snapshot.size()) == true);
+        assert(engine.GetCpu().GetPC() == 0x80020080);
+        assert(engine.GetCpu().GetGPR(2) == 999);
+        assert(engine.GetFrameCount() == 1234);
+
+        std::cout << "  ✓ PS1 Virtual Memory Card & QuickSave tests passed.\n";
     }
 
     std::cout << "[PASS] All unit tests completed successfully!\n";

@@ -58,6 +58,7 @@ public:
     uint64_t GetCycleCount() const { return m_cycles; }
 
     const CpuRegisters& GetRegisters() const { return m_regs; }
+    void SetRegisters(const CpuRegisters& regs) { m_regs = regs; m_next_pc = regs.pc + 4; }
 
     // Coprocessor 2 (GTE) Access
     Gte& GetGTE() { return m_gte; }

@@ -12,10 +12,12 @@
 #include <cstring>
 #include <iostream>
 #include <string>
+#include <chrono>
 
 // Project headers
 #include "launcher/launcher.h"
 #include "core/memory_manager.h"
+#include "core/save_manager.h"
 #include "input/input_manager.h"
 #include "loader/disc_reader.h"
 #include "loader/tim_parser.h"
@@ -611,6 +613,107 @@ static int RunMdecSelfTest() {
     }
 }
 
+static int RunSaveSelfTest() {
+    std::cout << "[TEST] Modern & Virtual PS1 Save System self-test...\n";
+    try {
+        personarm::SaveManager save_mgr;
+        if (!save_mgr.IsFormatted()) {
+            std::cerr << "[FAIL] SaveManager was not formatted.\n";
+            return 1;
+        }
+
+        // Test writing slot 0
+        std::vector<uint8_t> sample_save = { 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0 };
+        if (!save_mgr.WriteSlot(0, "Persona 2: EP - Velvet Room", "BASLUS-01158GAME", sample_save.data(), sample_save.size())) {
+            std::cerr << "[FAIL] Failed to write slot 0.\n";
+            return 1;
+        }
+
+        // Verify slot listing
+        auto slots = save_mgr.ListSlots();
+        if (slots.size() != 15 || !slots[0].is_in_use || slots[0].product_code != "BASLUS-01158GAME") {
+            std::cerr << "[FAIL] Slot listing check failed.\n";
+            return 1;
+        }
+
+        // Verify reading back slot 0
+        std::vector<uint8_t> read_data;
+        if (!save_mgr.ReadSlot(0, read_data) || read_data.size() < sample_save.size()) {
+            std::cerr << "[FAIL] Failed to read slot 0.\n";
+            return 1;
+        }
+        if (std::memcmp(read_data.data(), sample_save.data(), sample_save.size()) != 0) {
+            std::cerr << "[FAIL] Read payload content mismatch.\n";
+            return 1;
+        }
+
+        // Test QuickSave / QuickLoad with Engine
+        auto& engine = personarm::Engine::Instance();
+        engine.Initialize();
+        engine.GetCpu().SetPC(0x80010040);
+        engine.SetFrameCount(42);
+
+        std::vector<uint8_t> snapshot;
+        if (!save_mgr.CaptureQuickSave(engine, snapshot)) {
+            std::cerr << "[FAIL] CaptureQuickSave failed.\n";
+            return 1;
+        }
+
+        // Alter state
+        engine.GetCpu().SetPC(0x00000000);
+        engine.SetFrameCount(0);
+
+        // Restore state
+        if (!save_mgr.RestoreQuickSave(engine, snapshot.data(), snapshot.size())) {
+            std::cerr << "[FAIL] RestoreQuickSave failed.\n";
+            return 1;
+        }
+
+        if (engine.GetCpu().GetPC() != 0x80010040 || engine.GetFrameCount() != 42) {
+            std::cerr << "[FAIL] QuickSave state restoration mismatch.\n";
+            return 1;
+        }
+
+        std::cout << "  - PS1 128KB Virtual Memory Card: OK\n";
+        std::cout << "  - QuickSave Snapshot: " << snapshot.size() << " bytes\n";
+        std::cout << "[PASS] Save System self-test passed.\n";
+        return 0;
+    } catch (const std::exception& e) {
+        std::cerr << "[FAIL] Exception during Save test: " << e.what() << "\n";
+        return 1;
+    }
+}
+
+static int RunPerformanceSelfTest() {
+    std::cout << "[TEST] PersonaRM Core Engine Frametime Performance Benchmark...\n";
+    try {
+        auto& engine = personarm::Engine::Instance();
+        engine.Initialize();
+
+        auto start_time = std::chrono::high_resolution_clock::now();
+
+        constexpr uint32_t BENCHMARK_CYCLES = 1000000;
+        uint32_t step_count = 0;
+        while (step_count < BENCHMARK_CYCLES) {
+            engine.GetCpu().Step();
+            step_count++;
+        }
+
+        auto end_time = std::chrono::high_resolution_clock::now();
+        auto elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
+        double elapsed_sec = elapsed_us / 1000000.0;
+        double mhz = (step_count / (elapsed_sec > 0 ? elapsed_sec : 0.001)) / 1000000.0;
+
+        std::cout << "  - Executed: " << step_count << " CPU steps in " << elapsed_us << " us\n";
+        std::cout << "  - Emulation Speed: " << mhz << " MHz (PS1 Target: 33.87 MHz)\n";
+        std::cout << "[PASS] Performance Benchmark self-test passed.\n";
+        return 0;
+    } catch (const std::exception& e) {
+        std::cerr << "[FAIL] Exception during Performance test: " << e.what() << "\n";
+        return 1;
+    }
+}
+
 int main(int argc, char* argv[]) {
     personarm::Launcher launcher;
     if (!launcher.Initialize()) {
@@ -694,10 +797,11 @@ int main(int argc, char* argv[]) {
             if (std::strcmp(argv[i], "--test-audio") == 0) {
                 return RunAudioSelfTest();
             }
-            if (std::strcmp(argv[i], "--test-save") == 0 ||
-                std::strcmp(argv[i], "--test-performance") == 0) {
-                std::cout << "[STUB] Component self-test (" << argv[i] << ") passed.\n";
-                return EXIT_SUCCESS;
+            if (std::strcmp(argv[i], "--test-save") == 0) {
+                return RunSaveSelfTest();
+            }
+            if (std::strcmp(argv[i], "--test-performance") == 0) {
+                return RunPerformanceSelfTest();
             }
 
             std::cerr << "Unknown option: " << argv[i] << "\n";

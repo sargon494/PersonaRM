@@ -77,6 +77,9 @@ public:
     // Fast clear screen / fill VRAM rect
     void FillVramRect(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t color16);
 
+    const std::vector<uint16_t>& GetVram() const { return m_vram; }
+    void SetVram(const std::vector<uint16_t>& vram) { m_vram = vram; }
+
 private:
     void ExecuteGP0Command();
     void ExecuteGP1Command(uint32_t word);

@@ -66,9 +66,18 @@ public:
 
     /// Hardware subsystem accessors
     CpuContext& GetCpu() { return m_cpu; }
+    const CpuContext& GetCpu() const { return m_cpu; }
     Ps1Gpu& GetGpu() { return m_gpu; }
+    const Ps1Gpu& GetGpu() const { return m_gpu; }
     SpuEmulator& GetSpu() { return m_spu; }
+    const SpuEmulator& GetSpu() const { return m_spu; }
     Ps1BiosHle& GetBios() { return m_bios; }
+
+    const std::vector<uint8_t>& GetRam() const { return m_ram; }
+    void SetRam(const std::vector<uint8_t>& ram) { m_ram = ram; }
+    const std::vector<uint8_t>& GetScratchpad() const { return m_scratchpad; }
+    void SetScratchpad(const std::vector<uint8_t>& sp) { m_scratchpad = sp; }
+    void SetFrameCount(uint64_t count) { m_frame_counter = count; }
 
     /// Framebuffer retrieval for rendering presentation
     void GetCurrentFrame(std::vector<uint32_t>& out_rgba, uint32_t& out_w, uint32_t& out_h);
