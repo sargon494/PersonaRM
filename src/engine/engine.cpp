@@ -44,6 +44,8 @@ void Engine::Reset() {
     m_spu.Reset();
     m_bios.Reset();
     m_frame_counter = 0;
+    m_joy_step = 0;
+    m_joy_rx_fifo.clear();
     m_state = EngineState::Idle;
 }
 
@@ -111,7 +113,26 @@ uint32_t Engine::ReadBus(uint32_t address, uint32_t size) {
         }
     }
 
-    // 3. GPU Hardware Registers (0x1F801810 / 0x1F801814)
+    // 3. Controller / Memory Card Ports (0x1F801040: JOY_DATA, 0x1F801044: JOY_STAT)
+    if (physical == 0x1F801040) {
+        if (!m_joy_rx_fifo.empty()) {
+            uint8_t byte = m_joy_rx_fifo.front();
+            m_joy_rx_fifo.erase(m_joy_rx_fifo.begin());
+            return byte;
+        }
+        return 0xFF;
+    }
+    if (physical == 0x1F801044) {
+        // Bit 0: TX Ready (1), Bit 1: RX FIFO Not Empty, Bit 2: TX Empty (1), Bit 7: ACK
+        uint32_t stat = 0x05;
+        if (!m_joy_rx_fifo.empty()) {
+            stat |= 0x02; // RX FIFO has data
+            stat |= 0x80; // ACK flag
+        }
+        return stat;
+    }
+
+    // 4. GPU Hardware Registers (0x1F801810 / 0x1F801814)
     if (physical == 0x1F801810) {
         return m_gpu.ReadGP0();
     }
@@ -119,7 +140,7 @@ uint32_t Engine::ReadBus(uint32_t address, uint32_t size) {
         return m_gpu.ReadGPUSTAT();
     }
 
-    // 4. BIOS ROM Area (512 KB at 0x1FC00000..0x1FC7FFFF)
+    // 5. BIOS ROM Area (512 KB at 0x1FC00000..0x1FC7FFFF)
     if (physical >= 0x1FC00000 && physical < 0x1FC80000) {
         // Return dummy NOP instruction (0x00000000) for unhandled ROM calls
         return 0;
@@ -165,7 +186,43 @@ void Engine::WriteBus(uint32_t address, uint32_t value, uint32_t size) {
         return;
     }
 
-    // 3. GPU Hardware Registers (0x1F801810 / 0x1F801814)
+    // 3. Controller Port JOY_DATA (0x1F801040)
+    if (physical == 0x1F801040) {
+        uint8_t tx = static_cast<uint8_t>(value & 0xFF);
+        if (tx == 0x01) {
+            m_joy_step = 1;
+            m_joy_rx_fifo.push_back(0xFF);
+        } else if (tx == 0x42 && m_joy_step == 1) {
+            m_joy_step = 2;
+            m_joy_rx_fifo.push_back(0x41); // Standard Digital Controller ID
+        } else if (m_joy_step == 2) {
+            m_joy_step = 3;
+            m_joy_rx_fifo.push_back(0x5A); // Header end marker
+        } else if (m_joy_step == 3) {
+            // Buttons Byte 1 (active low 0=pressed)
+            uint8_t b1 = 0xFF;
+            if (m_input.IsActionActive(VirtualAction::MoveUp))    b1 &= ~(1 << 4);
+            if (m_input.IsActionActive(VirtualAction::MoveRight)) b1 &= ~(1 << 5);
+            if (m_input.IsActionActive(VirtualAction::MoveDown))  b1 &= ~(1 << 6);
+            if (m_input.IsActionActive(VirtualAction::MoveLeft))  b1 &= ~(1 << 7);
+            m_joy_step = 4;
+            m_joy_rx_fifo.push_back(b1);
+        } else if (m_joy_step == 4) {
+            // Buttons Byte 2 (active low 0=pressed)
+            uint8_t b2 = 0xFF;
+            if (m_input.IsActionActive(VirtualAction::CameraRotateLeft))  b2 &= ~(1 << 2); // L1
+            if (m_input.IsActionActive(VirtualAction::CameraRotateRight)) b2 &= ~(1 << 3); // R1
+            if (m_input.IsActionActive(VirtualAction::Menu))              b2 &= ~(1 << 4); // Triangle
+            if (m_input.IsActionActive(VirtualAction::Cancel))            b2 &= ~(1 << 5); // Circle
+            if (m_input.IsActionActive(VirtualAction::Confirm))           b2 &= ~(1 << 6); // Cross
+            if (m_input.IsActionActive(VirtualAction::Map))               b2 &= ~(1 << 7); // Square
+            m_joy_step = 0;
+            m_joy_rx_fifo.push_back(b2);
+        }
+        return;
+    }
+
+    // 4. GPU Hardware Registers (0x1F801810 / 0x1F801814)
     if (physical == 0x1F801810) {
         m_gpu.WriteGP0(value);
         return;
@@ -175,7 +232,7 @@ void Engine::WriteBus(uint32_t address, uint32_t value, uint32_t size) {
         return;
     }
 
-    // 4. SPU Hardware Registers (0x1F801C00..0x1F801DFF)
+    // 5. SPU Hardware Registers (0x1F801C00..0x1F801DFF)
     if (physical >= 0x1F801C00 && physical < 0x1F801E00) {
         // SPU register writes
         return;
@@ -233,9 +290,16 @@ void Engine::RunFrame() {
         return;
     }
 
-    // Emulate ~564,480 CPU clock cycles (one 60 Hz NTSC video frame)
+    // Dynamic Turbo Multiplier: if VirtualAction::Turbo is active, boost by 2x
+    float effective_multiplier = m_speed_multiplier;
+    if (m_input.IsActionActive(VirtualAction::Turbo)) {
+        effective_multiplier *= 2.0f;
+    }
+
+    // Emulate scaled CPU clock cycles (~564,480 at 1x 60 Hz NTSC)
     uint64_t start_cycles = m_cpu.GetCycleCount();
-    uint64_t target_cycles = start_cycles + PS1_CYCLES_PER_FRAME_NTSC;
+    uint64_t target_cycles = start_cycles +
+        static_cast<uint64_t>(PS1_CYCLES_PER_FRAME_NTSC * effective_multiplier);
 
     while (m_cpu.GetCycleCount() < target_cycles && m_state == EngineState::Running) {
         // Fast BIOS HLE hook check: only intercept at vectors 0xA0, 0xB0, 0xC0

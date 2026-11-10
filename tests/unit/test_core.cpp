@@ -554,6 +554,29 @@ int main() {
         assert(vp.x == 240);
         assert(vp.y == 0);
 
+        // Test 16:9 widescreen mode
+        gl_renderer.SetAspectRatioMode(personarm::AspectRatioMode::Widescreen16_9);
+        gl_renderer.Render(1920, 1080);
+        vp = gl_renderer.GetCurrentViewport();
+        assert(vp.width == 1920);
+        assert(vp.height == 1080);
+        assert(vp.x == 0);
+        assert(vp.y == 0);
+
+        // Test 21:9 ultrawide mode
+        gl_renderer.SetAspectRatioMode(personarm::AspectRatioMode::UltraWide21_9);
+        gl_renderer.Render(2560, 1080);
+        vp = gl_renderer.GetCurrentViewport();
+        assert(vp.width == 2520); // 1080 * 21 / 9 = 2520
+        assert(vp.x == 20);
+
+        // Test FillWindow
+        gl_renderer.SetAspectRatioMode(personarm::AspectRatioMode::FillWindow);
+        gl_renderer.Render(1920, 1080);
+        vp = gl_renderer.GetCurrentViewport();
+        assert(vp.width == 1920);
+        assert(vp.height == 1080);
+
         gl_renderer.Shutdown();
         window.Shutdown();
         assert(window.IsOpen() == false);
@@ -669,6 +692,74 @@ int main() {
         assert(engine.GetFrameCount() == 1234);
 
         std::cout << "  ✓ PS1 Virtual Memory Card & QuickSave tests passed.\n";
+    }
+
+    // 20. PS1 Hardware Controller Port Bus & Turbo Speed Tests
+    {
+        auto& engine = personarm::Engine::Instance();
+        engine.Initialize();
+
+        // 20.1 Test Speed Multiplier
+        engine.SetSpeedMultiplier(2.5f);
+        assert(engine.GetSpeedMultiplier() == 2.5f);
+        engine.SetSpeedMultiplier(1.0f);
+
+        // 20.2 Test Controller Hardware Port 0x1F801040 (JOY_DATA) via MIPS instructions
+        engine.GetInput().SetActionState(personarm::VirtualAction::Confirm, true);
+        engine.GetInput().SetActionState(personarm::VirtualAction::MoveUp, true);
+
+        // SB $1, 0($2): opcode (0x28 << 26) | (2 << 21) | (1 << 16)
+        // LBU $3, 0($2): opcode (0x24 << 26) | (2 << 21) | (3 << 16)
+        uint32_t sb_op = (0x28 << 26) | (2 << 21) | (1 << 16);
+        uint32_t lbu_op = (0x24 << 26) | (2 << 21) | (3 << 16);
+        std::vector<uint32_t> pad_code = { sb_op, lbu_op };
+
+        std::vector<uint8_t>& ram = const_cast<std::vector<uint8_t>&>(engine.GetRam());
+        std::memcpy(&ram[0x1000], pad_code.data(), pad_code.size() * sizeof(uint32_t));
+
+        // Set $2 = 0x1F801040 (JOY_DATA)
+        engine.GetCpu().SetGPR(2, 0x1F801040);
+
+        // Step 1: Send 0x01 (Device select) -> responds 0xFF
+        engine.GetCpu().SetGPR(1, 0x01);
+        engine.GetCpu().SetPC(0x80001000);
+        engine.GetCpu().Step(); // Executes SB 0x01
+        engine.GetCpu().Step(); // Executes LBU
+        assert(engine.GetCpu().GetGPR(3) == 0xFF);
+
+        // Step 2: Send 0x42 (Poll command 'B') -> responds 0x41 (Digital Pad ID)
+        engine.GetCpu().SetGPR(1, 0x42);
+        engine.GetCpu().SetPC(0x80001000);
+        engine.GetCpu().Step();
+        engine.GetCpu().Step();
+        assert(engine.GetCpu().GetGPR(3) == 0x41);
+
+        // Step 3: Send 0x00 -> Header End (0x5A)
+        engine.GetCpu().SetGPR(1, 0x00);
+        engine.GetCpu().SetPC(0x80001000);
+        engine.GetCpu().Step();
+        engine.GetCpu().Step();
+        assert(engine.GetCpu().GetGPR(3) == 0x5A);
+
+        // Step 4: Send 0x00 -> Buttons Byte 1 (MoveUp was active -> bit 4 is 0)
+        engine.GetCpu().SetGPR(1, 0x00);
+        engine.GetCpu().SetPC(0x80001000);
+        engine.GetCpu().Step();
+        engine.GetCpu().Step();
+        uint32_t btn1 = engine.GetCpu().GetGPR(3);
+        assert((btn1 & (1 << 4)) == 0); // Up pressed
+        assert((btn1 & (1 << 5)) != 0); // Right released
+
+        // Step 5: Send 0x00 -> Buttons Byte 2 (Confirm was active -> bit 6 Cross is 0)
+        engine.GetCpu().SetGPR(1, 0x00);
+        engine.GetCpu().SetPC(0x80001000);
+        engine.GetCpu().Step();
+        engine.GetCpu().Step();
+        uint32_t btn2 = engine.GetCpu().GetGPR(3);
+        assert((btn2 & (1 << 6)) == 0); // Cross pressed
+        assert((btn2 & (1 << 5)) != 0); // Circle released
+
+        std::cout << "  ✓ PS1 Controller Hardware Port & Turbo tests passed.\n";
     }
 
     std::cout << "[PASS] All unit tests completed successfully!\n";

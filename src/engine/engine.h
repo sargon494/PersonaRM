@@ -79,6 +79,14 @@ public:
     void SetScratchpad(const std::vector<uint8_t>& sp) { m_scratchpad = sp; }
     void SetFrameCount(uint64_t count) { m_frame_counter = count; }
 
+    /// Input manager accessor
+    InputManager& GetInput() { return m_input; }
+    const InputManager& GetInput() const { return m_input; }
+
+    /// Speed & Turbo control (1.0 = normal, 2.0 = 2x, 4.0 = 4x)
+    void SetSpeedMultiplier(float mult) { m_speed_multiplier = std::max(0.1f, std::min(mult, 16.0f)); }
+    float GetSpeedMultiplier() const { return m_speed_multiplier; }
+
     /// Framebuffer retrieval for rendering presentation
     void GetCurrentFrame(std::vector<uint32_t>& out_rgba, uint32_t& out_w, uint32_t& out_h);
 
@@ -103,10 +111,16 @@ private:
     SpuEmulator m_spu;
     Ps1BiosHle& m_bios;
     DiscReader m_disc_reader;
+    InputManager m_input;
 
     // Physical Memory Buffers
     std::vector<uint8_t> m_ram;        // 2 MB Main RAM
     std::vector<uint8_t> m_scratchpad; // 1 KB D-Cache Scratchpad
+
+    // Quality of Life & Timing
+    float m_speed_multiplier = 1.0f;
+    uint32_t m_joy_step = 0;
+    std::vector<uint8_t> m_joy_rx_fifo;
 
     uint64_t m_frame_counter = 0;
 };
