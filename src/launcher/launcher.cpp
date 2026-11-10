@@ -147,9 +147,9 @@ int Launcher::LaunchGame() {
     }
 
     std::cout << "\n[Engine] Initializing Memory Manager...\n";
-    std::cout << "[Engine] Initializing Renderer Context (OpenGL 4.6)...\n";
-    std::cout << "[Engine] Initializing Audio Engine (OpenAL Soft)...\n";
-    std::cout << "[Engine] Initializing SDL2 Input Abstraction Layer...\n";
+    std::cout << "[Engine] Renderer: stub (OpenGL backend not implemented yet)\n";
+    std::cout << "[Engine] Audio: stub (no physical audio output yet)\n";
+    std::cout << "[Engine] Input: simulated (SDL2 not integrated yet)\n";
     std::cout << "[Engine] Core startup complete.\n";
 
     return 0;

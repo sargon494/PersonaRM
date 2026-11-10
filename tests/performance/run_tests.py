@@ -42,7 +42,7 @@ FRAME_TIME_MS = 1000.0 / TARGET_FPS  # ~16.67ms per frame
 FRAME_TIME_THRESHOLD_MS = 20.0  # Allow some slack
 
 BUILD_DIR = Path(os.environ.get("CMAKE_BINARY_DIR", "build/Release"))
-TEST_BINARY = BUILD_DIR / ("personarm.exe" if sys.platform == "win32" and (BUILD_DIR / "personarm.exe").exists() else ("personarm" if (BUILD_DIR / "personarm").exists() else ("persona2ep.exe" if sys.platform == "win32" else "persona2ep")))
+TEST_BINARY = BUILD_DIR / ("personarm.exe" if sys.platform == "win32" and (BUILD_DIR / "personarm.exe").exists() else "personarm")
 
 
 

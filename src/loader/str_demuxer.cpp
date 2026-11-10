@@ -44,7 +44,6 @@ bool StrDemuxer::ProcessSector(const uint8_t* sector_data, size_t sector_size, S
     }
 
     uint32_t frame_num = header->frame_number;
-    uint16_t chunk_idx = header->chunk_index;
     uint16_t total_chunks = header->total_chunks;
 
     // Check if new frame started

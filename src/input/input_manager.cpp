@@ -14,6 +14,7 @@ bool InputManager::Initialize() {
     size_t count = static_cast<size_t>(VirtualAction::Count);
     m_action_states.assign(count, false);
     m_previous_action_states.assign(count, false);
+    m_last_update_states.assign(count, false);
 
     m_axes = AnalogAxes{};
     m_mouse = MouseState{};
@@ -31,8 +32,10 @@ void InputManager::Update(float delta_time) {
     (void)delta_time;
     if (!m_initialized) return;
 
-    // Shift current state to previous state for edge detection (just pressed / released)
-    m_previous_action_states = m_action_states;
+    // Edge detection: "previous" is the state captured at the prior Update();
+    // events that arrived since then are already in m_action_states.
+    m_previous_action_states = m_last_update_states;
+    m_last_update_states = m_action_states;
 
     // Reset per-frame deltas
     m_mouse.delta_x = 0;

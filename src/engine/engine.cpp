@@ -202,21 +202,21 @@ void Engine::WriteBus(uint32_t address, uint32_t value, uint32_t size) {
         } else if (m_joy_step == 3) {
             // Buttons Byte 1 (active low 0=pressed)
             uint8_t b1 = 0xFF;
-            if (m_input.IsActionActive(VirtualAction::MoveUp))    b1 &= ~(1 << 4);
-            if (m_input.IsActionActive(VirtualAction::MoveRight)) b1 &= ~(1 << 5);
-            if (m_input.IsActionActive(VirtualAction::MoveDown))  b1 &= ~(1 << 6);
-            if (m_input.IsActionActive(VirtualAction::MoveLeft))  b1 &= ~(1 << 7);
+            if (m_input.IsActionPressed(VirtualAction::MoveUp))    b1 &= ~(1 << 4);
+            if (m_input.IsActionPressed(VirtualAction::MoveRight)) b1 &= ~(1 << 5);
+            if (m_input.IsActionPressed(VirtualAction::MoveDown))  b1 &= ~(1 << 6);
+            if (m_input.IsActionPressed(VirtualAction::MoveLeft))  b1 &= ~(1 << 7);
             m_joy_step = 4;
             m_joy_rx_fifo.push_back(b1);
         } else if (m_joy_step == 4) {
             // Buttons Byte 2 (active low 0=pressed)
             uint8_t b2 = 0xFF;
-            if (m_input.IsActionActive(VirtualAction::CameraRotateLeft))  b2 &= ~(1 << 2); // L1
-            if (m_input.IsActionActive(VirtualAction::CameraRotateRight)) b2 &= ~(1 << 3); // R1
-            if (m_input.IsActionActive(VirtualAction::Menu))              b2 &= ~(1 << 4); // Triangle
-            if (m_input.IsActionActive(VirtualAction::Cancel))            b2 &= ~(1 << 5); // Circle
-            if (m_input.IsActionActive(VirtualAction::Confirm))           b2 &= ~(1 << 6); // Cross
-            if (m_input.IsActionActive(VirtualAction::Map))               b2 &= ~(1 << 7); // Square
+            if (m_input.IsActionPressed(VirtualAction::CameraRotateLeft))  b2 &= ~(1 << 2); // L1
+            if (m_input.IsActionPressed(VirtualAction::CameraRotateRight)) b2 &= ~(1 << 3); // R1
+            if (m_input.IsActionPressed(VirtualAction::Menu))              b2 &= ~(1 << 4); // Triangle
+            if (m_input.IsActionPressed(VirtualAction::Cancel))            b2 &= ~(1 << 5); // Circle
+            if (m_input.IsActionPressed(VirtualAction::Confirm))           b2 &= ~(1 << 6); // Cross
+            if (m_input.IsActionPressed(VirtualAction::Map))               b2 &= ~(1 << 7); // Square
             m_joy_step = 0;
             m_joy_rx_fifo.push_back(b2);
         }
@@ -249,17 +249,28 @@ bool Engine::BootFromDisc(const std::string& disc_path) {
     // Attempt to detect boot executable directly from SYSTEM.CNF via DiscReader
     std::string boot_exe_name = m_disc_reader.DetectBootExecutable();
 
-    if (boot_exe_name.empty()) {
-        // Fallback standard for Persona 2: Eternal Punishment NA and JP
-        boot_exe_name = "SLUS_011.58"; // NA PS1 product ID
-        PRM_LOG_WARN("ENGINE", "Could not parse BOOT from SYSTEM.CNF; defaulting to " + boot_exe_name);
+    std::vector<uint8_t> exe_payload;
+    if (!boot_exe_name.empty()) {
+        m_disc_reader.ReadFile(boot_exe_name, exe_payload);
     }
 
-    std::vector<uint8_t> exe_payload;
-    if (!m_disc_reader.ReadFile(boot_exe_name, exe_payload) || exe_payload.empty()) {
-        // Try Japanese version ID if NA was not found
-        boot_exe_name = "SLPS_027.70";
-        m_disc_reader.ReadFile(boot_exe_name, exe_payload);
+    if (exe_payload.empty()) {
+        // SYSTEM.CNF was missing/unreadable: probe the known Persona 2 EP executables
+        for (const std::string& candidate : DiscReader::KnownPersona2BootExecutables()) {
+            if (m_disc_reader.ReadFile(candidate, exe_payload) && !exe_payload.empty()) {
+                PRM_LOG_WARN("ENGINE", "SYSTEM.CNF BOOT unusable; booting known executable " + candidate);
+                boot_exe_name = candidate;
+                break;
+            }
+        }
+    }
+
+    {
+        Persona2DiscInfo disc = DiscReader::IdentifyPersona2(boot_exe_name);
+        if (disc.recognized) {
+            PRM_LOG_INFO("ENGINE", "Recognized Persona 2 EP disc " + disc.product_id + " (" + disc.region + ", " +
+                                   disc.edition + ", disc " + (disc.disc_number ? std::to_string(disc.disc_number) : std::string("?")) + " of 2)");
+        }
     }
 
     if (exe_payload.empty()) {
@@ -293,7 +304,7 @@ void Engine::RunFrame() {
 
     // Dynamic Turbo Multiplier: if VirtualAction::Turbo is active, boost by 2x
     float effective_multiplier = m_speed_multiplier;
-    if (m_input.IsActionActive(VirtualAction::Turbo)) {
+    if (m_input.IsActionPressed(VirtualAction::Turbo)) {
         effective_multiplier *= 2.0f;
     }
 

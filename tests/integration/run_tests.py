@@ -27,7 +27,7 @@ if hasattr(sys.stdout, "reconfigure"):
 
 TEST_TIMEOUT = 120  # seconds
 BUILD_DIR = Path(os.environ.get("CMAKE_BINARY_DIR", "build/Release"))
-TEST_BINARY = BUILD_DIR / ("personarm.exe" if sys.platform == "win32" and (BUILD_DIR / "personarm.exe").exists() else ("personarm" if (BUILD_DIR / "personarm").exists() else ("persona2ep.exe" if sys.platform == "win32" else "persona2ep")))
+TEST_BINARY = BUILD_DIR / ("personarm.exe" if sys.platform == "win32" and (BUILD_DIR / "personarm.exe").exists() else "personarm")
 
 # Ensure executable permissions on POSIX systems (artifacts lose +x during zip upload)
 if sys.platform != "win32" and TEST_BINARY.exists():

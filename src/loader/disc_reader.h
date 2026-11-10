@@ -49,6 +49,22 @@ struct ExecutableInfo {
 };
 
 // ───────────────────────────────────────────────────────────────────────
+// Persona 2: Eternal Punishment disc identification
+// Serials come from community databases (psxdatacenter, libretro); NOT checked
+// against a physical disc or Redump. See docs/research/PERSONARM_ERRATA_Y_CORRECCIONES.md.
+// ───────────────────────────────────────────────────────────────────────
+
+struct Persona2DiscInfo {
+    bool recognized = false;
+    std::string product_id;     // Canonical form, e.g. "SLUS-01158"
+    std::string boot_exe;       // SYSTEM.CNF form, e.g. "SLUS_011.58"
+    std::string region;         // "US" or "JP"
+    std::string edition;        // e.g. "Standard", "Deluxe Pack", "Atlus Best Collection"
+    int disc_number = 0;        // 1 or 2; 0 when unknown
+    int disc_count = 2;         // The game spans two discs
+};
+
+// ───────────────────────────────────────────────────────────────────────
 // DiscReader Class
 // ───────────────────────────────────────────────────────────────────────
 
@@ -71,6 +87,13 @@ public:
 
     // Game Boot Identification (Parses SYSTEM.CNF)
     std::string DetectBootExecutable();
+
+    /// Identifies a Persona 2 EP disc from its boot executable name or product id
+    /// ("SLUS_011.58", "SLUS-01158" and "slus01158" are all accepted).
+    static Persona2DiscInfo IdentifyPersona2(const std::string& boot_exe_or_product_id);
+
+    /// Boot executable names (SYSTEM.CNF form) of every known Persona 2 EP disc.
+    static std::vector<std::string> KnownPersona2BootExecutables();
 
     // Executable Parser
     static ExecutableInfo ParseExecutable(const uint8_t* data, size_t size);

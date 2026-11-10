@@ -20,21 +20,53 @@ ISO_SECTOR_SIZE = 2048
 RAW_SECTOR_SIZE = 2352
 PVD_LBA = 16
 
+# Serials from community databases (psxdatacenter / libretro); not verified against media.
+# See docs/research/PERSONARM_ERRATA_Y_CORRECCIONES.md (G1/G2).
 KNOWN_VERSIONS = {
     "SLUS_011.58": {
-        "title": "Persona 2: Eternal Punishment (US)",
+        "title": "Persona 2: Eternal Punishment (US) - Disc 1",
         "platform": "PlayStation",
         "serial": "SLUS-01158"
     },
-    "SLPS_027.60": {
-        "title": "Persona 2: Batsu / Eternal Punishment (JP)",
+    "SLUS_013.39": {
+        "title": "Persona 2: Eternal Punishment (US) - Disc 2",
         "platform": "PlayStation",
-        "serial": "SLPS-02760"
+        "serial": "SLUS-01339"
     },
-    "SLPS_021.80": {
-        "title": "Persona 2: Tsumi / Innocent Sin (JP)",
+    "SLPS_027.85": {
+        "title": "Persona 2: Batsu (JP, Deluxe Pack) - Disc 1",
         "platform": "PlayStation",
-        "serial": "SLPS-02180"
+        "serial": "SLPS-02785"
+    },
+    "SLPS_027.86": {
+        "title": "Persona 2: Batsu (JP, Deluxe Pack) - Disc 2",
+        "platform": "PlayStation",
+        "serial": "SLPS-02786"
+    },
+    "SLPS_028.25": {
+        "title": "Persona 2: Batsu (JP) - Disc 1",
+        "platform": "PlayStation",
+        "serial": "SLPS-02825"
+    },
+    "SLPS_028.26": {
+        "title": "Persona 2: Batsu (JP) - Disc 2",
+        "platform": "PlayStation",
+        "serial": "SLPS-02826"
+    },
+    "SCPS_454.95": {
+        "title": "Persona 2: Batsu (JP, SCPS) - Disc 1",
+        "platform": "PlayStation",
+        "serial": "SCPS-45495"
+    },
+    "SCPS_454.96": {
+        "title": "Persona 2: Batsu (JP, SCPS) - Disc 2",
+        "platform": "PlayStation",
+        "serial": "SCPS-45496"
+    },
+    "SLPM_869.67": {
+        "title": "Persona 2: Batsu (JP, Atlus Best Collection)",
+        "platform": "PlayStation",
+        "serial": "SLPM-86967"
     }
 }
 

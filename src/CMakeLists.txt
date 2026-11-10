@@ -67,7 +67,7 @@ set(ENGINE_SOURCES
 )
 
 # ───────────────────────────────────────────────────────────────────────
-# Core Engine Static Library: personarm_core (aliased as persona2ep)
+# Core Engine Static Library: personarm_core
 # ───────────────────────────────────────────────────────────────────────
 
 add_library(personarm_core STATIC
@@ -81,8 +81,6 @@ add_library(personarm_core STATIC
     ${ENGINE_SOURCES}
 )
 
-# Provide alias 'persona2ep' for backwards compatibility and test helpers
-add_library(persona2ep ALIAS personarm_core)
 
 target_include_directories(personarm_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
