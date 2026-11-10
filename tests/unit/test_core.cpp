@@ -17,6 +17,7 @@
 #include "cpu/gte.h"
 #include "loader/exe_loader.h"
 #include "loader/str_demuxer.h"
+#include "engine/engine.h"
 
 int main() {
     std::cout << "[UNIT TEST] Running Core and Input Unit Tests...\n";
@@ -457,6 +458,43 @@ int main() {
         assert(frame.width == 320 && frame.height == 240);
 
         std::cout << "  ✓ PS1 STR Video Demuxer tests passed.\n";
+    }
+
+    // 16. PersonaRM Core Engine Tests
+    {
+        auto& engine = personarm::Engine::Instance();
+        personarm::EngineBootConfig config;
+        config.enable_bios_hle = true;
+
+        assert(engine.Initialize(config) == true);
+        assert(engine.GetState() == personarm::EngineState::Idle);
+
+        // Synthetic standalone PS-X executable
+        std::vector<uint8_t> exe(4096, 0);
+        auto* hdr = reinterpret_cast<personarm::PsxExeHeader*>(exe.data());
+        std::memcpy(hdr->magic, "PS-X EXE", 8);
+        hdr->initial_pc = 0x80010000;
+        hdr->destination_ram = 0x80010000;
+        hdr->file_size = 2048;
+        hdr->initial_sp_base = 0x801FFF00;
+
+        assert(engine.BootExecutable(exe.data(), exe.size()) == true);
+        assert(engine.GetState() == personarm::EngineState::Running);
+
+        // Run 1 NTSC frame (~564,480 cycles)
+        engine.RunFrame();
+        assert(engine.GetFrameCount() == 1);
+
+        std::vector<uint32_t> frame;
+        uint32_t w = 0, h = 0;
+        engine.GetCurrentFrame(frame, w, h);
+        assert(w == 320 && h == 240);
+        assert(frame.size() == 320 * 240);
+
+        engine.Shutdown();
+        assert(engine.GetState() == personarm::EngineState::Stopped);
+
+        std::cout << "  ✓ PersonaRM Core Engine tests passed.\n";
     }
 
     std::cout << "[PASS] All unit tests completed successfully!\n";

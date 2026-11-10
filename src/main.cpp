@@ -28,6 +28,7 @@
 #include "cpu/gte.h"
 #include "loader/exe_loader.h"
 #include "loader/str_demuxer.h"
+#include "engine/engine.h"
 
 static constexpr const char* LAUNCHER_NAME    = "PersonaRM - Native Launcher & Hub";
 static constexpr const char* LAUNCHER_VERSION = "0.2.0";
@@ -64,6 +65,7 @@ static void PrintUsage(const char* prog) {
               << "  --test-exe         Verify PS-X EXE header and payload loader\n"
               << "  --test-spu         Verify PS1 SPU 24-voice audio mixer\n"
               << "  --test-str         Verify PS1 STR/MDEC CD-ROM XA video demuxer\n"
+              << "  --test-engine      Verify PersonaRM unified core engine & frame loop\n"
               << "  --test-save        Verify modern save state system\n"
               << "  --test-performance Run engine frametime benchmarks\n";
 }
@@ -479,6 +481,52 @@ static int RunStrSelfTest() {
     }
 }
 
+static int RunEngineSelfTest() {
+    std::cout << "[TEST] PersonaRM Core Engine self-test...\n";
+    try {
+        auto& engine = personarm::Engine::Instance();
+        personarm::EngineBootConfig config;
+        config.enable_bios_hle = true;
+
+        if (!engine.Initialize(config)) {
+            std::cerr << "[FAIL] Failed to initialize Core Engine.\n";
+            return 1;
+        }
+
+        // Test booting synthetic executable
+        std::vector<uint8_t> exe(4096, 0);
+        auto* hdr = reinterpret_cast<personarm::PsxExeHeader*>(exe.data());
+        std::memcpy(hdr->magic, "PS-X EXE", 8);
+        hdr->initial_pc = 0x80010000;
+        hdr->destination_ram = 0x80010000;
+        hdr->file_size = 2048;
+        hdr->initial_sp_base = 0x801FFF00;
+
+        if (!engine.BootExecutable(exe.data(), exe.size())) {
+            std::cerr << "[FAIL] Engine failed to boot executable.\n";
+            return 1;
+        }
+
+        engine.RunFrame();
+        if (engine.GetFrameCount() != 1) {
+            std::cerr << "[FAIL] Engine did not advance frame counter.\n";
+            return 1;
+        }
+
+        std::vector<uint32_t> frame;
+        uint32_t w = 0, h = 0;
+        engine.GetCurrentFrame(frame, w, h);
+        std::cout << "  - Engine Frame Output: " << w << "x" << h << " (" << frame.size() << " pixels)\n";
+
+        engine.Shutdown();
+        std::cout << "[PASS] PersonaRM Core Engine self-test passed.\n";
+        return 0;
+    } catch (const std::exception& e) {
+        std::cerr << "[FAIL] Exception during Engine test: " << e.what() << "\n";
+        return 1;
+    }
+}
+
 int main(int argc, char* argv[]) {
     personarm::Launcher launcher;
     if (!launcher.Initialize()) {
@@ -546,6 +594,9 @@ int main(int argc, char* argv[]) {
             }
             if (std::strcmp(argv[i], "--test-str") == 0) {
                 return RunStrSelfTest();
+            }
+            if (std::strcmp(argv[i], "--test-engine") == 0) {
+                return RunEngineSelfTest();
             }
             if (std::strcmp(argv[i], "--test-renderer") == 0) {
                 return RunRendererSelfTest();

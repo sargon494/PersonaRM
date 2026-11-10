@@ -85,6 +85,7 @@ class IntegrationTestSuite:
             self.test_exe,
             self.test_spu,
             self.test_str,
+            self.test_engine,
             self.test_game_loading,
             self.test_save_system,
             self.test_performance,
@@ -168,6 +169,10 @@ class IntegrationTestSuite:
     def test_str(self) -> TestResult:
         print("\n[INFO] Testing PS1 STR Video Demuxer...")
         return self._run_subcommand("str", "--test-str")
+
+    def test_engine(self) -> TestResult:
+        print("\n[INFO] Testing PersonaRM Core Engine & Frame Loop...")
+        return self._run_subcommand("engine", "--test-engine")
 
     def test_game_loading(self) -> TestResult:
         print("\n[INFO] Testing disc/game loader...")

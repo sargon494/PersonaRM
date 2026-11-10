@@ -53,6 +53,10 @@ set(RENDERING_SOURCES
     rendering/ps1_gpu.cpp
     rendering/ps1_gpu.h
 )
+set(ENGINE_SOURCES
+    engine/engine.cpp
+    engine/engine.h
+)
 
 # ───────────────────────────────────────────────────────────────────────
 # Core Engine Static Library: personarm_core (aliased as persona2ep)
@@ -66,6 +70,7 @@ add_library(personarm_core STATIC
     ${CPU_SOURCES}
     ${LOADER_SOURCES}
     ${RENDERING_SOURCES}
+    ${ENGINE_SOURCES}
 )
 
 # Provide alias 'persona2ep' for backwards compatibility and test helpers
