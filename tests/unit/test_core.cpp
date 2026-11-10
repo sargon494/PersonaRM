@@ -12,9 +12,11 @@
 #include "rendering/ps1_gpu.h"
 #include "audio/audio_system.h"
 #include "audio/vag_decoder.h"
+#include "audio/spu_emulator.h"
 #include "cpu/cpu_context.h"
 #include "cpu/gte.h"
 #include "loader/exe_loader.h"
+#include "loader/str_demuxer.h"
 
 int main() {
     std::cout << "[UNIT TEST] Running Core and Input Unit Tests...\n";
@@ -413,6 +415,48 @@ int main() {
         assert(boot_file == "SLUS_011.58");
 
         std::cout << "  ✓ PS-X EXE Loader & SYSTEM.CNF parser tests passed.\n";
+    }
+
+    // 14. PS1 SPU 24-Voice Mixer Tests
+    {
+        personarm::SpuEmulator spu;
+        spu.SetVoiceVolume(0, 0x3FFF, 0x3FFF);
+        spu.SetVoicePitch(0, 4096);
+        spu.SetVoiceStartAddress(0, 0x0000);
+
+        uint8_t dummy_vag[16] = { 0x00, 0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+        spu.UploadToRam(0x0000, dummy_vag, sizeof(dummy_vag));
+        spu.KeyOn(1 << 0);
+        assert(spu.GetActiveVoiceMask() == 1);
+
+        std::vector<int16_t> pcm;
+        spu.GenerateSamples(pcm, 64);
+        assert(pcm.size() == 128); // 64 frames * 2 channels
+
+        std::cout << "  ✓ PS1 SPU 24-Voice Audio Emulator tests passed.\n";
+    }
+
+    // 15. PS1 STR Video Demuxer Tests
+    {
+        personarm::StrDemuxer demuxer;
+        std::vector<uint8_t> sec(2336, 0);
+        auto* h = reinterpret_cast<personarm::StrSectorHeader*>(sec.data());
+        h->magic = personarm::STR_MAGIC;
+        h->chunk_type = 0x01;
+        h->chunk_index = 0;
+        h->total_chunks = 1;
+        h->frame_number = 10;
+        h->payload_size = 256;
+        h->width = 320;
+        h->height = 240;
+
+        personarm::StrDemuxedFrame frame;
+        bool done = demuxer.ProcessSector(sec.data(), sec.size(), frame);
+        assert(done == true);
+        assert(frame.frame_index == 10);
+        assert(frame.width == 320 && frame.height == 240);
+
+        std::cout << "  ✓ PS1 STR Video Demuxer tests passed.\n";
     }
 
     std::cout << "[PASS] All unit tests completed successfully!\n";

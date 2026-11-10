@@ -25,7 +25,7 @@ struct PsxExeHeader {
     uint32_t initial_sp_base;   // Initial $sp base address (e.g. 0x801FFFF0)
     uint32_t initial_sp_offset; // Stack offset
     uint8_t  reserved[16];      // Reserved by Sony
-    char     marker[1972];      // Sony copyright notice / pad to 2048 bytes
+    char     marker[1984];      // Sony copyright notice / pad to 2048 bytes
 };
 #pragma pack(pop)
 

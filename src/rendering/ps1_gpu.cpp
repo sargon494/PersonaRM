@@ -11,7 +11,7 @@ Ps1Gpu::Ps1Gpu() {
 }
 
 void Ps1Gpu::Reset() {
-    std::fill(m_vram.begin(), m_vram.end(), 0);
+    std::fill(m_vram.begin(), m_vram.end(), static_cast<uint16_t>(0));
 
     m_display.x = 0;
     m_display.y = 0;

@@ -26,6 +26,8 @@ set(AUDIO_SOURCES
     audio/audio_system.h
     audio/vag_decoder.cpp
     audio/vag_decoder.h
+    audio/spu_emulator.cpp
+    audio/spu_emulator.h
 )
 set(CPU_SOURCES
     cpu/cpu_context.cpp
@@ -42,6 +44,8 @@ set(LOADER_SOURCES
     loader/ps1_bios_hle.h
     loader/exe_loader.cpp
     loader/exe_loader.h
+    loader/str_demuxer.cpp
+    loader/str_demuxer.h
 )
 set(RENDERING_SOURCES
     rendering/renderer.cpp

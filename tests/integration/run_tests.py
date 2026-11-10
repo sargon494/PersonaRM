@@ -83,6 +83,8 @@ class IntegrationTestSuite:
             self.test_bios,
             self.test_gte,
             self.test_exe,
+            self.test_spu,
+            self.test_str,
             self.test_game_loading,
             self.test_save_system,
             self.test_performance,
@@ -158,6 +160,14 @@ class IntegrationTestSuite:
     def test_exe(self) -> TestResult:
         print("\n[INFO] Testing PS-X EXE Loader & SYSTEM.CNF parser...")
         return self._run_subcommand("exe", "--test-exe")
+
+    def test_spu(self) -> TestResult:
+        print("\n[INFO] Testing PS1 SPU 24-Voice Audio Emulator...")
+        return self._run_subcommand("spu", "--test-spu")
+
+    def test_str(self) -> TestResult:
+        print("\n[INFO] Testing PS1 STR Video Demuxer...")
+        return self._run_subcommand("str", "--test-str")
 
     def test_game_loading(self) -> TestResult:
         print("\n[INFO] Testing disc/game loader...")

@@ -24,8 +24,10 @@
 #include "rendering/ps1_gpu.h"
 #include "audio/audio_system.h"
 #include "audio/vag_decoder.h"
+#include "audio/spu_emulator.h"
 #include "cpu/gte.h"
 #include "loader/exe_loader.h"
+#include "loader/str_demuxer.h"
 
 static constexpr const char* LAUNCHER_NAME    = "PersonaRM - Native Launcher & Hub";
 static constexpr const char* LAUNCHER_VERSION = "0.2.0";
@@ -60,6 +62,8 @@ static void PrintUsage(const char* prog) {
               << "  --test-bios        Verify PS1 BIOS HLE system call dispatcher\n"
               << "  --test-gte         Verify PS1 Geometry Transformation Engine math\n"
               << "  --test-exe         Verify PS-X EXE header and payload loader\n"
+              << "  --test-spu         Verify PS1 SPU 24-voice audio mixer\n"
+              << "  --test-str         Verify PS1 STR/MDEC CD-ROM XA video demuxer\n"
               << "  --test-save        Verify modern save state system\n"
               << "  --test-performance Run engine frametime benchmarks\n";
 }
@@ -407,6 +411,74 @@ static int RunExeSelfTest() {
     }
 }
 
+static int RunSpuSelfTest() {
+    std::cout << "[TEST] PS1 SPU 24-Voice Audio Emulator self-test...\n";
+    try {
+        personarm::SpuEmulator spu;
+        spu.SetMasterVolume(0x3FFF, 0x3FFF);
+        spu.SetVoiceVolume(0, 0x3FFF, 0x3FFF);
+        spu.SetVoicePitch(0, 4096);
+        spu.SetVoiceStartAddress(0, 0x1000);
+
+        // Upload a valid 16-byte dummy VAG block with Loop End flag (0x01)
+        uint8_t dummy_block[16] = { 0x00, 0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+        spu.UploadToRam(0x1000, dummy_block, sizeof(dummy_block));
+
+        spu.KeyOn(1 << 0);
+        if (spu.GetActiveVoiceMask() == 0) {
+            std::cerr << "[FAIL] SPU KeyOn failed to activate voice 0.\n";
+            return 1;
+        }
+
+        std::vector<int16_t> pcm;
+        spu.GenerateSamples(pcm, 128);
+        if (pcm.size() != 256) {
+            std::cerr << "[FAIL] SPU generated incorrect number of PCM samples.\n";
+            return 1;
+        }
+
+        std::cout << "  - Generated " << pcm.size() / 2 << " stereo frames at 44.1 kHz\n";
+        std::cout << "[PASS] PS1 SPU Audio self-test passed.\n";
+        return 0;
+    } catch (const std::exception& e) {
+        std::cerr << "[FAIL] Exception during SPU test: " << e.what() << "\n";
+        return 1;
+    }
+}
+
+static int RunStrSelfTest() {
+    std::cout << "[TEST] PS1 STR Video Demuxer self-test...\n";
+    try {
+        personarm::StrDemuxer demuxer;
+
+        // Create a synthetic 2336-byte STR sector
+        std::vector<uint8_t> sector(2336, 0);
+        auto* hdr = reinterpret_cast<personarm::StrSectorHeader*>(sector.data());
+        hdr->magic = personarm::STR_MAGIC;
+        hdr->chunk_type = 0x01;
+        hdr->chunk_index = 0;
+        hdr->total_chunks = 1;
+        hdr->frame_number = 1;
+        hdr->payload_size = 512;
+        hdr->width = 320;
+        hdr->height = 240;
+
+        personarm::StrDemuxedFrame frame;
+        bool completed = demuxer.ProcessSector(sector.data(), sector.size(), frame);
+        if (!completed || !frame.complete || frame.frame_index != 1) {
+            std::cerr << "[FAIL] StrDemuxer failed to assemble single-chunk frame.\n";
+            return 1;
+        }
+
+        std::cout << "  - Demuxed frame #" << frame.frame_index << ": " << frame.width << "x" << frame.height << "\n";
+        std::cout << "[PASS] PS1 STR Video Demuxer self-test passed.\n";
+        return 0;
+    } catch (const std::exception& e) {
+        std::cerr << "[FAIL] Exception during STR test: " << e.what() << "\n";
+        return 1;
+    }
+}
+
 int main(int argc, char* argv[]) {
     personarm::Launcher launcher;
     if (!launcher.Initialize()) {
@@ -468,6 +540,12 @@ int main(int argc, char* argv[]) {
             }
             if (std::strcmp(argv[i], "--test-exe") == 0) {
                 return RunExeSelfTest();
+            }
+            if (std::strcmp(argv[i], "--test-spu") == 0) {
+                return RunSpuSelfTest();
+            }
+            if (std::strcmp(argv[i], "--test-str") == 0) {
+                return RunStrSelfTest();
             }
             if (std::strcmp(argv[i], "--test-renderer") == 0) {
                 return RunRendererSelfTest();
