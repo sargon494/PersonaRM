@@ -129,3 +129,4 @@ std::optional<VagAudioData> VagDecoder::DecodeFromFile(const std::string& filepa
 }
 
 } // namespace personarm
+

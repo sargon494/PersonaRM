@@ -206,3 +206,4 @@ std::optional<TimImage> TimParser::ParseFromFile(const std::string& filepath) {
 }
 
 } // namespace personarm
+

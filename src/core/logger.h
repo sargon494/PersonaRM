@@ -105,3 +105,4 @@ private:
 #define PRM_LOG_ERROR(tag, msg) personarm::Logger::Instance().Log(personarm::LogLevel::Error, tag, msg)
 
 } // namespace personarm
+
