@@ -17,3 +17,4 @@ set_tests_properties(unit_test_core PROPERTIES
     LABELS "unit"
     TIMEOUT 120
 )
+
