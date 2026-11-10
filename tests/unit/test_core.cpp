@@ -7,7 +7,9 @@
 #include "input/input_manager.h"
 #include "loader/disc_reader.h"
 #include "loader/tim_parser.h"
+#include "loader/ps1_bios_hle.h"
 #include "rendering/renderer.h"
+#include "rendering/ps1_gpu.h"
 #include "audio/audio_system.h"
 #include "audio/vag_decoder.h"
 #include "cpu/cpu_context.h"
@@ -251,6 +253,76 @@ int main() {
         assert(audio->pcm_samples.size() == 28);
 
         std::cout << "  ✓ VAG Audio Decoder tests passed.\n";
+    }
+
+    // 10. PS1 Hardware GPU & VRAM Tests
+    {
+        personarm::Ps1Gpu gpu;
+        assert(gpu.GetDisplayArea().width == 320);
+        assert(gpu.GetDisplayArea().height == 240);
+
+        // VRAM read/write test (16-bit RGB 5:5:5)
+        gpu.WriteVram(100, 50, 0x7FFF); // Pure white (15-bit)
+        assert(gpu.ReadVram(100, 50) == 0x7FFF);
+        assert(gpu.ReadVram(101, 50) == 0); // Adjacent pixel is clear
+
+        // GP0(0x02) Quick Fill Rect test: Fill (x=0, y=0, w=16, h=16) with blue (0x7C00)
+        // word 0: 0x02 + blue color (B=31 << 16 -> 0x021F0000)
+        gpu.WriteGP0(0x02000000 | (31 << 16));
+        gpu.WriteGP0(0x00000000); // x=0, y=0
+        gpu.WriteGP0((16 << 16) | 16); // w=16, h=16
+
+        // Check filled pixel in VRAM
+        assert(gpu.ReadVram(0, 0) != 0);
+
+        // GP1(0x08) Display Mode change test: 640x480 interlaced
+        gpu.WriteGP1(0x08000000 | 0x03 | 0x04 | 0x20); // hres=640, vres=480, interlaced
+        assert(gpu.GetDisplayArea().width == 640);
+        assert(gpu.GetDisplayArea().height == 480);
+        assert(gpu.GetDisplayArea().is_interlaced == true);
+
+        // Frame rendering test: Output to RGBA buffer
+        std::vector<uint32_t> rgba_buf;
+        uint32_t w = 0, h = 0;
+        gpu.OutputFrameToRGBA(rgba_buf, w, h);
+        assert(w == 640 && h == 480);
+        assert(rgba_buf.size() == 640 * 480);
+
+        std::cout << "  ✓ PS1 Hardware GPU & VRAM tests passed.\n";
+    }
+
+    // 11. PS1 BIOS HLE Dispatcher Tests
+    {
+        personarm::Ps1BiosHle& bios = personarm::Ps1BiosHle::Instance();
+        bios.Initialize();
+
+        personarm::CpuContext cpu;
+        personarm::MemoryManager mem;
+        mem.Initialize(1024 * 1024);
+
+        // Test Vector A hook: FileOpen (func 0x00) -> returns fd=1 in $v0 ($2)
+        cpu.SetGPR(9, 0x00); // $t1 = func 0x00
+        cpu.SetGPR(31, 0x80010050); // $ra
+        cpu.SetPC(0x000000A0);
+
+        bool handled = bios.HandleBiosHook(cpu, mem);
+        assert(handled == true);
+        assert(cpu.GetGPR(2) == 1); // $v0 == 1
+        assert(cpu.GetPC() == 0x80010050); // Returned to $ra
+
+        // Test Vector B hook: InitHeap (func 0x12) -> returns 1 in $v0
+        cpu.SetGPR(9, 0x12);
+        cpu.SetGPR(31, 0x80010060);
+        cpu.SetPC(0x000000B0);
+
+        handled = bios.HandleBiosHook(cpu, mem);
+        assert(handled == true);
+        assert(cpu.GetGPR(2) == 1);
+        assert(cpu.GetPC() == 0x80010060);
+
+        assert(bios.GetInterceptedCallCount() == 2);
+
+        std::cout << "  ✓ PS1 BIOS HLE Dispatcher tests passed.\n";
     }
 
     std::cout << "[PASS] All unit tests completed successfully!\n";

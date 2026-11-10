@@ -36,10 +36,14 @@ set(LOADER_SOURCES
     loader/disc_reader.h
     loader/tim_parser.cpp
     loader/tim_parser.h
+    loader/ps1_bios_hle.cpp
+    loader/ps1_bios_hle.h
 )
 set(RENDERING_SOURCES
     rendering/renderer.cpp
     rendering/renderer.h
+    rendering/ps1_gpu.cpp
+    rendering/ps1_gpu.h
 )
 
 # ───────────────────────────────────────────────────────────────────────

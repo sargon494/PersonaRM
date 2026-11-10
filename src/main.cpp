@@ -19,7 +19,9 @@
 #include "input/input_manager.h"
 #include "loader/disc_reader.h"
 #include "loader/tim_parser.h"
+#include "loader/ps1_bios_hle.h"
 #include "rendering/renderer.h"
+#include "rendering/ps1_gpu.h"
 #include "audio/audio_system.h"
 #include "audio/vag_decoder.h"
 
@@ -52,6 +54,8 @@ static void PrintUsage(const char* prog) {
               << "  --test-load        Verify binary/disc loader\n"
               << "  --test-tim         Verify TIM texture parser\n"
               << "  --test-vag         Verify VAG SPU audio decoder\n"
+              << "  --test-gpu         Verify PS1 GPU VRAM & GP0/GP1 commands\n"
+              << "  --test-bios        Verify PS1 BIOS HLE system call dispatcher\n"
               << "  --test-save        Verify modern save state system\n"
               << "  --test-performance Run engine frametime benchmarks\n";
 }
@@ -273,6 +277,56 @@ static int RunVagSelfTest() {
     }
 }
 
+static int RunGpuSelfTest() {
+    std::cout << "[TEST] PS1 GPU & VRAM self-test...\n";
+    try {
+        personarm::Ps1Gpu gpu;
+        gpu.FillVramRect(0, 0, 32, 32, 0x03E0); // Green (15-bit)
+        if (gpu.ReadVram(0, 0) != 0x03E0) {
+            std::cerr << "[FAIL] VRAM fill failed.\n";
+            return 1;
+        }
+
+        std::vector<uint32_t> frame;
+        uint32_t w = 0, h = 0;
+        gpu.OutputFrameToRGBA(frame, w, h);
+        std::cout << "  - GPU Frame output: " << w << "x" << h << " (" << frame.size() << " pixels)\n";
+        std::cout << "[PASS] PS1 GPU & VRAM self-test passed.\n";
+        return 0;
+    } catch (const std::exception& e) {
+        std::cerr << "[FAIL] Exception during GPU test: " << e.what() << "\n";
+        return 1;
+    }
+}
+
+static int RunBiosSelfTest() {
+    std::cout << "[TEST] PS1 BIOS HLE Dispatcher self-test...\n";
+    try {
+        auto& bios = personarm::Ps1BiosHle::Instance();
+        bios.Initialize();
+
+        personarm::CpuContext cpu;
+        personarm::MemoryManager mem;
+        mem.Initialize(1024 * 1024);
+
+        cpu.SetGPR(9, 0x00); // FileOpen
+        cpu.SetGPR(31, 0x80010020);
+        cpu.SetPC(0x000000A0);
+
+        if (!bios.HandleBiosHook(cpu, mem) || cpu.GetGPR(2) != 1) {
+            std::cerr << "[FAIL] BIOS FileOpen hook failed.\n";
+            return 1;
+        }
+
+        std::cout << "  - BIOS Intercepted calls: " << bios.GetInterceptedCallCount() << "\n";
+        std::cout << "[PASS] PS1 BIOS HLE Dispatcher self-test passed.\n";
+        return 0;
+    } catch (const std::exception& e) {
+        std::cerr << "[FAIL] Exception during BIOS test: " << e.what() << "\n";
+        return 1;
+    }
+}
+
 int main(int argc, char* argv[]) {
     personarm::Launcher launcher;
     if (!launcher.Initialize()) {
@@ -322,6 +376,12 @@ int main(int argc, char* argv[]) {
             }
             if (std::strcmp(argv[i], "--test-vag") == 0) {
                 return RunVagSelfTest();
+            }
+            if (std::strcmp(argv[i], "--test-gpu") == 0) {
+                return RunGpuSelfTest();
+            }
+            if (std::strcmp(argv[i], "--test-bios") == 0) {
+                return RunBiosSelfTest();
             }
             if (std::strcmp(argv[i], "--test-renderer") == 0) {
                 return RunRendererSelfTest();

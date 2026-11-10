@@ -79,6 +79,8 @@ class IntegrationTestSuite:
             self.test_memory,
             self.test_tim_parser,
             self.test_vag_decoder,
+            self.test_gpu,
+            self.test_bios,
             self.test_game_loading,
             self.test_save_system,
             self.test_performance,
@@ -138,6 +140,14 @@ class IntegrationTestSuite:
     def test_vag_decoder(self) -> TestResult:
         print("\n[INFO] Testing VAG audio decoder...")
         return self._run_subcommand("vag_decoder", "--test-vag")
+
+    def test_gpu(self) -> TestResult:
+        print("\n[INFO] Testing PS1 GPU & VRAM...")
+        return self._run_subcommand("gpu", "--test-gpu")
+
+    def test_bios(self) -> TestResult:
+        print("\n[INFO] Testing PS1 BIOS HLE Dispatcher...")
+        return self._run_subcommand("bios", "--test-bios")
 
     def test_game_loading(self) -> TestResult:
         print("\n[INFO] Testing disc/game loader...")
