@@ -22,6 +22,15 @@ TEST_TIMEOUT = 300  # seconds
 BUILD_DIR = Path(os.environ.get("CMAKE_BINARY_DIR", "build/Release"))
 TEST_BINARY = BUILD_DIR / ("personarm.exe" if sys.platform == "win32" and (BUILD_DIR / "personarm.exe").exists() else ("personarm" if (BUILD_DIR / "personarm").exists() else ("persona2ep.exe" if sys.platform == "win32" else "persona2ep")))
 
+# Ensure executable permissions on POSIX systems (artifacts lose +x during zip upload)
+if sys.platform != "win32" and TEST_BINARY.exists():
+    try:
+        import stat
+        current_stat = os.stat(TEST_BINARY)
+        os.chmod(TEST_BINARY, current_stat.st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    except Exception as e:
+        print(f"Warning: could not set executable permissions on {TEST_BINARY}: {e}")
+
 
 
 # ───────────────────────────────────────────────────────────────────────
