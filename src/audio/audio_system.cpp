@@ -68,3 +68,4 @@ void AudioSystem::PlayVoice(const std::string& voice_line) {
 }
 
 } // namespace personarm
+
