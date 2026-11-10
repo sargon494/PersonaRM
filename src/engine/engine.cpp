@@ -187,9 +187,8 @@ bool Engine::BootFromDisc(const std::string& disc_path) {
         return false;
     }
 
-    // Read and parse SYSTEM.CNF to locate the executable name
-    std::string system_cnf = m_disc_reader.ReadTextFile("SYSTEM.CNF");
-    std::string boot_exe_name = ExeLoader::ExtractBootExecutable(system_cnf);
+    // Attempt to detect boot executable directly from SYSTEM.CNF via DiscReader
+    std::string boot_exe_name = m_disc_reader.DetectBootExecutable();
 
     if (boot_exe_name.empty()) {
         // Fallback standard for Persona 2: Eternal Punishment NA and JP
@@ -197,11 +196,11 @@ bool Engine::BootFromDisc(const std::string& disc_path) {
         PRM_LOG_WARN("ENGINE", "Could not parse BOOT from SYSTEM.CNF; defaulting to " + boot_exe_name);
     }
 
-    std::vector<uint8_t> exe_payload = m_disc_reader.ReadFileBytes(boot_exe_name);
-    if (exe_payload.empty()) {
+    std::vector<uint8_t> exe_payload;
+    if (!m_disc_reader.ReadFile(boot_exe_name, exe_payload) || exe_payload.empty()) {
         // Try Japanese version ID if NA was not found
         boot_exe_name = "SLPS_027.70";
-        exe_payload = m_disc_reader.ReadFileBytes(boot_exe_name);
+        m_disc_reader.ReadFile(boot_exe_name, exe_payload);
     }
 
     if (exe_payload.empty()) {
@@ -255,3 +254,4 @@ void Engine::GetCurrentFrame(std::vector<uint32_t>& out_rgba, uint32_t& out_w, u
 }
 
 } // namespace personarm
+
