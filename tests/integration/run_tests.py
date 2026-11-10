@@ -20,7 +20,8 @@ from typing import List, Optional, Dict, Any
 
 TEST_TIMEOUT = 300  # seconds
 BUILD_DIR = Path(os.environ.get("CMAKE_BINARY_DIR", "build/Release"))
-TEST_BINARY = BUILD_DIR / "persona2ep"
+TEST_BINARY = BUILD_DIR / ("personarm.exe" if sys.platform == "win32" and (BUILD_DIR / "personarm.exe").exists() else ("personarm" if (BUILD_DIR / "personarm").exists() else ("persona2ep.exe" if sys.platform == "win32" else "persona2ep")))
+
 
 
 # ───────────────────────────────────────────────────────────────────────

@@ -1,68 +1,67 @@
 # ───────────────────────────────────────────────────────────────────────
 # src/ CMakeLists.txt
-# Persona 2: Eternal Punishment - Native Port
+# PersonaRM - Native Launcher & Port Engine
 # ───────────────────────────────────────────────────────────────────────
 
-# Collect core source files
+# Launcher Sources
+set(LAUNCHER_SOURCES
+    launcher/launcher.cpp
+    launcher/launcher.h
+)
+
+# Core & Memory Sources
 set(CORE_SOURCES
     core/memory_manager.cpp
     core/memory_manager.h
 )
 
-# Placeholder source lists for future modules
+# Placeholder source lists for subsystems
 set(AUDIO_SOURCES "")
 set(CPU_SOURCES "")
 set(LOADER_SOURCES "")
 set(RENDERING_SOURCES "")
+set(INPUT_SOURCES "")
 
 # ───────────────────────────────────────────────────────────────────────
-# Main executable
+# Main Executable: personarm (PersonaRM Launcher & Runtime)
 # ───────────────────────────────────────────────────────────────────────
 
-add_executable(persona2ep
+add_executable(personarm
     main.cpp
+    ${LAUNCHER_SOURCES}
     ${CORE_SOURCES}
     ${AUDIO_SOURCES}
     ${CPU_SOURCES}
     ${LOADER_SOURCES}
     ${RENDERING_SOURCES}
+    ${INPUT_SOURCES}
 )
 
-target_include_directories(persona2ep PRIVATE
+target_include_directories(personarm PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-# ───────────────────────────────────────────────────────────────────────
-# Link dependencies (as they become available)
-# ───────────────────────────────────────────────────────────────────────
-
-# For now, only link core system libraries.
-# Uncomment as modules are implemented:
-#
-# target_link_libraries(persona2ep PRIVATE
-#     SDL2::SDL2
-#     OpenGL::GL
-#     OpenAL::OpenAL
-#     PNG::PNG
-#     JPEG::JPEG
-#     ZLIB::ZLIB
-# )
+# Alias for backwards compatibility with tests / scripts expecting persona2ep
+add_custom_target(persona2ep ALL
+    DEPENDS personarm
+)
 
 # ───────────────────────────────────────────────────────────────────────
-# Compiler settings
+# Compiler Settings
 # ───────────────────────────────────────────────────────────────────────
 
-target_compile_features(persona2ep PRIVATE cxx_std_17)
+target_compile_features(personarm PRIVATE cxx_std_17)
 
 if(MSVC)
-    target_compile_options(persona2ep PRIVATE /W4)
+    target_compile_options(personarm PRIVATE /W4)
 else()
-    target_compile_options(persona2ep PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(personarm PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
 # ───────────────────────────────────────────────────────────────────────
-# Static analysis support
+# Static Analysis Target
 # ───────────────────────────────────────────────────────────────────────
 
-include(${CMAKE_SOURCE_DIR}/cmake/modules/StaticAnalysis.cmake)
-
+if(EXISTS "${CMAKE_SOURCE_DIR}/cmake/modules/StaticAnalysis.cmake")
+    include(${CMAKE_SOURCE_DIR}/cmake/modules/StaticAnalysis.cmake)
+endif()

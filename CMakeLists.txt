@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(Persona2EP
-    VERSION 0.1.0
-    DESCRIPTION "Persona 2: Eternal Punishment - Native Port"
+project(PersonaRM
+    VERSION 0.2.0
+    DESCRIPTION "PersonaRM - Native Launcher & Port Engine (Persona 2: Eternal Punishment)"
     LANGUAGES CXX C
 )
 
@@ -37,36 +37,16 @@ option(BUILD_DOCS "Build documentation" OFF)
 option(BUILD_SHARED_LIBS "Build shared libraries" OFF)
 
 # ───────────────────────────────────────────────────────────────────────
-# Find dependencies
-# ───────────────────────────────────────────────────────────────────────
-
-# SDL2
-find_package(SDL2 REQUIRED COMPONENTS SDL2)
-
-# OpenGL
-find_package(OpenGL REQUIRED)
-
-# OpenAL
-find_package(OpenAL REQUIRED)
-
-# PNG
-find_package(PNG REQUIRED)
-
-# JPEG
-find_package(JPEG REQUIRED)
-
-# ZLIB
-find_package(ZLIB REQUIRED)
-
-# ───────────────────────────────────────────────────────────────────────
-# Add subdirectories
+# Subdirectories
 # ───────────────────────────────────────────────────────────────────────
 
 add_subdirectory(src)
 
 if(BUILD_TESTS)
     enable_testing()
-    add_subdirectory(tests)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/CMakeLists.txt")
+        add_subdirectory(tests)
+    endif()
 endif()
 
 # ───────────────────────────────────────────────────────────────────────
@@ -75,7 +55,7 @@ endif()
 
 include(GNUInstallDirs)
 
-install(TARGETS persona2ep
+install(TARGETS personarm
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
@@ -85,6 +65,8 @@ install(FILES
     CONTRIBUTING.md
     AGENT.md
     ARCHITECTURE.md
+    docs/GAMEPLAY_AND_CONTROLS.md
+    docs/PROJECT_AUDIT.md
     DESTINATION ${CMAKE_INSTALL_DOCDIR}
 )
 
@@ -93,13 +75,10 @@ install(FILES
 # ───────────────────────────────────────────────────────────────────────
 
 message(STATUS "")
-message(STATUS "=== Persona 2: Eternal Punishment - Native Port ===")
+message(STATUS "=== PersonaRM - Native Launcher & Port Suite ===")
 message(STATUS "Version: ${PROJECT_VERSION}")
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
-message(STATUS "SDL2: ${SDL2_FOUND}")
-message(STATUS "OpenAL: ${OpenAL_FOUND}")
-message(STATUS "PNG: ${PNG_FOUND}")
-message(STATUS "JPEG: ${JPEG_FOUND}")
+message(STATUS "Target Executable: personarm")
 message(STATUS "Tests: ${BUILD_TESTS}")
-message(STATUS "===========================================")
+message(STATUS "================================================")
 message(STATUS "")
