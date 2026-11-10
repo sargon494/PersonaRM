@@ -97,7 +97,7 @@ BuddyAllocator::BuddyAllocator(SizeType max_size)
         throw std::bad_alloc();
     }
 
-    size_t levels = static_cast<size_t>(std::log2(static_size_cast<double>(max_size))) + 1;
+    size_t levels = static_cast<size_t>(std::log2(static_cast<double>(max_size))) + 1;
     m_block_sizes.resize(levels);
     m_free_list.resize(levels, false);
 

@@ -16,6 +16,7 @@
 // Project headers
 #include "launcher/launcher.h"
 #include "core/memory_manager.h"
+#include "input/input_manager.h"
 
 static constexpr const char* LAUNCHER_NAME    = "PersonaRM - Native Launcher & Hub";
 static constexpr const char* LAUNCHER_VERSION = "0.2.0";
@@ -40,8 +41,8 @@ static void PrintUsage(const char* prog) {
               << "  --help             Show this help information\n\n"
               << "Component Self-Tests:\n"
               << "  --test-memory      Verify memory manager allocations and policies\n"
-              << "  --test-renderer    Verify OpenGL renderer initialization\n"
               << "  --test-input       Verify SDL2 controller & KBM bindings\n"
+              << "  --test-renderer    Verify OpenGL renderer initialization\n"
               << "  --test-audio       Verify OpenAL audio device context\n"
               << "  --test-load        Verify binary/disc loader\n"
               << "  --test-save        Verify modern save state system\n"
@@ -72,6 +73,43 @@ static int RunMemorySelfTest() {
         return 0;
     } catch (const std::exception& e) {
         std::cerr << "[FAIL] Exception during memory test: " << e.what() << "\n";
+        return 1;
+    }
+}
+
+static int RunInputSelfTest() {
+    std::cout << "[TEST] Input Manager self-test...\n";
+    try {
+        auto& input = personarm::InputManager::Instance();
+        if (!input.Initialize()) {
+            std::cerr << "[FAIL] Failed to initialize InputManager.\n";
+            return 1;
+        }
+
+        input.SimulateActionPress(personarm::VirtualAction::Confirm);
+        input.Update(0.016f);
+
+        if (!input.IsActionPressed(personarm::VirtualAction::Confirm)) {
+            std::cerr << "[FAIL] Action Confirm was not registered.\n";
+            return 1;
+        }
+
+        std::cout << "  - Confirm Glyph (KBM): " << input.GetActionGlyphDescription(personarm::VirtualAction::Confirm) << "\n";
+        std::cout << "  - Attack Glyph (KBM):  " << input.GetActionGlyphDescription(personarm::VirtualAction::BattleAttack) << "\n";
+        std::cout << "  - Turbo Glyph (KBM):   " << input.GetActionGlyphDescription(personarm::VirtualAction::Turbo) << "\n";
+
+        input.SimulateActionRelease(personarm::VirtualAction::Confirm);
+        input.Update(0.016f);
+
+        if (input.IsActionPressed(personarm::VirtualAction::Confirm)) {
+            std::cerr << "[FAIL] Action Confirm was not released.\n";
+            return 1;
+        }
+
+        std::cout << "[PASS] Input Manager self-test passed.\n";
+        return 0;
+    } catch (const std::exception& e) {
+        std::cerr << "[FAIL] Exception during input test: " << e.what() << "\n";
         return 1;
     }
 }
@@ -114,8 +152,10 @@ int main(int argc, char* argv[]) {
             if (std::strcmp(argv[i], "--test-memory") == 0) {
                 return RunMemorySelfTest();
             }
+            if (std::strcmp(argv[i], "--test-input") == 0) {
+                return RunInputSelfTest();
+            }
             if (std::strcmp(argv[i], "--test-renderer") == 0 ||
-                std::strcmp(argv[i], "--test-input") == 0 ||
                 std::strcmp(argv[i], "--test-audio") == 0 ||
                 std::strcmp(argv[i], "--test-load") == 0 ||
                 std::strcmp(argv[i], "--test-save") == 0 ||
