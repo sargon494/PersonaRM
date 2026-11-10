@@ -52,6 +52,10 @@ set(RENDERING_SOURCES
     rendering/renderer.h
     rendering/ps1_gpu.cpp
     rendering/ps1_gpu.h
+    rendering/window_context.cpp
+    rendering/window_context.h
+    rendering/gl_renderer.cpp
+    rendering/gl_renderer.h
 )
 set(ENGINE_SOURCES
     engine/engine.cpp

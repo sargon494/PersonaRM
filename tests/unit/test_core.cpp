@@ -18,6 +18,8 @@
 #include "loader/exe_loader.h"
 #include "loader/str_demuxer.h"
 #include "engine/engine.h"
+#include "rendering/window_context.h"
+#include "rendering/gl_renderer.h"
 
 int main() {
     std::cout << "[UNIT TEST] Running Core and Input Unit Tests...\n";
@@ -495,6 +497,39 @@ int main() {
         assert(engine.GetState() == personarm::EngineState::Stopped);
 
         std::cout << "  ✓ PersonaRM Core Engine tests passed.\n";
+    }
+
+    // 17. Window Context & GL Renderer Tests
+    {
+        personarm::WindowContext window;
+        personarm::WindowConfig win_cfg;
+        win_cfg.headless = true;
+        win_cfg.width = 1920;
+        win_cfg.height = 1080;
+
+        assert(window.Initialize(win_cfg) == true);
+        assert(window.IsOpen() == true);
+        assert(window.IsHeadless() == true);
+
+        personarm::GlRenderer gl_renderer;
+        assert(gl_renderer.Initialize(window) == true);
+
+        std::vector<uint32_t> test_frame(320 * 240, 0xFF00FF00); // Green frame
+        gl_renderer.UploadFrame(test_frame.data(), 320, 240);
+        gl_renderer.Render(1920, 1080);
+
+        auto vp = gl_renderer.GetCurrentViewport();
+        // 1920x1080 is 16:9, so 4:3 target results in pillarboxing (width ~1440, height 1080, x ~240)
+        assert(vp.height == 1080);
+        assert(vp.width == 1440);
+        assert(vp.x == 240);
+        assert(vp.y == 0);
+
+        gl_renderer.Shutdown();
+        window.Shutdown();
+        assert(window.IsOpen() == false);
+
+        std::cout << "  ✓ Window Context & GL Renderer tests passed.\n";
     }
 
     std::cout << "[PASS] All unit tests completed successfully!\n";

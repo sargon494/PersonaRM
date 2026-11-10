@@ -86,6 +86,7 @@ class IntegrationTestSuite:
             self.test_spu,
             self.test_str,
             self.test_engine,
+            self.test_window,
             self.test_game_loading,
             self.test_save_system,
             self.test_performance,
@@ -173,6 +174,10 @@ class IntegrationTestSuite:
     def test_engine(self) -> TestResult:
         print("\n[INFO] Testing PersonaRM Core Engine & Frame Loop...")
         return self._run_subcommand("engine", "--test-engine")
+
+    def test_window(self) -> TestResult:
+        print("\n[INFO] Testing Window Context & GL Presentation pipeline...")
+        return self._run_subcommand("window", "--test-window")
 
     def test_game_loading(self) -> TestResult:
         print("\n[INFO] Testing disc/game loader...")

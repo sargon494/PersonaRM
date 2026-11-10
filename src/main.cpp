@@ -29,6 +29,8 @@
 #include "loader/exe_loader.h"
 #include "loader/str_demuxer.h"
 #include "engine/engine.h"
+#include "rendering/window_context.h"
+#include "rendering/gl_renderer.h"
 
 static constexpr const char* LAUNCHER_NAME    = "PersonaRM - Native Launcher & Hub";
 static constexpr const char* LAUNCHER_VERSION = "0.2.0";
@@ -66,6 +68,7 @@ static void PrintUsage(const char* prog) {
               << "  --test-spu         Verify PS1 SPU 24-voice audio mixer\n"
               << "  --test-str         Verify PS1 STR/MDEC CD-ROM XA video demuxer\n"
               << "  --test-engine      Verify PersonaRM unified core engine & frame loop\n"
+              << "  --test-window      Verify Window Context & GL presentation pipeline\n"
               << "  --test-save        Verify modern save state system\n"
               << "  --test-performance Run engine frametime benchmarks\n";
 }
@@ -527,6 +530,43 @@ static int RunEngineSelfTest() {
     }
 }
 
+static int RunWindowSelfTest() {
+    std::cout << "[TEST] Window Context & GL Presentation pipeline self-test...\n";
+    try {
+        personarm::WindowContext window;
+        personarm::WindowConfig win_cfg;
+        win_cfg.headless = true;
+        win_cfg.width = 1280;
+        win_cfg.height = 720;
+
+        if (!window.Initialize(win_cfg)) {
+            std::cerr << "[FAIL] Failed to initialize WindowContext.\n";
+            return 1;
+        }
+
+        personarm::GlRenderer gl_renderer;
+        if (!gl_renderer.Initialize(window)) {
+            std::cerr << "[FAIL] Failed to initialize GlRenderer.\n";
+            return 1;
+        }
+
+        std::vector<uint32_t> frame(320 * 240, 0xFF336699);
+        gl_renderer.UploadFrame(frame.data(), 320, 240);
+        gl_renderer.Render(1280, 720);
+
+        auto vp = gl_renderer.GetCurrentViewport();
+        std::cout << "  - Viewport Letterbox: " << vp.width << "x" << vp.height << " offset (" << vp.x << "," << vp.y << ")\n";
+
+        gl_renderer.Shutdown();
+        window.Shutdown();
+        std::cout << "[PASS] Window Context & GL Presentation self-test passed.\n";
+        return 0;
+    } catch (const std::exception& e) {
+        std::cerr << "[FAIL] Exception during Window test: " << e.what() << "\n";
+        return 1;
+    }
+}
+
 int main(int argc, char* argv[]) {
     personarm::Launcher launcher;
     if (!launcher.Initialize()) {
@@ -597,6 +637,9 @@ int main(int argc, char* argv[]) {
             }
             if (std::strcmp(argv[i], "--test-engine") == 0) {
                 return RunEngineSelfTest();
+            }
+            if (std::strcmp(argv[i], "--test-window") == 0) {
+                return RunWindowSelfTest();
             }
             if (std::strcmp(argv[i], "--test-renderer") == 0) {
                 return RunRendererSelfTest();
