@@ -41,6 +41,7 @@ option(BUILD_SHARED_LIBS "Build shared libraries" OFF)
 # ───────────────────────────────────────────────────────────────────────
 
 add_subdirectory(src)
+add_subdirectory(tools)
 
 if(BUILD_TESTS)
     enable_testing()

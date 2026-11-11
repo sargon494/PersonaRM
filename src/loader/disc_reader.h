@@ -107,7 +107,7 @@ public:
 
 private:
     bool ParseIso9660Volume();
-    void ReadDirectorySectors(uint32_t lba, uint32_t length_bytes, const std::string& prefix);
+    void ReadDirectorySectors(uint32_t lba, uint32_t length_bytes, const std::string& prefix, int depth = 0);
 
     std::string m_file_path;
     std::ifstream m_stream;
