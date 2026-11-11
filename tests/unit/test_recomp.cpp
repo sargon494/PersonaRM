@@ -322,6 +322,29 @@ static void TestCfgUnresolvedJumpCounter() {
     CHECK(r.indirect_jumps == 1 && r.unresolved_jumps == 1);
 }
 
+// The slot at 0x80010100 starts at zero, but the code stores the address of the function at 0x80010040
+// into it before calling through it. The store makes that address a candidate.
+static void TestCfgGlobalPointerStored() {
+    std::vector<uint8_t> code(0x200, 0);
+    const uint32_t words[] = {
+        0x3C028001u,   // 0 lui $2,0x8001
+        0x24420040u,   // 1 addiu $2,$2,0x40          -> 0x80010040
+        0x3C038001u,   // 2 lui $3,0x8001
+        0xAC620100u,   // 3 sw $2,0x100($3)           -> store to 0x80010100
+        0x3C048001u,   // 4 lui $4,0x8001
+        0x8C850100u,   // 5 lw $5,0x100($4)           -> load from 0x80010100
+        0x00A0F809u,   // 6 jalr $31,$5
+        kNop,          // 7 delay slot
+        kJrRa, kNop,   // 8-9
+    };
+    for (size_t i = 0; i < sizeof(words) / sizeof(words[0]); ++i)
+        for (int b = 0; b < 4; ++b) code[i * 4 + b] = static_cast<uint8_t>(words[i] >> (8 * b));
+    CfgReport r = AnalyzeControlFlow(code.data(), code.size(), kBase, kBase);
+    CHECK(r.pointers.assigned_in_image == 1 && r.pointers.null_value == 0);
+    CHECK(r.pointer_samples.size() == 1 && r.pointer_samples[0].status == PointerStatus::AssignedInImage);
+    CHECK(r.pointer_samples[0].candidates.size() == 1 && r.pointer_samples[0].candidates[0] == kBase + 0x40);
+}
+
 int main() {
     TestDecode();
     TestCfgCallsAndDelaySlots();
@@ -333,6 +356,7 @@ int main() {
     TestCfgSwitchOffsetLoad();
     TestCfgBiosCall();
     TestCfgGlobalPointers();
+    TestCfgGlobalPointerStored();
     TestCfgUnresolvedJumpCounter();
     TestDescribeInsn();
     TestCfgUnresolvedContextLimit();
