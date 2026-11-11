@@ -112,12 +112,80 @@ static void TestCfgCoverage() {
     CHECK(r.returns == 1);
 }
 
+
+// Switch-table dispatch as the compiler emits it:
+//   sltiu t0,a0,4 ; beq t0,zero,default ; nop          -- bound check (index < 4)
+//   sll t1,a0,2 ; lui at,hi ; addiu at,at,lo            -- table base
+//   addu t1,t1,at ; lw t2,0(t1) ; nop ; jr t2 ; nop     -- load target, jump
+// The four table entries sit in the image after the code and point at four small cases.
+static void TestCfgJumpTable() {
+    const uint32_t table = kBase + 16 * 4;     // word 16 holds the table
+    const uint32_t hi = table >> 16;
+    const uint32_t lo = table & 0xFFFF;
+    const uint32_t lui = 0x3C010000u | hi;     // lui at,hi
+    const uint32_t addiu = 0x24210000u | lo;   // addiu at,at,lo
+    // 0 sltiu t0,a0,4 ; 1 beq t0,zero,+? ; 2 nop ; 3 sll t1,a0,2 ; 4 lui at ; 5 addiu at
+    // 6 addu t1,t1,at ; 7 lw t2,0(t1) ; 8 nop ; 9 jr t2 ; 10 nop
+    // 11 default: jr ra ; 12 nop
+    // 13..15 padding (unreachable filler, as in the real image)
+    // 16..19 table entries pointing at cases 20, 21, 22, 23
+    // 20..23 cases: each is addiu v0,zero,n ; jr ra ; nop (three words each, padded to 4)
+    auto code = Bytes({
+        0x2C880004u,                 // 0  sltiu t0,a0,4
+        0x11000000u | 9u,            // 1  beq t0,zero,+9 (to default at word 11)
+        kNop,                        // 2
+        0x00044880u,                 // 3  sll t1,a0,2
+        lui,                         // 4  lui at,hi
+        addiu,                       // 5  addiu at,at,lo
+        0x00294821u,                 // 6  addu t1,t1,at
+        0x8D2A0000u,                 // 7  lw t2,0(t1)
+        kNop,                        // 8
+        0x01400008u,                 // 9  jr t2
+        kNop,                        // 10
+        kJrRa,                       // 11 default: jr ra
+        kNop,                        // 12
+        kNop, kNop, kNop,            // 13-15
+        0, 0, 0, 0,                  // 16-19 table entries, patched below
+        0, 0, 0, 0, 0, 0, 0, 0,      // 20-27 case blocks, filled in below
+        0, 0, 0, 0, 0, 0, 0, 0,
+    });
+    // Patch the four table entries and the four cases.
+    // Each case block is four words long, so case i starts at word 20 + 4*i.
+    const uint32_t cases[4] = {kBase + (20 + 4 * 0) * 4, kBase + (20 + 4 * 1) * 4, kBase + (20 + 4 * 2) * 4, kBase + (20 + 4 * 3) * 4};
+    for (int i = 0; i < 4; ++i) {
+        uint32_t w = cases[i];
+        for (int b = 0; b < 4; ++b) code[(16 + i) * 4 + b] = static_cast<uint8_t>(w >> (8 * b));
+    }
+    // cases at 20..23: addiu v0,zero,i ; jr ra ; nop ; nop
+    for (int i = 0; i < 4; ++i) {
+        uint32_t words[4] = {0x24020000u | static_cast<uint32_t>(i), kJrRa, kNop, kNop};
+        for (int k = 0; k < 4; ++k) {
+            uint32_t w = words[k];
+            for (int b = 0; b < 4; ++b) code[(20 + 4 * i + k) * 4 + b] = static_cast<uint8_t>(w >> (8 * b));
+        }
+    }
+
+    CfgReport r = AnalyzeControlFlow(code.data(), code.size(), kBase, kBase);
+    // Every case must be reached through the table, so the indirect jump is resolved.
+    CHECK(r.indirect_jumps == 1);
+    CHECK(r.resolved_jump_tables == 1);
+    CHECK(r.resolved_table_entries == 4);
+    CHECK(r.indirect_sites.empty());
+    // Reached: words 0-12 (bound check, dispatch, default with its delay slot) and, through the table,
+    // the first three words of each of the four case blocks (20+4i .. 22+4i). The fourth word of each
+    // case block is never reached as code, and padding 13-15 and table words 16-19 are data.
+    CHECK(r.reachable_words == 25);
+    CHECK(r.functions == 5);            // entry point plus one function per table case
+    CHECK(r.invalid_reached == 0 && r.out_of_range_targets == 0);
+}
+
 int main() {
     TestDecode();
     TestCfgCallsAndDelaySlots();
     TestCfgInvalidReached();
     TestCfgOutOfRange();
     TestCfgCoverage();
+    TestCfgJumpTable();
     std::cout << "recomp tests passed (" << g_checks << " checks)\n";
     return 0;
 }

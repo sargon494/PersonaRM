@@ -22,6 +22,100 @@ void Record(std::vector<uint32_t>& list, uint32_t addr) {
     if (list.size() < kMaxSites) list.push_back(addr);
 }
 
+
+// Switch-table recovery for `jr rX` (WP-14, step 2). Works backwards inside the straight-line
+// block that ends at the jump, looking for the pattern a compiler emits for a switch:
+//   sltiu t, idx, N ; beq t, zero, default      (bound check: index < N)
+//   sll  s, idx, 2  ; lui b, hi ; addiu b, b, lo (table base)
+//   addu  s, s, b   ; lw rX, 0(s)               (load the case address)
+// Returns the table entries that lie inside the image, or an empty list when the pattern is not
+// complete. It never guesses: a missing piece means the site stays unresolved.
+struct JumpTable {
+    uint32_t base = 0;
+    uint32_t count = 0;
+};
+
+bool FindJumpTable(const uint8_t* code, size_t size, uint32_t load, uint32_t jr_addr, JumpTable& out) {
+    auto word_at = [&](uint32_t a) { return LoadU32(code + (a - load)); };
+    auto in_code = [&](uint32_t a) {
+        return a >= load && static_cast<uint64_t>(a) + 4 <= static_cast<uint64_t>(load) + size && ((a - load) & 3u) == 0;
+    };
+
+    // Walk back to the start of the straight-line block, never crossing a control transfer.
+    uint32_t pc = jr_addr;
+    const uint32_t jr_word = word_at(pc);
+    const uint32_t jr_reg = (jr_word >> 21) & 31;            // rs of jr
+
+    // Find the lw that loads jr_reg (search backwards, stop at a transfer or a write to it).
+    uint32_t lw_addr = 0;
+    bool found_lw = false;
+    for (uint32_t a = pc; a >= load + 4 && !found_lw; a -= 4) {
+        const uint32_t prev = a - 4;
+        if (!in_code(prev)) break;
+        const uint32_t w = word_at(prev);
+        const uint32_t op = w >> 26;
+        if (op == 0x00 && (w & 63) == 0x08) break;            // previous jr ends the block
+        if (op == 0x02 || op == 0x03 || (op >= 0x04 && op <= 0x07)) break;  // j/jal/branch
+        if (op == 0x23 && ((w >> 16) & 31) == jr_reg) {       // lw rX, off(base)
+            lw_addr = prev;
+            found_lw = true;
+        }
+    }
+    if (!found_lw) return false;
+
+    // The lw address is formed as addu(index_scaled, base): the lw register is the sum, so the
+    // table base lives in the other operand of that addu, built by a lui/addiu pair.
+    const uint32_t lw_word = word_at(lw_addr);
+    const uint32_t lw_base = (lw_word >> 21) & 31;
+    const int16_t lw_off = static_cast<int16_t>(lw_word & 0xFFFF);
+    if (lw_off != 0) return false;                             // table is read from element 0
+
+    uint32_t addu_addr = 0;
+    uint32_t addu_other = 0;                                   // the operand that is not the sum itself
+    bool found_addu = false;
+    for (uint32_t a = lw_addr; a >= load + 4 && !found_addu; a -= 4) {
+        const uint32_t prev = a - 4;
+        if (!in_code(prev)) break;
+        const uint32_t w = word_at(prev);
+        const uint32_t op = w >> 26;
+        if (op == 0x00 && (w & 63) == 0x21 && ((w >> 11) & 31) == lw_base) {   // addu lw_base, rs, rt
+            addu_addr = prev;
+            const uint32_t rs = (w >> 21) & 31;
+            const uint32_t rt = (w >> 16) & 31;
+            addu_other = (rs == lw_base) ? rt : rs;
+            found_addu = true;
+        }
+    }
+    if (!found_addu) return false;
+
+    uint32_t base_hi = 0, base_lo = 0;
+    bool have_hi = false, have_lo = false;
+    uint32_t sltiu_bound = 0;
+    bool have_bound = false;
+    for (uint32_t a = addu_addr; a >= load + 4; a -= 4) {
+        const uint32_t prev = a - 4;
+        if (!in_code(prev)) break;
+        const uint32_t w = word_at(prev);
+        const uint32_t op = w >> 26;
+        const uint32_t rt = (w >> 16) & 31;
+        if (op == 0x0F && rt == addu_other && !have_hi) {      // lui base, hi
+            base_hi = (w & 0xFFFF) << 16;
+            have_hi = true;
+        } else if (op == 0x09 && rt == addu_other && !have_lo) { // addiu base, base, lo
+            base_lo = static_cast<uint16_t>(w & 0xFFFF);
+            have_lo = true;
+        } else if (op == 0x0B && !have_bound) {                // sltiu t, idx, N
+            sltiu_bound = static_cast<uint16_t>(w & 0xFFFF);
+            have_bound = true;
+        }
+    }
+    if (!have_hi || !have_lo || !have_bound || sltiu_bound == 0) return false;
+
+    out.base = base_hi + base_lo;
+    out.count = sltiu_bound;
+    return true;
+}
+
 } // namespace
 
 CfgReport AnalyzeControlFlow(const uint8_t* code, size_t size, uint32_t load, uint32_t entry) {
@@ -123,11 +217,30 @@ CfgReport AnalyzeControlFlow(const uint8_t* code, size_t size, uint32_t load, ui
                     }
                     pc = after;
                     break;
-                case InsnKind::IndirectJump:
+                case InsnKind::IndirectJump: {
                     ++r.indirect_jumps;
-                    Record(r.indirect_sites, pc);
+                    JumpTable jt;
+                    if (FindJumpTable(code, size, load, pc, jt)) {
+                        ++r.resolved_jump_tables;
+                        for (uint32_t i = 0; i < jt.count; ++i) {
+                            const uint32_t entry_addr = jt.base + 4 * i;
+                            if (!in_image(entry_addr)) break;
+                            const uint32_t target = word_at(entry_addr);
+                            if (!in_image(target)) {
+                                ++r.out_of_range_targets;
+                                Record(r.out_of_range_sites, pc);
+                                break;
+                            }
+                            ++r.resolved_table_entries;
+                            functions.insert(target);  // table entries are case blocks in this image
+                            work.push_back(target);
+                        }
+                    } else {
+                        Record(r.indirect_sites, pc);
+                    }
                     block_open = false;
                     break;
+                }
                 case InsnKind::IndirectCall:
                     ++r.indirect_calls;
                     Record(r.indirect_sites, pc);
