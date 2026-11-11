@@ -182,11 +182,12 @@ The `personarm` executable contains built-in self-test flags:
 Herramienta de línea de comandos que lee una imagen de disco de PS1 y genera un informe Markdown con **solo metadatos** (nombres, tamaños, direcciones y contadores; nunca contenido del juego). Se compila junto al resto del proyecto y queda en `build/Release/psx_analyze`.
 
 ```
-psx_analyze <disco.cue|.bin|.iso> [<disco2> ...] [--out informe.md] [--hash] [--max-scan-mb N] [--full-paths]
+psx_analyze <disco.cue|.bin|.iso> [<disco2> ...] [--out informe.md] [--hash] [--max-scan-mb N] [--full-paths] [--cfg]
 ```
 
 - Acepta ISO de 2048 bytes y BIN/CUE de 2352 bytes. Para discos de dos CD, pasa ambos en la misma ejecución.
 - `--hash` añade el CRC32 de la imagen (tarda en discos de 700 MB). `--full-paths` muestra la ruta tal cual; por defecto solo se imprime el nombre del archivo.
 - El informe incluye: serial reconocido, `SYSTEM.CNF`, cabecera del ejecutable de arranque, accesos directos a hardware, llamadas a BIOS, candidatos a overlay, tipos de archivo y tipo de sector.
+- `--cfg` recorre el ejecutable de arranque desde su punto de entrada siguiendo saltos y llamadas directas: indica qué parte del código se alcanza, cuántos saltos indirectos quedan sin resolver y si aparecen palabras reservadas como código.
 - Las secciones marcadas *heurística* son una lectura lineal de instrucciones MIPS-I, no un desensamblado: sirven para decidir, no para dar nada por demostrado.
 - Antes de compartir un informe, revisa que no contenga nada que no quieras publicar. No subas imágenes de disco ni archivos extraídos al repositorio.
