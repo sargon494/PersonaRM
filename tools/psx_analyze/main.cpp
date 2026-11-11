@@ -23,6 +23,7 @@ static void Usage() {
         "  --hash              Calcula el CRC32 de la imagen (lento en discos de 700 MB)\n"
         "  --max-scan-mb <N>   Tamano maximo por archivo para buscar codigo (por defecto 8)\n"
         "  --full-paths        Muestra la ruta de la imagen tal cual en vez de su nombre\n"
+        "  --cfg               Analiza el alcance del control de flujo del ejecutable de arranque (WP-14)\n"
         "  --help              Muestra esta ayuda\n";
 }
 
@@ -36,6 +37,7 @@ int main(int argc, char** argv) {
         if (a == "--help" || a == "-h") { Usage(); return 0; }
         if (a == "--hash") { options.hash = true; continue; }
         if (a == "--full-paths") { options.full_paths = true; continue; }
+        if (a == "--cfg") { options.cfg = true; continue; }
         if (a == "--out" && i + 1 < argc) { out_path = argv[++i]; continue; }
         if (a == "--max-scan-mb" && i + 1 < argc) {
             const long mb = std::strtol(argv[++i], nullptr, 10);

@@ -2,6 +2,7 @@
 
 #include "core/hash.h"
 #include "loader/disc_reader.h"
+#include "recomp/cfg.h"
 
 #include <algorithm>
 #include <cctype>
@@ -313,6 +314,12 @@ bool AnalyzeDisc(const std::string& image_path, const AnalyzeOptions& options,
                 AnalyzeBuffer(data, rep);
                 if (is_boot) {
                     out.sdk_hints = FindSdkHints(data.data(), data.size());
+                    if (options.cfg && rep.is_psx_exe) {
+                        const size_t payload = std::min<size_t>(rep.exe.payload_size, data.size() - 0x800);
+                        out.boot_cfg = recomp::AnalyzeControlFlow(data.data() + 0x800, payload,
+                                                                  rep.exe.load_address, rep.exe.entry);
+                        out.has_cfg = true;
+                    }
                 }
             }
         } else if (!media && e.size_bytes > options.max_scan_bytes) {
@@ -400,6 +407,28 @@ std::string RenderMarkdown(const std::vector<DiscReport>& reports) {
                     first = false;
                 }
                 os << "\n\n";
+            }
+
+            if (d.has_cfg) {
+                const auto& c = d.boot_cfg;
+                os << "#### Control de flujo desde el punto de entrada (CFG)\n\n";
+                os << "| Medida | Valor |\n|---|---:|\n";
+                os << "| Palabras alcanzadas / total | " << c.reachable_words << " / " << c.text_words
+                   << " (" << c.coverage_permille / 10 << "." << c.coverage_permille % 10 << " %) |\n";
+                os << "| Funciones (entrada + llamadas directas distintas) | " << c.functions << " |\n";
+                os << "| Llamadas directas / saltos directos / ramas condicionales | " << c.direct_calls << " / "
+                   << c.direct_jumps << " / " << c.conditional_branches << " |\n";
+                os << "| Retornos (`jr $ra`) | " << c.returns << " |\n";
+                os << "| Saltos y llamadas indirectas sin resolver | " << c.indirect_jumps << " / " << c.indirect_calls << " |\n";
+                os << "| Palabras reservadas alcanzadas como código | " << c.invalid_reached << " |\n";
+                os << "| Destinos fuera de la imagen | " << c.out_of_range_targets << " |\n";
+                os << "| Llamadas al sistema (syscall/break) | " << c.syscalls << " |\n\n";
+                if (!c.indirect_sites.empty()) {
+                    os << "Primeros saltos indirectos sin resolver: ";
+                    for (size_t i = 0; i < c.indirect_sites.size() && i < 10; ++i) os << (i ? ", " : "") << Hex(c.indirect_sites[i]);
+                    os << "\n\n";
+                }
+                os << "_Lectura: el CFG solo sigue saltos directos. Lo que no alcanza (saltos indirectos, overlays, código generado) es lo que decidirá si hace falta el respaldo del intérprete._\n\n";
             }
 
             os << "#### Indicios de librerías del SDK (heurística)\n\n";

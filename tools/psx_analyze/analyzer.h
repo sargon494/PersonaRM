@@ -12,6 +12,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include "recomp/cfg.h"
 #include <map>
 #include <set>
 #include <string>
@@ -96,12 +97,15 @@ struct DiscReport {
     std::map<std::string, ExtensionStats> extensions;
     FileReport boot;             // full analysis of the boot executable
     bool has_boot = false;
+    bool has_cfg = false;
+    recomp::CfgReport boot_cfg;
     std::map<std::string, uint32_t> sdk_hints;
 };
 
 struct AnalyzeOptions {
     bool hash = false;                 // CRC32 of the whole image (slow on 700 MB)
     bool full_paths = false;           // print the image path as given instead of its base name
+    bool cfg = false;                  // control-flow reachability of the boot executable (WP-14)
     size_t max_scan_bytes = 8u << 20;  // per file; the boot executable is always scanned
 };
 

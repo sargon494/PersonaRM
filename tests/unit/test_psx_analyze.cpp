@@ -268,6 +268,15 @@ static void TestDiscs() {
     CHECK(md.find("DATA/OVL.BIN") != std::string::npos && md.find("test.iso") != std::string::npos);
     CHECK(md.find(dir.string()) == std::string::npos);    // base name only: no local paths leak
 
+    AnalyzeOptions withcfg; withcfg.cfg = true;
+    DiscReport cfgr;
+    CHECK(AnalyzeDisc(iso, withcfg, cfgr, err) && cfgr.has_cfg);
+    // MakeCode ends each function in a BIOS stub (jr $t2): the first one is an unresolved indirect jump.
+    CHECK(cfgr.boot_cfg.indirect_jumps == 1 && cfgr.boot_cfg.reachable_words > 0);
+    CHECK(cfgr.boot_cfg.invalid_reached == 0);
+    CHECK(RenderMarkdown({cfgr}).find("Control de flujo") != std::string::npos);
+    CHECK(!r.has_cfg);
+
     DiscReport full;
     AnalyzeOptions fp; fp.full_paths = true;
     CHECK(AnalyzeDisc(iso, fp, full, err) && full.image_name == iso);

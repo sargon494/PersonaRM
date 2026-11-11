@@ -21,6 +21,10 @@ set(CORE_SOURCES
     core/json_lite.cpp
     core/json_lite.h
     core/hash.h
+    recomp/mips_decode.h
+    recomp/mips_decode.cpp
+    recomp/cfg.h
+    recomp/cfg.cpp
     core/save_manager.cpp
     core/save_manager.h
 )
