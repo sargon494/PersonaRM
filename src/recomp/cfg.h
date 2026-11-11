@@ -12,9 +12,16 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace personarm::recomp {
+
+/// Local diagnostic: the instructions leading up to an unresolved indirect transfer.
+struct SiteContext {
+    uint32_t site = 0;                      // address of the unresolved jr/jalr
+    std::vector<std::string> window;        // the preceding words, then the site, as text
+};
 
 struct CfgReport {
     uint32_t text_words = 0;
@@ -30,10 +37,11 @@ struct CfgReport {
     uint32_t syscalls = 0;
     uint32_t invalid_reached = 0;       // reserved encodings reached as code
     uint32_t out_of_range_targets = 0;  // branch/call/fall-through targets outside the image
-    uint32_t resolved_jump_tables = 0;  // indirect jumps whose switch table was decoded
+    uint32_t resolved_jump_tables = 0;  // indirect jumps whose switch table yielded at least one entry
     uint32_t resolved_table_entries = 0; // in-image entries read from those tables
     std::vector<uint32_t> function_entries;     // sorted, in-image
     std::vector<uint32_t> indirect_sites;       // addresses of unresolved indirect jumps/calls
+    std::vector<SiteContext> unresolved_contexts; // first few unresolved sites, for local inspection
     std::vector<uint32_t> invalid_sites;        // addresses of reserved words reached
     std::vector<uint32_t> out_of_range_sites;   // addresses of the instructions that point outside
 };

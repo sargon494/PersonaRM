@@ -193,11 +193,34 @@ static void TestCfgJumpTableOutOfRange() {
         kJrRa, kNop, kNop, kNop, kJrRa, kNop, kNop, kNop, kJrRa, kNop, kNop, kNop, kJrRa, kNop, kNop, kNop,
     });
     CfgReport r = AnalyzeControlFlow(code.data(), code.size(), kBase, kBase);
-    CHECK(r.resolved_jump_tables == 1);
+    CHECK(r.resolved_jump_tables == 0);               // no entry was read, so the table is not resolved
     CHECK(r.resolved_table_entries == 0);             // the first entry stops the table walk
     CHECK(r.out_of_range_targets == 1);
     CHECK(r.out_of_range_sites.size() == 1 && r.out_of_range_sites[0] == kBase + 9 * 4);
-    CHECK(r.indirect_sites.empty());
+    CHECK(r.indirect_sites.size() == 1 && r.indirect_sites[0] == kBase + 9 * 4);  // stays unresolved
+    CHECK(r.unresolved_contexts.size() == 1 && r.unresolved_contexts[0].site == kBase + 9 * 4);
+    bool marked = false;
+    for (const auto& line : r.unresolved_contexts[0].window) marked |= line.find("sin resolver") != std::string::npos;
+    CHECK(marked);
+}
+
+static void TestDescribeInsn() {
+    CHECK(DescribeInsn(0x8D2A0000u) == "lw $10,0($9)");
+    CHECK(DescribeInsn(0x00294821u) == "addu $9,$1,$9");
+    CHECK(DescribeInsn(0x2C880004u) == "sltiu $8,$4,4");
+    CHECK(DescribeInsn(0x01400008u) == "jr $10");
+    CHECK(DescribeInsn(0x3C018001u) == "lui $1,0x8001");
+    CHECK(DescribeInsn(0xFC000000u) == ".word 0xFC000000");
+    CHECK(DescribeInsn(0x03E00008u) == "jr $31");
+}
+
+static void TestCfgUnresolvedContextLimit() {
+    // Five jalr t0 sites in a row, each with a nop delay slot, then jr ra: only four get a context window.
+    constexpr uint32_t kJalrT0 = 0x0100F809u;
+    auto code = Bytes({kJalrT0, kNop, kJalrT0, kNop, kJalrT0, kNop, kJalrT0, kNop, kJalrT0, kNop, kJrRa, kNop});
+    CfgReport r = AnalyzeControlFlow(code.data(), code.size(), kBase, kBase);
+    CHECK(r.indirect_calls == 5 && r.indirect_sites.size() == 5);
+    CHECK(r.unresolved_contexts.size() == 4);
 }
 
 int main() {
@@ -208,6 +231,8 @@ int main() {
     TestCfgCoverage();
     TestCfgJumpTable();
     TestCfgJumpTableOutOfRange();
+    TestDescribeInsn();
+    TestCfgUnresolvedContextLimit();
     std::cout << "recomp tests passed (" << g_checks << " checks)\n";
     return 0;
 }

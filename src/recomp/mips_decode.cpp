@@ -1,5 +1,7 @@
 #include "mips_decode.h"
 
+#include <cstdio>
+
 namespace personarm::recomp {
 
 namespace {
@@ -74,6 +76,60 @@ Insn Decode(uint32_t w, uint32_t addr) {
             break;                                              // reserved opcode
     }
     return in;
+}
+
+
+std::string DescribeInsn(uint32_t w) {
+    static const char* const kSpecial[64] = {
+        "sll", nullptr, "srl", "sra", "sllv", nullptr, "srlv", "srav",
+        "jr", "jalr", nullptr, nullptr, "syscall", "break", nullptr, nullptr,
+        "mfhi", "mthi", "mflo", "mtlo", nullptr, nullptr, nullptr, nullptr,
+        "mult", "multu", "div", "divu", nullptr, nullptr, nullptr, nullptr,
+        "add", "addu", "sub", "subu", "and", "or", "xor", "nor",
+        nullptr, nullptr, "slt", "sltu", nullptr, nullptr, nullptr, nullptr,
+    };
+    static const char* const kImm[64] = {
+        nullptr, nullptr, "j", "jal", "beq", "bne", "blez", "bgtz",
+        "addi", "addiu", "slti", "sltiu", "andi", "ori", "xori", "lui",
+        "cop0", nullptr, "cop2", nullptr, nullptr, nullptr, nullptr, nullptr,
+        nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+        "lb", "lh", "lwl", "lw", "lbu", "lhu", "lwr", nullptr,
+        "sb", "sh", "swl", "sw", nullptr, nullptr, "swr", nullptr,
+        "lwc0", "lwc1", "lwc2", "lwc3", nullptr, nullptr, nullptr, nullptr,
+        "swc0", "swc1", "swc2", "swc3", nullptr, nullptr, nullptr, nullptr,
+    };
+    const uint32_t op = w >> 26;
+    const uint32_t rs = (w >> 21) & 31, rt = (w >> 16) & 31, rd = (w >> 11) & 31, sa = (w >> 6) & 31;
+    const int16_t imm = static_cast<int16_t>(w & 0xFFFF);
+    char buf[96];
+    if (op == 0) {
+        const char* name = kSpecial[w & 63];
+        if (!name) { std::snprintf(buf, sizeof buf, ".word 0x%08X", w); return buf; }
+        switch (w & 63) {
+            case 0x00: case 0x02: case 0x03:
+                std::snprintf(buf, sizeof buf, "%s $%u,$%u,%u", name, rd, rt, sa); break;
+            case 0x08: std::snprintf(buf, sizeof buf, "jr $%u", rs); break;
+            case 0x09: std::snprintf(buf, sizeof buf, "jalr $%u,$%u", rd, rs); break;
+            case 0x0C: case 0x0D: std::snprintf(buf, sizeof buf, "%s", name); break;
+            case 0x10: case 0x12: std::snprintf(buf, sizeof buf, "%s $%u", name, rd); break;
+            case 0x11: case 0x13: std::snprintf(buf, sizeof buf, "%s $%u", name, rs); break;
+            default: std::snprintf(buf, sizeof buf, "%s $%u,$%u,$%u", name, rd, rs, rt); break;
+        }
+        return buf;
+    }
+    if (op == 1) {
+        std::snprintf(buf, sizeof buf, "%s $%u,%d", rt == 0 ? "bltz" : rt == 1 ? "bgez" : rt == 16 ? "bltzal" : rt == 17 ? "bgezal" : "regimm", rs, imm);
+        return buf;
+    }
+    const char* name = kImm[op];
+    if (!name) { std::snprintf(buf, sizeof buf, ".word 0x%08X", w); return buf; }
+    if (op == 2 || op == 3) { std::snprintf(buf, sizeof buf, "%s 0x%07X", name, (w & 0x03FFFFFFu) << 2); return buf; }
+    if (op >= 4 && op <= 7) { std::snprintf(buf, sizeof buf, "%s $%u,$%u,%d", name, rs, rt, imm); return buf; }
+    if (op == 0x0F) { std::snprintf(buf, sizeof buf, "lui $%u,0x%04X", rt, w & 0xFFFF); return buf; }
+    if (op >= 0x20 && op <= 0x2E) { std::snprintf(buf, sizeof buf, "%s $%u,%d($%u)", name, rt, imm, rs); return buf; }
+    if (op >= 0x08 && op <= 0x0E) { std::snprintf(buf, sizeof buf, "%s $%u,$%u,%d", name, rt, rs, imm); return buf; }
+    std::snprintf(buf, sizeof buf, "%s $%u,%d($%u)", name, rt, imm, rs);
+    return buf;
 }
 
 } // namespace personarm::recomp

@@ -4,6 +4,7 @@
 // analysis (WP-14). It classifies one 32-bit word; it does not execute anything.
 
 #include <cstdint>
+#include <string>
 
 namespace personarm::recomp {
 
@@ -33,5 +34,9 @@ struct Insn {
 };
 
 Insn Decode(uint32_t word, uint32_t addr);
+
+/// Human-readable form of one word for local diagnostics, e.g. "lw $10,0($9)".
+/// Unknown encodings render as ".word 0x........".
+std::string DescribeInsn(uint32_t word);
 
 } // namespace personarm::recomp

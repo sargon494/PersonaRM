@@ -3,6 +3,7 @@
 #include "mips_decode.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
 #include <set>
 
@@ -21,6 +22,9 @@ uint32_t LoadU32(const uint8_t* p) {
 void Record(std::vector<uint32_t>& list, uint32_t addr) {
     if (list.size() < kMaxSites) list.push_back(addr);
 }
+
+constexpr size_t kContextSites = 4;
+constexpr uint32_t kContextBefore = 8;
 
 
 // Switch-table recovery for `jr rX` (WP-14, step 2). Works backwards inside the straight-line
@@ -114,6 +118,21 @@ bool FindJumpTable(const uint8_t* code, size_t size, uint32_t load, uint32_t jr_
     out.base = base_hi + base_lo;
     out.count = sltiu_bound;
     return true;
+}
+
+// Records the instructions before an unresolved site, as text, for local inspection.
+void CaptureContext(const uint8_t* code, size_t size, uint32_t load, uint32_t site, CfgReport& r) {
+    if (r.unresolved_contexts.size() >= kContextSites) return;
+    SiteContext ctx;
+    ctx.site = site;
+    const uint32_t first = site >= load + 4 * kContextBefore ? site - 4 * kContextBefore : load;
+    for (uint32_t a = first; a <= site + 4 && a + 4 <= load + size; a += 4) {
+        const uint32_t w = LoadU32(code + (a - load));
+        char line[160];
+        std::snprintf(line, sizeof line, "0x%08X  %s%s", a, DescribeInsn(w).c_str(), a == site ? "   <- sin resolver" : "");
+        ctx.window.emplace_back(line);
+    }
+    r.unresolved_contexts.push_back(std::move(ctx));
 }
 
 } // namespace
@@ -220,8 +239,9 @@ CfgReport AnalyzeControlFlow(const uint8_t* code, size_t size, uint32_t load, ui
                 case InsnKind::IndirectJump: {
                     ++r.indirect_jumps;
                     JumpTable jt;
-                    if (FindJumpTable(code, size, load, pc, jt)) {
-                        ++r.resolved_jump_tables;
+                    uint32_t read = 0;
+                    bool table_ok = FindJumpTable(code, size, load, pc, jt);
+                    if (table_ok) {
                         for (uint32_t i = 0; i < jt.count; ++i) {
                             const uint32_t entry_addr = jt.base + 4 * i;
                             if (!in_image(entry_addr)) break;
@@ -231,12 +251,17 @@ CfgReport AnalyzeControlFlow(const uint8_t* code, size_t size, uint32_t load, ui
                                 Record(r.out_of_range_sites, pc);
                                 break;
                             }
-                            ++r.resolved_table_entries;
+                            ++read;
                             functions.insert(target);  // table entries are case blocks in this image
                             work.push_back(target);
                         }
+                    }
+                    if (read > 0) {
+                        ++r.resolved_jump_tables;
+                        r.resolved_table_entries += read;
                     } else {
                         Record(r.indirect_sites, pc);
+                        CaptureContext(code, size, load, pc, r);
                     }
                     block_open = false;
                     break;
@@ -244,6 +269,7 @@ CfgReport AnalyzeControlFlow(const uint8_t* code, size_t size, uint32_t load, ui
                 case InsnKind::IndirectCall:
                     ++r.indirect_calls;
                     Record(r.indirect_sites, pc);
+                    CaptureContext(code, size, load, pc, r);
                     pc = after;
                     break;
                 case InsnKind::Return:
