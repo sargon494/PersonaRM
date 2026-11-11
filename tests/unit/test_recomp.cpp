@@ -272,6 +272,56 @@ static void TestCfgBiosCall() {
     CHECK(r.reachable_words == 5);
 }
 
+// `lui $2,0x8001 ; lw $2,0x100($2) ; jalr $2`: a global function pointer. The value at 0x80010100
+// is read from the image, so each status can be checked on its own.
+static std::vector<uint8_t> GlobalPointerImage(uint32_t value_at_slot, uint32_t hi, uint32_t off) {
+    std::vector<uint8_t> code(0x200, 0);
+    auto put = [&](uint32_t off_bytes, uint32_t w) { for (int b = 0; b < 4; ++b) code[off_bytes + b] = static_cast<uint8_t>(w >> (8 * b)); };
+    put(0x00, 0x3C020000u | hi);                    // lui $2,hi
+    put(0x04, 0x8C420000u | off);                   // lw $2,off($2)
+    put(0x08, 0x0040F809u);                         // jalr $31,$2
+    put(0x0C, kNop);
+    put(0x100, value_at_slot);                      // the slot the pointer is loaded from (image offset 0x100)
+    return code;
+}
+
+static void TestCfgGlobalPointers() {
+    {   // slot holds zero: assigned at run time
+        auto code = GlobalPointerImage(0, 0x8001, 0x100);
+        CfgReport r = AnalyzeControlFlow(code.data(), code.size(), kBase, kBase);
+        CHECK(r.indirect_calls == 1 && r.pointers.null_value == 1);
+        CHECK(r.pointer_samples.size() == 1 && r.pointer_samples[0].address == kBase + 0x100
+              && r.pointer_samples[0].status == PointerStatus::Null);
+    }
+    {   // slot points inside the image
+        auto code = GlobalPointerImage(kBase + 0x180, 0x8001, 0x100);
+        CfgReport r = AnalyzeControlFlow(code.data(), code.size(), kBase, kBase);
+        CHECK(r.pointers.in_image_value == 1 && r.pointer_samples[0].value == kBase + 0x180);
+    }
+    {   // slot points outside the image
+        auto code = GlobalPointerImage(0x80100000u, 0x8001, 0x100);
+        CfgReport r = AnalyzeControlFlow(code.data(), code.size(), kBase, kBase);
+        CHECK(r.pointers.value_outside == 1);
+    }
+    {   // the base address itself is outside the image
+        auto code = GlobalPointerImage(0, 0x8100, 0x100);
+        CfgReport r = AnalyzeControlFlow(code.data(), code.size(), kBase, kBase);
+        CHECK(r.pointers.address_outside == 1);
+    }
+    {   // the pointer comes from a value that is not a constant address
+        auto code = Bytes({0x8FA80000u, 0x0100F809u, kNop});   // lw $8,0($29) ; jalr $31,$8
+        CfgReport r = AnalyzeControlFlow(code.data(), code.size(), kBase, kBase);
+        CHECK(r.pointers.unrecognised == 1);
+    }
+}
+
+static void TestCfgUnresolvedJumpCounter() {
+    // jr to an unknown register, not a table and not a BIOS vector: counted as unresolved.
+    auto code = Bytes({0x01400008u, kNop});                 // jr $10 with $10 unknown
+    CfgReport r = AnalyzeControlFlow(code.data(), code.size(), kBase, kBase);
+    CHECK(r.indirect_jumps == 1 && r.unresolved_jumps == 1);
+}
+
 int main() {
     TestDecode();
     TestCfgCallsAndDelaySlots();
@@ -282,6 +332,8 @@ int main() {
     TestCfgJumpTableOutOfRange();
     TestCfgSwitchOffsetLoad();
     TestCfgBiosCall();
+    TestCfgGlobalPointers();
+    TestCfgUnresolvedJumpCounter();
     TestDescribeInsn();
     TestCfgUnresolvedContextLimit();
     std::cout << "recomp tests passed (" << g_checks << " checks)\n";
