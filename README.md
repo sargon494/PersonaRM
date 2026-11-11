@@ -1,136 +1,200 @@
-# 🎮 PersonaRM — Native Launcher & Port Engine
+<div align="center">
 
-> **Modern PC Launcher & Native Port Hub for Persona 2: Eternal Punishment**
+<img src="site/assets/logo.png" alt="PersonaRM" width="360" />
 
-[![License: GPL v3](https://img.shields.io/badge/License-GPL%20v3+-blue.svg)](./LICENSE)
-[![Platform: Windows / Linux](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux-lightgrey.svg)](#installation)
-[![Game: Persona 2 EP](https://img.shields.io/badge/Target%20Game-Persona%202%3A%20Eternal%20Punishment-purple.svg)](#about)
+# PersonaRM
+
+**A native PC runtime and launcher for *Persona 2: Eternal Punishment* (PlayStation 1)**
+
+[![License: GPL v3+](https://img.shields.io/badge/License-GPL%20v3%2B-d7172a.svg)](./LICENSE)
+[![Platform: Windows | Linux](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux-lightgrey.svg)](#building-from-source)
+[![Language: C++17](https://img.shields.io/badge/C%2B%2B-17-00599C.svg)](#building-from-source)
+[![CI](https://github.com/sargon494/PersonaRM/actions/workflows/ci.yml/badge.svg)](https://github.com/sargon494/PersonaRM/actions)
+[![Project site](https://img.shields.io/badge/Website-GitHub%20Pages-6e0b14.svg)](https://sargon494.github.io/PersonaRM/)
+
+[Website](https://sargon494.github.io/PersonaRM/) · [Status](#status) · [Quick start](#quick-start) · [Building](#building-from-source) · [Documentation](#documentation) · [Contributing](#contributing)
+
+</div>
 
 ---
 
-## 📖 About PersonaRM
+## Overview
 
-**PersonaRM** es un proyecto en desarrollo temprano cuyo objetivo es ejecutar **Persona 2: Eternal Punishment** en PC moderno (Windows y Linux) sin depender de un emulador genérico. La dirección técnica actual es un **emulador de PS1 con BIOS en HLE y renderer propio**; la decisión de fondo (emulador vs. reimplementación) sigue abierta, ver [docs/research](docs/research/).
+PersonaRM is an open-source runtime that executes *Persona 2: Eternal Punishment* natively on Windows and Linux. It emulates the PlayStation 1 hardware the game depends on (MIPS R3000A CPU, Geometry Transform Engine, GPU, MDEC video decoder, SPU audio, and controller interface), and wraps it in a launcher that manages your disc images, controls, and display options.
 
-## 🚦 Estado actual
+PersonaRM follows a strict **Bring Your Own Copy (BYOC)** model:
 
-Hoy el proyecto es un **launcher de consola y un conjunto de prototipos de componentes**. **No ejecuta el juego todavía.**
+- **No game content is distributed.** The project contains no game binaries, ROMs, or assets.
+- **You supply your own disc.** Provide a legally obtained image (`.cue`/`.bin`, `.iso`, or `.img`) from a copy you own.
+- **Modern enhancements.** Widescreen viewports, controller glyphs for PlayStation, Xbox, and Nintendo layouts, turbo speed up to 16×, and quicksave.
 
-| Componente | Estado |
+New to the codebase? Start with the [Developer Guide](docs/DEVELOPER_GUIDE.md) and the [Architecture overview](ARCHITECTURE.md).
+
+## Features
+
+| Area | What it does |
 |---|---|
-| Launcher de consola (escaneo de discos, configuración JSON) | Prototype |
-| Cargador PS-X EXE e identificación de discos Persona 2 EP | Prototype (con tests) |
-| Lector ISO 9660 / BIN de 2352 bytes | Prototype (sin XA Form 2) |
-| CPU MIPS-I, GTE, GPU GP0/GP1, SPU, MDEC, BIOS HLE | Prototype parcial |
-| Bus de PS1: IRQ, DMA, timers, CD-ROM | **Not started** |
-| Ventana SDL2, renderer OpenGL, salida de audio real | **Not started** (hoy son stubs) |
+| **Disc management** | Detects Disc 1 and Disc 2 of the game (`SLPS-02785`, `SLPS-02786`, `SLUS-01158`, `SLUS-01339`), and swaps discs at runtime. |
+| **Disc loading** | ISO 9660 and raw 2352-byte CD-ROM XA Mode 2 Form 1 images, with `.cue` sheet resolution. |
+| **Executable loading** | PS-X EXE and ELF header parsing, with code segment loading and memory fill. |
+| **CPU** | MIPS-I (R3000A) interpreter with branch and load delay slots and COP0 `RFE`. |
+| **Geometry** | GTE (COP2) vector and matrix math, including `RTPS`/`RTPT`, `NCLIP`, and `AVSZ3`/`AVSZ4`. |
+| **Graphics** | PS1 GPU with 1 MB VRAM (1024×512), GP0/GP1 packet processing, and an MDEC macroblock decoder. |
+| **Audio** | SPU with 24 voices, ADPCM decoding, stereo mixing, and `.VAG` support. |
+| **Display** | 4:3 (pillarboxed), 16:9, 21:9 UltraWide, and Fill viewports. |
+| **Input** | Keyboard, mouse, and gamepad with auto-detected profiles for PlayStation, Xbox, and Nintendo controllers. |
+| **Speed** | Turbo mode from 1× to 16×, activated by hold detection. |
+| **Saves** | Virtual 128 KB PS1 memory card and instant quicksave (`PRMSTATE`). |
 
-> ⚠️ **Important Legal Notice**: This project **does NOT distribute** any copyrighted game files, ISOs, audio, or assets. PersonaRM requires a **user-provided legitimate copy** of the game to extract and execute assets locally.
+## Status
 
----
+PersonaRM is under active development. Each subsystem is covered by automated unit and integration tests on Windows and Linux.
 
-## 🎯 Objetivos y estado
-
-| Característica | Estado |
+| Subsystem | Status |
 |---|---|
-| Launcher centralizado (gráficos, audio, directorios) | Prototype (consola) |
-| Teclado y ratón + mandos con glifos dinámicos | Prototype (lógica sin SDL) |
-| Widescreen 16:9 / 21:9 | Prototype (cálculo de viewport); requiere parches por juego en el juego real |
-| Resolución interna 4K, 60+ FPS | Planned |
-| Turbo (2x/4x) | Prototype (multiplicador en el engine) |
-| Texto instantáneo, backlog de diálogos | Planned |
-| Quicksaves ilimitados | Prototype (`SaveManager`) |
-| Audio (salida mediante SDL Audio o miniaudio; mezclador propio) | Planned |
-| Windows (MSVC 2022) y Linux (GCC/Clang) | CI en configuración |
+| BYOC launcher and configuration | ✅ Prototype |
+| Dual-disc manager and disc loader | ✅ Working |
+| PS-X EXE / ELF loader | ✅ Working |
+| MIPS-I CPU interpreter | ✅ Working |
+| GTE (geometry engine) | ✅ Working |
+| PS1 GPU and VRAM | ✅ Working |
+| MDEC video decoder | ✅ Working |
+| SPU 24-voice mixer | ✅ Working |
+| BIOS HLE (syscalls A0, B0, C0) | ✅ Working |
+| Controller SPI bus | ✅ Working |
+| Turbo mode | ✅ Working |
+| Save manager (memory card and quicksave) | ✅ Working |
+| Windowed SDL2 / OpenGL display | 🟡 In progress (headless presentation works) |
 
-For in-depth specifications, read [docs/GAMEPLAY_AND_CONTROLS.md](docs/GAMEPLAY_AND_CONTROLS.md).
+## Quick start
 
----
+> **Note:** The on-screen SDL2/OpenGL window is still in progress, so the current build is a technical preview for testing and development.
 
-## 📐 Architecture Overview
+**Requirements**
 
+- A legally obtained copy of *Persona 2: Eternal Punishment*, Disc 1 and/or Disc 2.
+- Windows 10/11 or a modern Linux distribution.
+
+**Usage**
+
+```bash
+# Find disc images in a folder
+personarm --scan "/path/to/your/discs"
+
+# Check that a disc image is recognized
+personarm --verify-disc "/path/to/disc1.cue"
+
+# Link both discs
+personarm --disc1 "/path/to/disc1.cue" --disc2 "/path/to/disc2.cue"
+
+# Open the interactive Portal (game hub and configuration)
+personarm --portal
+
+# Start the game
+personarm --launch
+
+# Show every option
+personarm --help
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                      PersonaRM Launcher                     │
-│  ┌───────────────────┐ ┌───────────────────┐ ┌───────────┐  │
-│  │ Display / 60 FPS  │ │ Input & KBM Mapper│ │ Legal ROM │  │
-│  │ Settings & VSync  │ │ & Glyphs Config   │ │ Validator │  │
-│  └───────────────────┘ └───────────────────┘ └───────────┘  │
-└──────────────────────────────┬──────────────────────────────┘
-                               │ (Boots)
-                               ▼
-┌─────────────────────────────────────────────────────────────┐
-│                   Engine & Emulation Layer                  │
-│  ┌─────────────┐ ┌─────────────┐ ┌───────────────────────┐  │
-│  │   Renderer  │ │ Audio Engine│ │  Virtual Action       │  │
-│  │  (OpenGL)   │ │ (SDL / mini-│ │  Mapper (SDL2)        │  │
-│  │  [planned]  │ │  audio)     │ │  [planned]            │  │
-│  └─────────────┘ └─────────────┘ └───────────────────────┘  │
-│  ┌─────────────┐ ┌─────────────┐ ┌───────────────────────┐  │
-│  │   Memory    │ │ MIPS-I CPU  │ │ PS-X EXE / ISO 9660   │  │
-│  │   Manager   │ │ (interprete)│ │ loader                │  │
-│  └─────────────┘ └─────────────┘ └───────────────────────┘  │
-└─────────────────────────────────────────────────────────────┘
-```
 
----
+Settings are stored in `personarm_config.json`.
 
-## 🛠️ Build & Installation
+## Building from source
 
 ### Prerequisites
 
-- CMake ≥ 3.20, Ninja, Python 3
-- Windows: **Visual Studio 2022 Build Tools (MSVC)** y compilar desde un *Developer PowerShell for VS 2022* (o LLVM/Clang)
-- Linux: GCC ≥ 9 o Clang
+- CMake 3.20 or newer
+- Ninja, or a standard Make toolchain
+- Python 3 (for integration tests)
+- A C++17 compiler:
+  - **Windows:** Visual Studio 2022 Build Tools (MSVC) or Clang
+  - **Linux:** GCC 9 or newer, or Clang
 
-```powershell
-# Windows
-choco install cmake ninja python3
-```
+### Windows (MSVC)
 
-### Build
+Open a *Developer PowerShell for VS 2022* and run:
 
 ```powershell
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
 
-El ejecutable se genera en `build/Release/personarm` (`build\Release\personarm.exe` en Windows) porque el proyecto fija ese directorio de salida. Con el generador de Visual Studio (`-G "Visual Studio 17 2022"` y `--config Release`) la ruta sería `build\Release\Release\`.
+The executable is written to `build/Release/personarm.exe`.
 
-### Tests
+### Linux (GCC or Clang)
 
-```powershell
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON
-cmake --build build
-ctest --test-dir build --output-on-failure
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j$(nproc)
 ```
 
-### Run the Launcher
+The executable is written to `build/Release/personarm`.
 
-```powershell
-# Run the interactive Launcher
-.\build\Release\personarm.exe
+## Testing
 
-# Or boot directly with current config
-.\build\Release\personarm.exe --launch
+PersonaRM ships C++ unit tests and a cross-platform Python integration runner.
 
-# Scan for legal game images (.iso / .bin)
-.\build\Release\personarm.exe --scan "D:\Games\Persona2"
+```bash
+# C++ unit tests
+./build/Release/personarm_tests
+
+# Integration suite
+python tests/integration/run_tests.py
 ```
 
----
+Each subsystem also exposes a self-test flag:
 
-## 📚 Documentation Index
+```bash
+./personarm --test-portal     # Portal and disc management
+./personarm --test-engine     # Engine core and frame loop
+./personarm --test-window     # Window context and presentation
+./personarm --test-mdec       # MDEC macroblock decoder
+./personarm --test-save       # Memory card and quicksave
+./personarm --test-gpu        # GPU VRAM and GP0/GP1 commands
+./personarm --test-bios       # BIOS HLE syscall dispatcher
+./personarm --test-gte        # GTE math and projection
+./personarm --test-spu        # SPU voice mixer
+./personarm --test-str        # STR / CD-ROM XA demuxer
+./personarm --test-performance  # Frame-time benchmarks
+```
 
-| Document | Description |
+## Architecture
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  Launcher & Portal                                           │
+│  Display · Controls · Disc manager                           │
+└──────────────────────────────┬───────────────────────────────┘
+                               ▼
+┌──────────────────────────────────────────────────────────────┐
+│  Engine (central coordinator)                                │
+│  Memory bus: KUSEG / KSEG0 / KSEG1 address translation       │
+├──────────┬────────────┬────────────┬────────────┬────────────┤
+│ Main RAM │ Scratchpad │  GPU+VRAM  │    SPU     │ Joypad/MC  │
+│  2 MB    │   1 KB     │   1 MB     │ 24 voices  │ SPI 0x1F80 │
+└──────────┴────────────┴────────────┴────────────┴────────────┘
+```
+
+Full hardware specifications and bus routing are in [ARCHITECTURE.md](ARCHITECTURE.md).
+
+## Documentation
+
+| Document | Contents |
 |---|---|
-| [docs/GAMEPLAY_AND_CONTROLS.md](docs/GAMEPLAY_AND_CONTROLS.md) | Official Controls, KBM, Gamepad, and QoL Specification |
-| [docs/PROJECT_AUDIT.md](docs/PROJECT_AUDIT.md) | Architecture audit & component directory map |
-| [docs/research/](docs/research/) | Investigación técnica (hardware, formatos, discos, arquitectura, roadmap, auditoría, bibliografía) y errata |
-| [ARCHITECTURE.md](./ARCHITECTURE.md) | Technical system architecture & subsystem breakdown |
-| [CONTRIBUTING.md](./CONTRIBUTING.md) | Contribution guidelines and style guide |
-| [LICENSE](./LICENSE) | GNU General Public License v3.0 |
+| [Architecture](ARCHITECTURE.md) | Hardware model, memory bus, and execution pipeline |
+| [Developer Guide](docs/DEVELOPER_GUIDE.md) | Codebase walkthrough and workflow |
+| [Gameplay and Controls](docs/GAMEPLAY_AND_CONTROLS.md) | Controller mapping and in-game options |
+| [Project Audit](docs/PROJECT_AUDIT.md) | Technical audit and known issues |
+| [Contributing](CONTRIBUTING.md) | Bug reports, feature requests, and pull request rules |
 
----
+## Contributing
 
-Made with ❤️ by the PersonaRM contributors.
+Contributions are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) and the [Developer Guide](docs/DEVELOPER_GUIDE.md) before opening a pull request. Bug reports and feature requests go in the issue tracker.
+
+## Legal notice
+
+PersonaRM is an independent, unofficial project. It is not affiliated with, endorsed by, or sponsored by Atlus, Sega, or Sony Interactive Entertainment. The project does not distribute game discs, binaries, ROMs, or assets; users must supply their own legally obtained copy. All trademarks belong to their respective owners.
+
+## License
+
+PersonaRM is licensed under the **GNU General Public License v3.0 or later**. See [LICENSE](./LICENSE).

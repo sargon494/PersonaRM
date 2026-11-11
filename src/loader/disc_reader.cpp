@@ -4,8 +4,11 @@
 #include <cstring>
 #include <algorithm>
 #include <sstream>
+#include <filesystem>
 
 namespace personarm {
+
+namespace fs = std::filesystem;
 
 static constexpr uint32_t ISO_SECTOR_SIZE = 2048;
 static constexpr uint32_t CD_RAW_SECTOR_SIZE = 2352;
@@ -23,21 +26,75 @@ void DiscReader::Close() {
     }
     m_is_open = false;
     m_format = DiscFormat::Unknown;
+    m_sector_size = 2048;
+    m_sector_header_offset = 0;
+    m_sector_data_size = 2048;
+    m_volume_label.clear();
     m_file_table.clear();
+}
+
+std::string DiscReader::ResolveCueBinary(const std::string& cue_path) {
+    if (!fs::exists(cue_path)) {
+        return "";
+    }
+
+    std::ifstream file(cue_path);
+    if (!file.is_open()) {
+        return "";
+    }
+
+    std::string line;
+    while (std::getline(file, line)) {
+        // Looking for lines like: FILE "image.bin" BINARY or FILE image.bin BINARY
+        size_t file_pos = line.find("FILE");
+        if (file_pos != std::string::npos) {
+            size_t start = line.find('"', file_pos);
+            std::string bin_name;
+            if (start != std::string::npos) {
+                size_t end = line.find('"', start + 1);
+                if (end != std::string::npos) {
+                    bin_name = line.substr(start + 1, end - start - 1);
+                }
+            } else {
+                // Unquoted format
+                std::istringstream iss(line.substr(file_pos + 4));
+                iss >> bin_name;
+            }
+
+            if (!bin_name.empty()) {
+                fs::path cue_dir = fs::path(cue_path).parent_path();
+                fs::path target = cue_dir.empty() ? fs::path(bin_name) : (cue_dir / bin_name);
+
+                if (fs::exists(target)) {
+                    return target.string();
+                }
+
+                // Try case-insensitive matching if exact name doesn't exist
+                if (!cue_dir.empty() && fs::exists(cue_dir)) {
+                    std::string lower_bin = bin_name;
+                    for (auto& c : lower_bin) c = static_cast<char>(std::tolower(c));
+                    for (const auto& entry : fs::directory_iterator(cue_dir)) {
+                        std::string entry_lower = entry.path().filename().string();
+                        for (auto& c : entry_lower) c = static_cast<char>(std::tolower(c));
+                        if (entry_lower == lower_bin) {
+                            return entry.path().string();
+                        }
+                    }
+                }
+                return target.string();
+            }
+        }
+    }
+
+    return "";
 }
 
 bool DiscReader::Open(const std::string& file_path) {
     Close();
 
-    m_stream.open(file_path, std::ios::binary);
-    if (!m_stream.is_open()) {
-        return false;
-    }
+    std::string target_path = file_path;
 
-    m_file_path = file_path;
-    m_is_open = true;
-
-    // Detect format
+    // Detect format from extension
     std::string ext = file_path;
     size_t dot_pos = ext.find_last_of('.');
     if (dot_pos != std::string::npos) {
@@ -45,20 +102,50 @@ bool DiscReader::Open(const std::string& file_path) {
         for (auto& c : ext) c = static_cast<char>(std::tolower(c));
     }
 
+    // Handle .cue sheet automatically
+    if (ext == ".cue") {
+        std::string resolved_bin = ResolveCueBinary(file_path);
+        if (!resolved_bin.empty()) {
+            target_path = resolved_bin;
+        }
+    }
+
+    m_stream.open(target_path, std::ios::binary);
+    if (!m_stream.is_open()) {
+        return false;
+    }
+
+    m_file_path = target_path;
+    m_is_open = true;
+
     if (ext == ".elf") {
         m_format = DiscFormat::RawExecutable;
         return true;
     }
 
-    // Try 2048-byte sector ISO 9660 first
+    // 1. Try standard 2048-byte sector ISO 9660 first
     m_sector_size = ISO_SECTOR_SIZE;
+    m_sector_header_offset = 0;
+    m_sector_data_size = ISO_SECTOR_SIZE;
     if (ParseIso9660Volume()) {
         m_format = DiscFormat::Iso9660;
         return true;
     }
 
-    // Try 2352-byte sector BIN/RAW CD image
+    // 2. Try 2352-byte sector Mode 2 Form 1 (CD-ROM XA Form 1 - standard PS1 disc)
+    // 16 bytes sync/header + 8 bytes subheader = 24 bytes header offset
     m_sector_size = CD_RAW_SECTOR_SIZE;
+    m_sector_header_offset = 24;
+    m_sector_data_size = ISO_SECTOR_SIZE;
+    if (ParseIso9660Volume()) {
+        m_format = DiscFormat::BinCue;
+        return true;
+    }
+
+    // 3. Try 2352-byte sector Mode 1 (16 bytes header offset)
+    m_sector_size = CD_RAW_SECTOR_SIZE;
+    m_sector_header_offset = 16;
+    m_sector_data_size = ISO_SECTOR_SIZE;
     if (ParseIso9660Volume()) {
         m_format = DiscFormat::BinCue;
         return true;
@@ -79,14 +166,15 @@ bool DiscReader::Open(const std::string& file_path) {
 
 bool DiscReader::ParseIso9660Volume() {
     m_file_table.clear();
+    m_volume_label.clear();
 
     // Read Primary Volume Descriptor at LBA 16
-    uint64_t offset = static_cast<uint64_t>(ISO_PVD_LBA) * m_sector_size;
+    uint64_t offset = static_cast<uint64_t>(ISO_PVD_LBA) * m_sector_size + m_sector_header_offset;
     m_stream.seekg(offset, std::ios::beg);
 
-    std::vector<uint8_t> sector(m_sector_size);
-    m_stream.read(reinterpret_cast<char*>(sector.data()), m_sector_size);
-    if (m_stream.gcount() < static_cast<std::streamsize>(m_sector_size)) {
+    std::vector<uint8_t> sector(m_sector_data_size);
+    m_stream.read(reinterpret_cast<char*>(sector.data()), m_sector_data_size);
+    if (m_stream.gcount() < static_cast<std::streamsize>(m_sector_data_size)) {
         return false;
     }
 
@@ -94,6 +182,13 @@ bool DiscReader::ParseIso9660Volume() {
     if (sector[1] != 'C' || sector[2] != 'D' || sector[3] != '0' || sector[4] != '0' || sector[5] != '1') {
         return false;
     }
+
+    // Volume identifier starts at offset 40 (32 bytes)
+    std::string vol_id(reinterpret_cast<const char*>(sector.data() + 40), 32);
+    while (!vol_id.empty() && (vol_id.back() == ' ' || vol_id.back() == '\0' || vol_id.back() == '\r')) {
+        vol_id.pop_back();
+    }
+    m_volume_label = vol_id;
 
     // Root directory record starts at offset 156 of the PVD
     // Offset 156 + 2: Location of extent (LBA) in Little-Endian (4 bytes)
@@ -107,21 +202,21 @@ bool DiscReader::ParseIso9660Volume() {
 }
 
 void DiscReader::ReadDirectorySectors(uint32_t lba, uint32_t length_bytes, const std::string& prefix) {
-    uint32_t sectors_to_read = (length_bytes + m_sector_size - 1) / m_sector_size;
-    std::vector<uint8_t> buffer(m_sector_size);
+    uint32_t sectors_to_read = (length_bytes + m_sector_data_size - 1) / m_sector_data_size;
+    std::vector<uint8_t> buffer(m_sector_data_size);
 
     for (uint32_t s = 0; s < sectors_to_read; ++s) {
-        uint64_t offset = static_cast<uint64_t>(lba + s) * m_sector_size;
+        uint64_t offset = static_cast<uint64_t>(lba + s) * m_sector_size + m_sector_header_offset;
         m_stream.seekg(offset, std::ios::beg);
-        m_stream.read(reinterpret_cast<char*>(buffer.data()), m_sector_size);
+        m_stream.read(reinterpret_cast<char*>(buffer.data()), m_sector_data_size);
 
         size_t pos = 0;
-        while (pos < m_sector_size) {
+        while (pos < m_sector_data_size) {
             uint8_t record_len = buffer[pos];
             if (record_len == 0) {
                 break; // Padding to end of sector
             }
-            if (pos + record_len > m_sector_size) {
+            if (pos + record_len > m_sector_data_size) {
                 break;
             }
 
@@ -192,11 +287,36 @@ bool DiscReader::ReadFile(const std::string& file_name, std::vector<uint8_t>& ou
     const DiscFileEntry& entry = it->second;
     out_data.resize(entry.size_bytes);
 
-    uint64_t offset = static_cast<uint64_t>(entry.sector_lba) * m_sector_size;
-    m_stream.seekg(offset, std::ios::beg);
-    m_stream.read(reinterpret_cast<char*>(out_data.data()), entry.size_bytes);
+    if (entry.size_bytes == 0) {
+        return true;
+    }
 
-    return m_stream.gcount() == static_cast<std::streamsize>(entry.size_bytes);
+    // Direct contiguous read for standard 2048-byte ISOs
+    if (m_sector_header_offset == 0 && m_sector_size == m_sector_data_size) {
+        uint64_t offset = static_cast<uint64_t>(entry.sector_lba) * m_sector_size;
+        m_stream.seekg(offset, std::ios::beg);
+        m_stream.read(reinterpret_cast<char*>(out_data.data()), entry.size_bytes);
+        return m_stream.gcount() == static_cast<std::streamsize>(entry.size_bytes);
+    }
+
+    // Sector-by-sector extraction for raw 2352-byte CD images (Mode 1 & Mode 2 Form 1)
+    // Skips sector header and ECC/EDC on each sector
+    uint32_t num_sectors = (entry.size_bytes + m_sector_data_size - 1) / m_sector_data_size;
+    size_t bytes_read = 0;
+
+    for (uint32_t s = 0; s < num_sectors && bytes_read < entry.size_bytes; ++s) {
+        uint64_t offset = static_cast<uint64_t>(entry.sector_lba + s) * m_sector_size + m_sector_header_offset;
+        m_stream.seekg(offset, std::ios::beg);
+
+        size_t chunk = std::min(static_cast<size_t>(m_sector_data_size), entry.size_bytes - bytes_read);
+        m_stream.read(reinterpret_cast<char*>(out_data.data() + bytes_read), chunk);
+        if (m_stream.gcount() < static_cast<std::streamsize>(chunk)) {
+            return false;
+        }
+        bytes_read += chunk;
+    }
+
+    return bytes_read == entry.size_bytes;
 }
 
 std::string DiscReader::DetectBootExecutable() {

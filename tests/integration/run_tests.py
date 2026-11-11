@@ -91,6 +91,7 @@ class IntegrationTestSuite:
             self.test_game_loading,
             self.test_save_system,
             self.test_performance,
+            self.test_portal,
         ]
 
         for test_func in tests:
@@ -195,6 +196,10 @@ class IntegrationTestSuite:
     def test_performance(self) -> TestResult:
         print("\n[INFO] Testing performance benchmarks...")
         return self._run_subcommand("performance", "--test-performance")
+
+    def test_portal(self) -> TestResult:
+        print("\n[INFO] Testing PersonaRM Portal & BYOC Dual-Disc Manager...")
+        return self._run_subcommand("portal", "--test-portal")
 
 # ───────────────────────────────────────────────────────────────────────
 # Main Entry Point

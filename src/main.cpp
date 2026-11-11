@@ -16,6 +16,7 @@
 
 // Project headers
 #include "launcher/launcher.h"
+#include "launcher/portal.h"
 #include "core/memory_manager.h"
 #include "core/save_manager.h"
 #include "input/input_manager.h"
@@ -50,13 +51,19 @@ static void PrintVersion() {
 static void PrintUsage(const char* prog) {
     std::cout << "Usage: " << prog << " [options]\n\n"
               << "Launcher Options:\n"
+              << "  --portal           Launch interactive PersonaRM Portal & Game Hub\n"
               << "  --launch           Directly boot the game using current configuration\n"
+              << "  --disc1 <path>     Link Disc 1 image (Main Game)\n"
+              << "  --disc2 <path>     Link Disc 2 image (Special Preview / Swap Disc)\n"
+              << "  --swap-disc <1|2>  Switch active disc target\n"
+              << "  --verify-disc <f>  Inspect and display technical details of any disc image\n"
               << "  --config           Open interactive settings menu\n"
               << "  --scan [dir]       Scan directory for legal game disc images (.iso/.bin/.cue)\n"
               << "  --diagnostics      Run full diagnostic suite\n"
               << "  --version          Show launcher version\n"
               << "  --help             Show this help information\n\n"
               << "Component Self-Tests:\n"
+              << "  --test-portal      Verify PersonaRM Portal & BYOC disc management\n"
               << "  --test-memory      Verify memory manager allocations and policies\n"
               << "  --test-input       Verify controller & KBM action bindings (SDL2 not integrated)\n"
               << "  --test-renderer    Verify renderer viewport logic (no GL context yet)\n"
@@ -714,6 +721,52 @@ static int RunPerformanceSelfTest() {
     }
 }
 
+static int RunPortalSelfTest() {
+    std::cout << "[TEST] PersonaRM Portal & BYOC Launcher self-test...\n";
+    try {
+        personarm::Portal portal;
+        if (!portal.Initialize()) {
+            std::cerr << "[FAIL] Portal failed to initialize.\n";
+            return 1;
+        }
+
+        // Verify default active disc slot
+        if (portal.GetActiveDiscNumber() != 1 && portal.GetActiveDiscNumber() != 2) {
+            std::cerr << "[FAIL] Invalid default active disc number.\n";
+            return 1;
+        }
+
+        portal.SetActiveDiscNumber(2);
+        if (portal.GetActiveDiscNumber() != 2) {
+            std::cerr << "[FAIL] Failed to switch active disc to 2.\n";
+            return 1;
+        }
+
+        portal.SetActiveDiscNumber(1);
+        if (portal.GetActiveDiscNumber() != 1) {
+            std::cerr << "[FAIL] Failed to switch active disc back to 1.\n";
+            return 1;
+        }
+
+        // Verify synthetic disc inspection
+        auto slot = personarm::Portal::InspectDisc("nonexistent.cue");
+        if (slot.verified) {
+            std::cerr << "[FAIL] Nonexistent disc reported as verified.\n";
+            return 1;
+        }
+
+        // Verify auto-scan runs cleanly without exceptions
+        auto scanned = portal.AutoScanDiscs({ "." });
+        (void)scanned;
+
+        std::cout << "[PASS] PersonaRM Portal self-test passed.\n";
+        return 0;
+    } catch (const std::exception& e) {
+        std::cerr << "[FAIL] Exception during Portal test: " << e.what() << "\n";
+        return 1;
+    }
+}
+
 int main(int argc, char* argv[]) {
     personarm::Launcher launcher;
     if (!launcher.Initialize()) {
@@ -799,6 +852,61 @@ int main(int argc, char* argv[]) {
             }
             if (std::strcmp(argv[i], "--test-save") == 0) {
                 return RunSaveSelfTest();
+            }
+            if (std::strcmp(argv[i], "--portal") == 0) {
+                personarm::Portal portal;
+                portal.Initialize();
+                portal.RunInteractiveMenu();
+                return EXIT_SUCCESS;
+            }
+            if (std::strcmp(argv[i], "--disc1") == 0) {
+                if (i + 1 < argc && argv[i + 1][0] != '-') {
+                    personarm::Portal portal;
+                    portal.Initialize();
+                    portal.LoadDisc(1, argv[++i]);
+                    std::cout << "[Portal] Linked Disc 1: " << argv[i] << "\n";
+                    return EXIT_SUCCESS;
+                }
+            }
+            if (std::strcmp(argv[i], "--disc2") == 0) {
+                if (i + 1 < argc && argv[i + 1][0] != '-') {
+                    personarm::Portal portal;
+                    portal.Initialize();
+                    portal.LoadDisc(2, argv[++i]);
+                    std::cout << "[Portal] Linked Disc 2: " << argv[i] << "\n";
+                    return EXIT_SUCCESS;
+                }
+            }
+            if (std::strcmp(argv[i], "--swap-disc") == 0) {
+                if (i + 1 < argc && argv[i + 1][0] != '-') {
+                    int disc_num = std::atoi(argv[++i]);
+                    personarm::Portal portal;
+                    portal.Initialize();
+                    portal.SetActiveDiscNumber(disc_num);
+                    std::cout << "[Portal] Set active disc to: Disc " << disc_num << "\n";
+                    return EXIT_SUCCESS;
+                }
+            }
+            if (std::strcmp(argv[i], "--verify-disc") == 0) {
+                if (i + 1 < argc && argv[i + 1][0] != '-') {
+                    std::string path = argv[++i];
+                    auto slot = personarm::Portal::InspectDisc(path);
+                    std::cout << "Disc Inspection: " << path << "\n";
+                    std::cout << "  - Verified: " << (slot.verified ? "YES" : "NO") << "\n";
+                    std::cout << "  - Boot Executable: " << (slot.boot_exe.empty() ? "N/A" : slot.boot_exe) << "\n";
+                    std::cout << "  - Volume Label: " << (slot.volume_label.empty() ? "N/A" : slot.volume_label) << "\n";
+                    std::cout << "  - Files Count: " << slot.file_count << "\n";
+                    if (slot.info.recognized) {
+                        std::cout << "  - Product ID: " << slot.info.product_id << "\n";
+                        std::cout << "  - Region: " << slot.info.region << "\n";
+                        std::cout << "  - Edition: " << slot.info.edition << "\n";
+                        std::cout << "  - Disc Number: " << slot.info.disc_number << " of " << slot.info.disc_count << "\n";
+                    }
+                    return slot.verified ? EXIT_SUCCESS : EXIT_FAILURE;
+                }
+            }
+            if (std::strcmp(argv[i], "--test-portal") == 0) {
+                return RunPortalSelfTest();
             }
             if (std::strcmp(argv[i], "--test-performance") == 0) {
                 return RunPerformanceSelfTest();

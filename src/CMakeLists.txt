@@ -9,6 +9,8 @@ set(LAUNCHER_SOURCES
     launcher/launcher.h
     launcher/config_io.cpp
     launcher/config_io.h
+    launcher/portal.cpp
+    launcher/portal.h
 )
 
 set(CORE_SOURCES

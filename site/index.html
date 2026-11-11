@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PersonaRM — Native runtime for Persona 2: Eternal Punishment</title>
+    <meta name="description"
+        content="PersonaRM is an open-source native PC runtime and launcher for Persona 2: Eternal Punishment. Bring your own copy." />
+    <meta name="theme-color" content="#07070b" />
+    <link rel="icon" href="assets/logo.png" />
+    <meta property="og:title" content="PersonaRM" />
+    <meta property="og:description"
+        content="Native PC runtime for Persona 2: Eternal Punishment. Bring your own copy." />
+    <meta property="og:image" content="assets/logo.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+        href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:opsz,wght@6..96,500;6..96,700&family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500&display=swap"
+        rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css" />
+</head>
+
+<body>
+
+    <a class="skip" href="#main">Skip to content</a>
+
+    <header class="topbar">
+        <a class="brand" href="#top" aria-label="PersonaRM home">
+            <img src="assets/logo.png" alt="" width="34" height="34" />
+            <span>PersonaRM</span>
+        </a>
+        <nav aria-label="Primary">
+            <a href="#features">Features</a>
+            <a href="#status">Status</a>
+            <a href="#start">Quick start</a>
+            <a href="#developers">Developers</a>
+            <a class="nav-cta" href="https://github.com/sargon494/PersonaRM">GitHub</a>
+        </nav>
+    </header>
+
+    <main id="main">
+
+        <!-- HERO -->
+        <section class="hero" id="top">
+            <div class="smoke" aria-hidden="true"></div>
+            <div class="hero-inner">
+                <img class="hero-logo" src="assets/logo.png" alt="PersonaRM logo" />
+                <p class="eyebrow">Native PC runtime · Persona 2: Eternal Punishment</p>
+                <h1>Run the game natively. <span>Bring your own copy.</span></h1>
+                <p class="lead">
+                    PersonaRM is an open-source runtime and launcher for Windows and Linux.
+                    It recreates the PlayStation 1 hardware the game needs, so you can play
+                    with widescreen display, modern controllers, and quicksave.
+                </p>
+                <div class="actions">
+                    <a class="btn btn-primary" href="#start">Get started</a>
+                    <a class="btn" href="https://github.com/sargon494/PersonaRM">View source</a>
+                </div>
+                <ul class="chips" aria-label="Project facts">
+                    <li>GPL v3+</li>
+                    <li>Windows · Linux</li>
+                    <li>C++17</li>
+                    <li>No game files included</li>
+                </ul>
+            </div>
+        </section>
+
+        <!-- PRINCIPLES -->
+        <section class="section principles" aria-labelledby="principles-title">
+            <header class="section-head reveal">
+                <span class="num">01</span>
+                <h2 id="principles-title">Built on <em>Bring Your Own Copy</em></h2>
+            </header>
+            <div class="grid three">
+                <article class="card reveal">
+                    <h3>No game content</h3>
+                    <p>PersonaRM contains no game binaries, ROMs, or assets. The runtime is the only thing you download.
+                    </p>
+                </article>
+                <article class="card reveal">
+                    <h3>Your disc, your files</h3>
+                    <p>Point PersonaRM at a disc image from a copy you own: <code>.cue/.bin</code>, <code>.iso</code>,
+                        or <code>.img</code>.</p>
+                </article>
+                <article class="card reveal">
+                    <h3>Modern enhancements</h3>
+                    <p>Widescreen viewports, controller glyphs, turbo speed up to 16×, and instant quicksave.</p>
+                </article>
+            </div>
+        </section>
+
+        <!-- FEATURES -->
+        <section class="section" id="features" aria-labelledby="features-title">
+            <header class="section-head reveal">
+                <span class="num">02</span>
+                <h2 id="features-title">Hardware, <em>faithfully rebuilt</em></h2>
+            </header>
+            <div class="grid features">
+                <article class="feature reveal">
+                    <h3>MIPS-I CPU</h3>
+                    <p>R3000A interpreter with branch and load delay slots, and COP0 <code>RFE</code>.</p>
+                </article>
+                <article class="feature reveal">
+                    <h3>Geometry engine</h3>
+                    <p>GTE vector and matrix math: <code>RTPS</code>, <code>RTPT</code>, <code>NCLIP</code>,
+                        <code>AVSZ3/4</code>.</p>
+                </article>
+                <article class="feature reveal">
+                    <h3>GPU and VRAM</h3>
+                    <p>1 MB VRAM at 1024×512, with GP0 and GP1 packet processing.</p>
+                </article>
+                <article class="feature reveal">
+                    <h3>MDEC video</h3>
+                    <p>Macroblock decoding with 8×8 IDCT and PlayStation quantization.</p>
+                </article>
+                <article class="feature reveal">
+                    <h3>SPU audio</h3>
+                    <p>24 voices with ADPCM decoding, stereo mixing, and <code>.VAG</code> support.</p>
+                </article>
+                <article class="feature reveal">
+                    <h3>Disc handling</h3>
+                    <p>ISO 9660 and raw CD-ROM XA images, <code>.cue</code> resolution, and dual-disc swapping.</p>
+                </article>
+                <article class="feature reveal">
+                    <h3>Display modes</h3>
+                    <p>4:3 pillarboxed, 16:9, 21:9 UltraWide, and Fill.</p>
+                </article>
+                <article class="feature reveal">
+                    <h3>Controllers</h3>
+                    <p>Keyboard, mouse, and gamepad, with auto-detected PlayStation, Xbox, and Nintendo profiles.</p>
+                </article>
+                <article class="feature reveal">
+                    <h3>Memory card and saves</h3>
+                    <p>A virtual 128 KB PS1 memory card, plus instant quicksave.</p>
+                </article>
+            </div>
+        </section>
+
+        <!-- STATUS -->
+        <section class="section" id="status" aria-labelledby="status-title">
+            <header class="section-head reveal">
+                <span class="num">03</span>
+                <h2 id="status-title">Project <em>status</em></h2>
+            </header>
+            <p class="intro reveal">PersonaRM is in active development. Each subsystem is covered by automated tests on
+                Windows and Linux.</p>
+            <div class="status-table reveal" role="table" aria-label="Subsystem status">
+                <div class="row head" role="row"><span role="columnheader">Subsystem</span><span
+                        role="columnheader">Status</span></div>
+                <div class="row" role="row"><span role="cell">BYOC launcher and configuration</span><span role="cell"
+                        class="tag prototype">Prototype</span></div>
+                <div class="row" role="row"><span role="cell">Dual-disc manager and disc loader</span><span role="cell"
+                        class="tag ok">Working</span></div>
+                <div class="row" role="row"><span role="cell">PS-X EXE and ELF loader</span><span role="cell"
+                        class="tag ok">Working</span></div>
+                <div class="row" role="row"><span role="cell">MIPS-I CPU interpreter</span><span role="cell"
+                        class="tag ok">Working</span></div>
+                <div class="row" role="row"><span role="cell">GTE, GPU, MDEC, SPU</span><span role="cell"
+                        class="tag ok">Working</span></div>
+                <div class="row" role="row"><span role="cell">BIOS HLE and controller SPI</span><span role="cell"
+                        class="tag ok">Working</span></div>
+                <div class="row" role="row"><span role="cell">Turbo mode and save manager</span><span role="cell"
+                        class="tag ok">Working</span></div>
+                <div class="row" role="row"><span role="cell">Windowed SDL2 / OpenGL display</span><span role="cell"
+                        class="tag progress">In progress</span></div>
+            </div>
+        </section>
+
+        <!-- QUICK START -->
+        <section class="section" id="start" aria-labelledby="start-title">
+            <header class="section-head reveal">
+                <span class="num">04</span>
+                <h2 id="start-title">Quick <em>start</em></h2>
+            </header>
+            <div class="notice reveal">
+                <strong>Technical preview.</strong> The on-screen window is still in progress. The current build is for
+                testing and development.
+            </div>
+            <ol class="steps">
+                <li class="reveal">
+                    <h3>Get a legal copy</h3>
+                    <p>You need Disc 1 and/or Disc 2 of <em>Persona 2: Eternal Punishment</em>, from a copy you own.</p>
+                </li>
+                <li class="reveal">
+                    <h3>Download or build PersonaRM</h3>
+                    <p>Build from source using the instructions in the README, or wait for a release.</p>
+                </li>
+                <li class="reveal">
+                    <h3>Point it at your discs</h3>
+                    <p>Scan a folder, verify the image, then link both discs:</p>
+                    <div class="code">
+                        <pre><code>personarm --scan "/path/to/discs"
+personarm --verify-disc "/path/to/disc1.cue"
+personarm --disc1 "/path/to/disc1.cue" --disc2 "/path/to/disc2.cue"
+personarm --portal</code></pre>
+                        <button class="copy" type="button" aria-label="Copy commands">Copy</button>
+                    </div>
+                </li>
+            </ol>
+            <p class="fine reveal">Settings are stored in <code>personarm_config.json</code>. Run
+                <code>personarm --help</code> for all options.</p>
+        </section>
+
+        <!-- DEVELOPERS -->
+        <section class="section" id="developers" aria-labelledby="dev-title">
+            <header class="section-head reveal">
+                <span class="num">05</span>
+                <h2 id="dev-title">For <em>developers</em></h2>
+            </header>
+            <div class="grid two">
+                <article class="card reveal">
+                    <h3>Architecture</h3>
+                    <p>A central engine routes memory through a KUSEG, KSEG0, and KSEG1 bus to RAM, scratchpad, GPU,
+                        SPU, and the controller SPI.</p>
+                    <a class="link" href="https://github.com/sargon494/PersonaRM/blob/main/ARCHITECTURE.md">Read
+                        ARCHITECTURE.md →</a>
+                </article>
+                <article class="card reveal">
+                    <h3>Build and test</h3>
+                    <p>CMake 3.20+, C++17, and a Python test runner. Continuous integration runs on Windows and Linux.
+                    </p>
+                    <a class="link"
+                        href="https://github.com/sargon494/PersonaRM/blob/main/docs/DEVELOPER_GUIDE.md">Developer Guide
+                        →</a>
+                </article>
+                <article class="card reveal">
+                    <h3>Contribute</h3>
+                    <p>Bug reports, feature requests, and pull requests are welcome. Read the contributor rules first.
+                    </p>
+                    <a class="link"
+                        href="https://github.com/sargon494/PersonaRM/blob/main/CONTRIBUTING.md">CONTRIBUTING.md →</a>
+                </article>
+                <article class="card reveal">
+                    <h3>Open source</h3>
+                    <p>Licensed under GPL v3 or later. Fork it, study it, and improve it.</p>
+                    <a class="link" href="https://github.com/sargon494/PersonaRM">Browse the repository →</a>
+                </article>
+            </div>
+        </section>
+
+        <!-- CTA -->
+        <section class="cta reveal">
+            <div class="smoke" aria-hidden="true"></div>
+            <h2>Ready to <em>descend</em>?</h2>
+            <p>Clone the repository, build it, and bring your own disc.</p>
+            <a class="btn btn-primary" href="https://github.com/sargon494/PersonaRM">Open on GitHub</a>
+        </section>
+
+    </main>
+
+    <footer class="footer">
+        <div class="footer-inner">
+            <img src="assets/logo.png" alt="" width="64" height="64" />
+            <p class="legal">
+                PersonaRM is an independent, unofficial project. It is not affiliated with, endorsed by, or sponsored by
+                Atlus, Sega, or Sony Interactive Entertainment. It distributes no game discs, binaries, ROMs, or assets.
+                All trademarks belong to their respective owners.
+            </p>
+            <p class="license">Released under GPL v3 or later · <a
+                    href="https://github.com/sargon494/PersonaRM">sargon494/PersonaRM</a></p>
+        </div>
+    </footer>
+
+    <script src="main.js"></script>
+</body>
+
+</html>

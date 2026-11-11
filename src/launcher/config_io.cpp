@@ -102,6 +102,9 @@ JsonValue ConfigToJson(const LauncherConfig& c) {
     game.Set("title", c.game.title);
     game.Set("version", c.game.version);
     game.Set("rom_path", c.game.legal_rom_path);
+    game.Set("disc1_path", c.game.disc1_path);
+    game.Set("disc2_path", c.game.disc2_path);
+    game.Set("active_disc", c.game.active_disc);
     game.Set("verified", c.game.is_verified);
     root.Set("game", std::move(game));
 
@@ -151,6 +154,11 @@ size_t ConfigFromJson(const JsonValue& json, LauncherConfig& out) {
         out.game.title = g->StringOr("title", out.game.title);
         out.game.version = g->StringOr("version", out.game.version);
         out.game.legal_rom_path = g->StringOr("rom_path", out.game.legal_rom_path);
+        out.game.disc1_path = g->StringOr("disc1_path", out.game.disc1_path);
+        out.game.disc2_path = g->StringOr("disc2_path", out.game.disc2_path);
+        out.game.active_disc = static_cast<int>(ClampF(g->NumberOr("active_disc", out.game.active_disc), 1.0f, 2.0f));
+        if (out.game.disc1_path.empty()) out.game.disc1_path = out.game.legal_rom_path;
+        if (out.game.legal_rom_path.empty()) out.game.legal_rom_path = out.game.disc1_path;
         out.game.is_verified = g->BoolOr("verified", out.game.is_verified);
     }
 
@@ -191,7 +199,10 @@ void ParseLegacyConfig(const std::string& text, LauncherConfig& out) {
         else if (key == "vsync") out.video.vsync = ParseBool(val);
         else if (key == "target_fps" && ParseU32(val, u)) out.video.target_fps = ClampU32(u, 15, 1000);
         else if (key == "widescreen") out.video.enable_widescreen_patch = ParseBool(val);
-        else if (key == "rom_path") out.game.legal_rom_path = val;
+        else if (key == "rom_path") { out.game.legal_rom_path = val; if (out.game.disc1_path.empty()) out.game.disc1_path = val; }
+        else if (key == "disc1_path") { out.game.disc1_path = val; if (out.game.legal_rom_path.empty()) out.game.legal_rom_path = val; }
+        else if (key == "disc2_path") out.game.disc2_path = val;
+        else if (key == "active_disc" && ParseU32(val, u)) out.game.active_disc = static_cast<int>(ClampU32(u, 1, 2));
         else if (key == "turbo_multiplier" && ParseU32(val, u)) profile.turbo_speed = ClampU32(u, 2, 4);
         else if (key == "stick_deadzone") profile.stick_deadzone = ClampF(std::atof(val.c_str()), 0.0f, 0.9f);
         else if (key == "mouse_sensitivity") profile.mouse_sensitivity = ClampF(std::atof(val.c_str()), 0.1f, 10.0f);

@@ -245,6 +245,9 @@ static void TestConfig() {
     CHECK(ConfigFromJson(*bad, e) == 2);
     CHECK(e.video.width == 16384 && e.texture_overrides.cache_mb == 16 && e.texture_overrides.hash_algorithm == "fnv1a");
     LauncherConfig l;
+    c.game.disc1_path = "a.bin"; c.game.disc2_path = "b.bin"; c.game.active_disc = 2;
+    { LauncherConfig r; auto jj = JsonValue::Parse(ConfigToJson(c).Dump(2)); ConfigFromJson(*jj, r);
+      CHECK(r.game.disc1_path == "a.bin" && r.game.disc2_path == "b.bin" && r.game.active_disc == 2); }
     ParseLegacyConfig("width=1280\n# c\nturbo_multiplier=2\nstick_deadzone=0.25\nmouse_sensitivity=abc\n", l);
     CHECK(l.video.width == 1280 && l.input_profiles.Active().turbo_speed == 2 && l.input_profiles.Active().stick_deadzone == 0.25f);
 }

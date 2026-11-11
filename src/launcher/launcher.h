@@ -80,6 +80,9 @@ struct GameMetadata {
     std::string title = "Persona 2: Eternal Punishment";
     std::string version = "1.0.0";
     std::string legal_rom_path = "";
+    std::string disc1_path = "";
+    std::string disc2_path = "";
+    int active_disc = 1;
     bool is_verified = false;
 };
 
