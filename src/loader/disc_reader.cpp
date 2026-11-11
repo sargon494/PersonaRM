@@ -201,7 +201,10 @@ bool DiscReader::ParseIso9660Volume() {
     return !m_file_table.empty();
 }
 
-void DiscReader::ReadDirectorySectors(uint32_t lba, uint32_t length_bytes, const std::string& prefix) {
+void DiscReader::ReadDirectorySectors(uint32_t lba, uint32_t length_bytes, const std::string& prefix, int depth) {
+    constexpr int kMaxDirectoryDepth = 8;      // guards against cyclic or corrupt directory trees
+    constexpr size_t kMaxEntries = 200000;
+
     uint32_t sectors_to_read = (length_bytes + m_sector_data_size - 1) / m_sector_data_size;
     std::vector<uint8_t> buffer(m_sector_data_size);
 
@@ -235,7 +238,10 @@ void DiscReader::ReadDirectorySectors(uint32_t lba, uint32_t length_bytes, const
 
             bool is_dir = (flags & 0x02) != 0;
 
-            if (name != "\x00" && name != "\x01" && !name.empty()) {
+            // Records named "\0" (".") and "\1" ("..") are single-byte names; comparing against the
+            // C strings "\x00"/"\x01" never skipped ".", so test the byte explicitly.
+            const bool is_dot_entry = name.size() == 1 && (name[0] == '\0' || name[0] == '\1');
+            if (!is_dot_entry && !name.empty()) {
                 std::string full_path = prefix.empty() ? name : prefix + "/" + name;
                 DiscFileEntry entry{full_path, file_lba, file_size, is_dir};
                 m_file_table[full_path] = entry;
@@ -244,6 +250,12 @@ void DiscReader::ReadDirectorySectors(uint32_t lba, uint32_t length_bytes, const
                 std::string upper_name = full_path;
                 for (auto& c : upper_name) c = static_cast<char>(std::toupper(c));
                 m_file_table[upper_name] = entry;
+
+                // Descend into subdirectories (the "." and ".." records were skipped above).
+                if (is_dir && depth < kMaxDirectoryDepth && m_file_table.size() < kMaxEntries &&
+                    file_lba != lba && file_size > 0) {
+                    ReadDirectorySectors(file_lba, file_size, full_path, depth + 1);
+                }
             }
 
             pos += record_len;
