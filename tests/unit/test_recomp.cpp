@@ -179,6 +179,27 @@ static void TestCfgJumpTable() {
     CHECK(r.invalid_reached == 0 && r.out_of_range_targets == 0);
 }
 
+// A bound-checked table whose first entry points outside the image: that entry must not be
+// followed, must be counted as an out-of-range target, and the jump site must be reported.
+static void TestCfgJumpTableOutOfRange() {
+    const uint32_t table = kBase + 16 * 4;
+    const uint32_t lui = 0x3C010000u | (table >> 16);
+    const uint32_t addiu = 0x24210000u | (table & 0xFFFF);
+    auto code = Bytes({
+        0x2C880004u, 0x11000009u, kNop, 0x00044880u, lui, addiu,
+        0x00294821u, 0x8D2A0000u, kNop, 0x01400008u, kNop,
+        kJrRa, kNop, kNop, kNop, kNop,
+        0x80100000u, kBase + 20 * 4, kBase + 24 * 4, kBase + 28 * 4,   // entry 0 is outside the image
+        kJrRa, kNop, kNop, kNop, kJrRa, kNop, kNop, kNop, kJrRa, kNop, kNop, kNop, kJrRa, kNop, kNop, kNop,
+    });
+    CfgReport r = AnalyzeControlFlow(code.data(), code.size(), kBase, kBase);
+    CHECK(r.resolved_jump_tables == 1);
+    CHECK(r.resolved_table_entries == 0);             // the first entry stops the table walk
+    CHECK(r.out_of_range_targets == 1);
+    CHECK(r.out_of_range_sites.size() == 1 && r.out_of_range_sites[0] == kBase + 9 * 4);
+    CHECK(r.indirect_sites.empty());
+}
+
 int main() {
     TestDecode();
     TestCfgCallsAndDelaySlots();
@@ -186,6 +207,7 @@ int main() {
     TestCfgOutOfRange();
     TestCfgCoverage();
     TestCfgJumpTable();
+    TestCfgJumpTableOutOfRange();
     std::cout << "recomp tests passed (" << g_checks << " checks)\n";
     return 0;
 }
