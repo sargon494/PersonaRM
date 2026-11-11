@@ -419,8 +419,9 @@ std::string RenderMarkdown(const std::vector<DiscReport>& reports) {
                 os << "| Llamadas directas / saltos directos / ramas condicionales | " << c.direct_calls << " / "
                    << c.direct_jumps << " / " << c.conditional_branches << " |\n";
                 os << "| Retornos (`jr $ra`) | " << c.returns << " |\n";
-                os << "| Llamadas a BIOS (`jr` a 0xA0/0xB0/0xC0) / `jr` sin contar BIOS / `jalr` sin resolver | " << c.bios_calls << " / "
-                   << c.indirect_jumps << " / " << c.indirect_calls << " |\n";
+                os << "| Llamadas a BIOS (`jr` a 0xA0/0xB0/0xC0) | " << c.bios_calls << " |\n";
+                os << "| Saltos `jr` (sin BIOS) / sin resolver | " << c.indirect_jumps << " / " << c.unresolved_jumps << " |\n";
+                os << "| Llamadas `jalr` sin resolver | " << c.indirect_calls << " |\n";
                 os << "| Tablas de salto resueltas / entradas leídas | " << c.resolved_jump_tables << " / "
                    << c.resolved_table_entries << " |\n";
                 os << "| Palabras reservadas alcanzadas como código | " << c.invalid_reached << " |\n";
@@ -430,6 +431,29 @@ std::string RenderMarkdown(const std::vector<DiscReport>& reports) {
                     os << "Primeros saltos indirectos sin resolver: ";
                     for (size_t i = 0; i < c.indirect_sites.size() && i < 10; ++i) os << (i ? ", " : "") << Hex(c.indirect_sites[i]);
                     os << "\n\n";
+                }
+                const auto& pt = c.pointers;
+                os << "\nPunteros de función cargados de memoria (`jalr`, por el valor del slot en la imagen):\n\n";
+                os << "| Estado | Sitios |\n|---|---:|\n";
+                os << "| Slot a cero (se asigna en ejecución) | " << pt.null_value << " |\n";
+                os << "| Apunta dentro de la imagen | " << pt.in_image_value << " |\n";
+                os << "| Apunta fuera de la imagen | " << pt.value_outside << " |\n";
+                os << "| Slot fuera de la imagen (RAM/BSS) | " << pt.address_outside << " |\n";
+                os << "| Base no constante (no localizable) | " << pt.unrecognised << " |\n\n";
+                if (!c.pointer_samples.empty()) {
+                    os << "Primeros slots (diagnóstico local):\n\n```\n";
+                    for (const auto& ps : c.pointer_samples) {
+                        const char* st = "no localizable";
+                        switch (ps.status) {
+                            case recomp::PointerStatus::Null: st = "a cero"; break;
+                            case recomp::PointerStatus::InImage: st = "dentro de la imagen"; break;
+                            case recomp::PointerStatus::ValueOutside: st = "fuera de la imagen"; break;
+                            case recomp::PointerStatus::AddressOutside: st = "slot fuera de la imagen"; break;
+                            case recomp::PointerStatus::Unrecognised: break;
+                        }
+                        os << Hex(ps.site) << "  slot " << Hex(ps.address) << "  valor " << Hex(ps.value) << "  (" << st << ")\n";
+                    }
+                    os << "```\n\n";
                 }
                 if (!c.unresolved_contexts.empty()) {
                     os << "Contexto de los primeros sitios sin resolver (diagnóstico local: contiene código del juego, no lo compartas):\n\n```\n";

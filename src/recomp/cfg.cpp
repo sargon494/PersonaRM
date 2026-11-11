@@ -221,6 +221,76 @@ void CaptureContext(const uint8_t* code, size_t size, uint32_t load, uint32_t si
     r.unresolved_contexts.push_back(std::move(ctx));
 }
 
+
+// True when `w` writes general register `reg` (conservative for ops not modelled elsewhere).
+bool WritesReg(uint32_t w, uint32_t reg) {
+    if (reg == 0) return false;
+    const uint32_t op = w >> 26;
+    const uint32_t rt = (w >> 16) & 31, rd = (w >> 11) & 31;
+    if (op == 0x00) {
+        const uint32_t funct = w & 63;
+        if (funct == 0x08 || funct == 0x0C || funct == 0x0D) return false;   // jr, syscall, break
+        if (funct >= 0x18 && funct <= 0x1B) return false;                    // mult/div: HI/LO only
+        return rd == reg;
+    }
+    if (op == 0x03) return reg == 31;                                        // jal
+    if (op == 0x01) return (rt == 0x10 || rt == 0x11) && reg == 31;          // bltzal / bgezal
+    if ((op >= 0x08 && op <= 0x0F) || (op >= 0x20 && op <= 0x26)) return rt == reg;
+    return false;
+}
+
+constexpr size_t kPointerSamples = 8;
+
+// Classifies the function pointer that a `jalr` on `reg` calls through, when it was loaded by
+// `lw off(base)` from a constant base (WP-14, step 3). Only counts and a few samples are kept.
+void ClassifyPointer(const uint8_t* code, size_t size, uint32_t load, uint32_t site, uint32_t reg, CfgReport& r) {
+    auto word_at = [&](uint32_t a) { return LoadU32(code + (a - load)); };
+    auto in_image = [&](uint32_t a) {
+        return a >= load && static_cast<uint64_t>(a) + 4 <= static_cast<uint64_t>(load) + size && ((a - load) & 3u) == 0;
+    };
+
+    PointerSite ps;
+    ps.site = site;
+    const Region region = RegionBefore(code, size, load, site);
+    bool found = false;
+    uint32_t writer = 0;
+    for (uint32_t a = site; a > region.start; a -= 4) {
+        if (WritesReg(word_at(a - 4), reg)) { writer = a - 4; found = true; break; }
+    }
+
+    if (!found || (word_at(writer) >> 26) != 0x23) {
+        ps.status = PointerStatus::Unrecognised;
+        ++r.pointers.unrecognised;
+    } else {
+        const uint32_t lw = word_at(writer);
+        const Val base = StateBefore(code, size, load, writer)[(lw >> 21) & 31];
+        if (!(base.k && !base.var)) {
+            ps.status = PointerStatus::Unrecognised;
+            ++r.pointers.unrecognised;
+        } else {
+            const uint32_t addr = base.v + static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>(lw & 0xFFFF)));
+            ps.address = addr;
+            if (!in_image(addr)) {
+                ps.status = PointerStatus::AddressOutside;
+                ++r.pointers.address_outside;
+            } else {
+                ps.value = word_at(addr);
+                if (ps.value == 0) {
+                    ps.status = PointerStatus::Null;
+                    ++r.pointers.null_value;
+                } else if (in_image(ps.value)) {
+                    ps.status = PointerStatus::InImage;
+                    ++r.pointers.in_image_value;
+                } else {
+                    ps.status = PointerStatus::ValueOutside;
+                    ++r.pointers.value_outside;
+                }
+            }
+        }
+    }
+    if (r.pointer_samples.size() < kPointerSamples) r.pointer_samples.push_back(ps);
+}
+
 } // namespace
 
 CfgReport AnalyzeControlFlow(const uint8_t* code, size_t size, uint32_t load, uint32_t entry) {
@@ -354,6 +424,7 @@ CfgReport AnalyzeControlFlow(const uint8_t* code, size_t size, uint32_t load, ui
                         ++r.resolved_jump_tables;
                         r.resolved_table_entries += read;
                     } else {
+                        ++r.unresolved_jumps;
                         Record(r.indirect_sites, pc);
                         CaptureContext(code, size, load, pc, r);
                     }
@@ -363,6 +434,7 @@ CfgReport AnalyzeControlFlow(const uint8_t* code, size_t size, uint32_t load, ui
                 case InsnKind::IndirectCall:
                     ++r.indirect_calls;
                     Record(r.indirect_sites, pc);
+                    ClassifyPointer(code, size, load, pc, in.rs, r);
                     CaptureContext(code, size, load, pc, r);
                     pc = after;
                     break;

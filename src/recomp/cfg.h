@@ -17,6 +17,30 @@
 
 namespace personarm::recomp {
 
+/// What a function pointer loaded from memory (`lui`+`lw` then `jalr`) points to.
+enum class PointerStatus : uint8_t {
+    Null,           // the slot holds zero in the image: assigned at run time
+    InImage,        // the slot holds an address inside the image
+    ValueOutside,   // the slot holds an address outside the image
+    AddressOutside, // the slot itself is outside the image (RAM or BSS)
+    Unrecognised,   // the base is not a constant, so the slot cannot be located
+};
+
+struct PointerSummary {
+    uint32_t null_value = 0;
+    uint32_t in_image_value = 0;
+    uint32_t value_outside = 0;
+    uint32_t address_outside = 0;
+    uint32_t unrecognised = 0;
+};
+
+struct PointerSite {
+    uint32_t site = 0;      // the jalr
+    uint32_t address = 0;   // the slot it loads from (0 when unrecognised)
+    uint32_t value = 0;     // the word at that slot in the image (0 when not readable)
+    PointerStatus status = PointerStatus::Unrecognised;
+};
+
 /// Local diagnostic: the instructions leading up to an unresolved indirect transfer.
 struct SiteContext {
     uint32_t site = 0;                      // address of the unresolved jr/jalr
@@ -42,6 +66,9 @@ struct CfgReport {
     uint32_t resolved_table_entries = 0; // in-image entries read from those tables
     std::vector<uint32_t> function_entries;     // sorted, in-image
     std::vector<uint32_t> indirect_sites;       // addresses of unresolved indirect jumps/calls
+    uint32_t unresolved_jumps = 0;      // `jr` (not BIOS) with no switch table recovered
+    PointerSummary pointers;            // `jalr` targets loaded from memory, by status
+    std::vector<PointerSite> pointer_samples;   // first few, for local inspection
     std::vector<SiteContext> unresolved_contexts; // first few unresolved sites, for local inspection
     std::vector<uint32_t> invalid_sites;        // addresses of reserved words reached
     std::vector<uint32_t> out_of_range_sites;   // addresses of the instructions that point outside
