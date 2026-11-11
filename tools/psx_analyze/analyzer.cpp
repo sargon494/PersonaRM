@@ -431,6 +431,14 @@ std::string RenderMarkdown(const std::vector<DiscReport>& reports) {
                     for (size_t i = 0; i < c.indirect_sites.size() && i < 10; ++i) os << (i ? ", " : "") << Hex(c.indirect_sites[i]);
                     os << "\n\n";
                 }
+                if (!c.unresolved_contexts.empty()) {
+                    os << "Contexto de los primeros sitios sin resolver (diagnóstico local: contiene código del juego, no lo compartas):\n\n```\n";
+                    for (const auto& ctx : c.unresolved_contexts) {
+                        for (const auto& line : ctx.window) os << line << "\n";
+                        os << "\n";
+                    }
+                    os << "```\n\n";
+                }
                 if (!c.out_of_range_sites.empty()) {
                     os << "Primeros puntos que apuntan fuera de la imagen: ";
                     for (size_t i = 0; i < c.out_of_range_sites.size() && i < 10; ++i) os << (i ? ", " : "") << Hex(c.out_of_range_sites[i]);
