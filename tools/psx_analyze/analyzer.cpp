@@ -435,7 +435,8 @@ std::string RenderMarkdown(const std::vector<DiscReport>& reports) {
                 const auto& pt = c.pointers;
                 os << "\nPunteros de función cargados de memoria (`jalr`, por el valor del slot en la imagen):\n\n";
                 os << "| Estado | Sitios |\n|---|---:|\n";
-                os << "| Slot a cero (se asigna en ejecución) | " << pt.null_value << " |\n";
+                os << "| Slot a cero, asignado por escrituras con dirección dentro de la imagen | " << pt.assigned_in_image << " |\n";
+                os << "| Slot a cero sin escritura constante encontrada | " << pt.null_value << " |\n";
                 os << "| Apunta dentro de la imagen | " << pt.in_image_value << " |\n";
                 os << "| Apunta fuera de la imagen | " << pt.value_outside << " |\n";
                 os << "| Slot fuera de la imagen (RAM/BSS) | " << pt.address_outside << " |\n";
@@ -445,13 +446,16 @@ std::string RenderMarkdown(const std::vector<DiscReport>& reports) {
                     for (const auto& ps : c.pointer_samples) {
                         const char* st = "no localizable";
                         switch (ps.status) {
-                            case recomp::PointerStatus::Null: st = "a cero"; break;
+                            case recomp::PointerStatus::Null: st = "a cero, sin escritura constante"; break;
+                            case recomp::PointerStatus::AssignedInImage: st = "asignado por escritura"; break;
                             case recomp::PointerStatus::InImage: st = "dentro de la imagen"; break;
                             case recomp::PointerStatus::ValueOutside: st = "fuera de la imagen"; break;
                             case recomp::PointerStatus::AddressOutside: st = "slot fuera de la imagen"; break;
                             case recomp::PointerStatus::Unrecognised: break;
                         }
-                        os << Hex(ps.site) << "  slot " << Hex(ps.address) << "  valor " << Hex(ps.value) << "  (" << st << ")\n";
+                        os << Hex(ps.site) << "  slot " << Hex(ps.address) << "  valor " << Hex(ps.value) << "  (" << st << ")";
+                        for (size_t k = 0; k < ps.candidates.size(); ++k) os << (k ? ", " : "  candidatos: ") << Hex(ps.candidates[k]);
+                        os << "\n";
                     }
                     os << "```\n\n";
                 }

@@ -6,6 +6,7 @@
 #include <array>
 #include <cstdio>
 #include <cstring>
+#include <map>
 #include <set>
 
 namespace personarm::recomp {
@@ -240,10 +241,42 @@ bool WritesReg(uint32_t w, uint32_t reg) {
 }
 
 constexpr size_t kPointerSamples = 8;
+constexpr size_t kSamplesPerStatus = 4;
+constexpr size_t kMaxCandidates = 8;
+
+// Constant values written to each address by `sw` with a constant base (WP-14, step 3b).
+struct SlotStores {
+    std::vector<uint32_t> values;   // constant values written
+    bool unknown = false;           // at least one store wrote a value that is not a constant
+};
+using StoreTable = std::map<uint32_t, SlotStores>;
+
+// One pass over the image: every `sw` with a constant base contributes its stored constant.
+StoreTable CollectStores(const uint8_t* code, size_t size, uint32_t load) {
+    auto word_at = [&](uint32_t a) { return LoadU32(code + (a - load)); };
+    StoreTable table;
+    for (uint32_t a = load; static_cast<uint64_t>(a) + 4 <= static_cast<uint64_t>(load) + size; a += 4) {
+        const uint32_t w = word_at(a);
+        if ((w >> 26) != 0x2B) continue;                              // sw
+        const RegFile R = StateBefore(code, size, load, a);
+        const Val base = R[(w >> 21) & 31];
+        if (!(base.k && !base.var)) continue;
+        const uint32_t addr = base.v + static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>(w & 0xFFFF)));
+        const Val val = R[(w >> 16) & 31];
+        SlotStores& st = table[addr];
+        if (val.k && !val.var) {
+            if (st.values.size() < kMaxCandidates) st.values.push_back(val.v);
+        } else {
+            st.unknown = true;
+        }
+    }
+    return table;
+}
 
 // Classifies the function pointer that a `jalr` on `reg` calls through, when it was loaded by
 // `lw off(base)` from a constant base (WP-14, step 3). Only counts and a few samples are kept.
-void ClassifyPointer(const uint8_t* code, size_t size, uint32_t load, uint32_t site, uint32_t reg, CfgReport& r) {
+void ClassifyPointer(const uint8_t* code, size_t size, uint32_t load, uint32_t site, uint32_t reg,
+                     const StoreTable& stores, CfgReport& r) {
     auto word_at = [&](uint32_t a) { return LoadU32(code + (a - load)); };
     auto in_image = [&](uint32_t a) {
         return a >= load && static_cast<uint64_t>(a) + 4 <= static_cast<uint64_t>(load) + size && ((a - load) & 3u) == 0;
@@ -276,8 +309,19 @@ void ClassifyPointer(const uint8_t* code, size_t size, uint32_t load, uint32_t s
             } else {
                 ps.value = word_at(addr);
                 if (ps.value == 0) {
-                    ps.status = PointerStatus::Null;
-                    ++r.pointers.null_value;
+                    const auto it = stores.find(addr);
+                    if (it != stores.end()) {
+                        for (uint32_t v : it->second.values) {
+                            if (in_image(v) && ps.candidates.size() < kMaxCandidates) ps.candidates.push_back(v);
+                        }
+                    }
+                    if (!ps.candidates.empty()) {
+                        ps.status = PointerStatus::AssignedInImage;
+                        ++r.pointers.assigned_in_image;
+                    } else {
+                        ps.status = PointerStatus::Null;
+                        ++r.pointers.null_value;
+                    }
                 } else if (in_image(ps.value)) {
                     ps.status = PointerStatus::InImage;
                     ++r.pointers.in_image_value;
@@ -288,7 +332,9 @@ void ClassifyPointer(const uint8_t* code, size_t size, uint32_t load, uint32_t s
             }
         }
     }
-    if (r.pointer_samples.size() < kPointerSamples) r.pointer_samples.push_back(ps);
+    size_t same = 0;
+    for (const auto& q : r.pointer_samples) same += q.status == ps.status;
+    if (r.pointer_samples.size() < kPointerSamples && same < kSamplesPerStatus) r.pointer_samples.push_back(ps);
 }
 
 } // namespace
@@ -304,6 +350,8 @@ CfgReport AnalyzeControlFlow(const uint8_t* code, size_t size, uint32_t load, ui
     };
     auto word_at = [&](uint32_t a) { return LoadU32(code + (a - load)); };
     auto index_of = [&](uint32_t a) { return static_cast<size_t>((a - load) / 4); };
+
+    const StoreTable stores = CollectStores(code, size, load);
 
     std::vector<bool> visited(words, false);
     std::set<uint32_t> functions;
@@ -434,7 +482,7 @@ CfgReport AnalyzeControlFlow(const uint8_t* code, size_t size, uint32_t load, ui
                 case InsnKind::IndirectCall:
                     ++r.indirect_calls;
                     Record(r.indirect_sites, pc);
-                    ClassifyPointer(code, size, load, pc, in.rs, r);
+                    ClassifyPointer(code, size, load, pc, in.rs, stores, r);
                     CaptureContext(code, size, load, pc, r);
                     pc = after;
                     break;
