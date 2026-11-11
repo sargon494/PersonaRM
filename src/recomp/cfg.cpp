@@ -3,6 +3,7 @@
 #include "mips_decode.h"
 
 #include <algorithm>
+#include <array>
 #include <cstdio>
 #include <cstring>
 #include <set>
@@ -27,13 +28,134 @@ constexpr size_t kContextSites = 4;
 constexpr uint32_t kContextBefore = 8;
 
 
-// Switch-table recovery for `jr rX` (WP-14, step 2). Works backwards inside the straight-line
-// block that ends at the jump, looking for the pattern a compiler emits for a switch:
-//   sltiu t, idx, N ; beq t, zero, default      (bound check: index < N)
-//   sll  s, idx, 2  ; lui b, hi ; addiu b, b, lo (table base)
-//   addu  s, s, b   ; lw rX, 0(s)               (load the case address)
-// Returns the table entries that lie inside the image, or an empty list when the pattern is not
-// complete. It never guesses: a missing piece means the site stays unresolved.
+// Register tracking for the straight-line code before a site (WP-14, step 2b).
+//
+// A Val describes what is known about a register:
+//   k    the register holds a known constant part `v` (unknown otherwise)
+//   var  the register also holds a variable index part, scaled from register `origin`
+// Unknown is (!k && !var). Index parts come from `sll`, so `sll $2,$3,2` yields {var, origin 3}.
+struct Val {
+    bool k = false;
+    bool var = false;
+    uint8_t origin = 0;
+    uint32_t v = 0;
+};
+
+using RegFile = std::array<Val, 32>;
+
+// Apply one instruction to the register file. Anything not modelled makes its destination unknown.
+void Apply(RegFile& R, uint32_t w) {
+    const uint32_t op = w >> 26;
+    const uint32_t rs = (w >> 21) & 31, rt = (w >> 16) & 31, rd = (w >> 11) & 31, sa = (w >> 6) & 31;
+    const uint32_t funct = w & 63;
+    const uint32_t imm = w & 0xFFFF;
+    const uint32_t simm = static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>(imm)));
+    auto set = [&](uint32_t reg, Val val) { if (reg != 0) R[reg] = val; };
+    auto unknown = Val{};
+
+    if (op == 0x00) {
+        switch (funct) {
+            case 0x00: {                                       // sll
+                const Val s = R[rt];
+                if (!s.var && s.k) set(rd, Val{true, false, 0, s.v << sa});
+                else set(rd, Val{true, true, s.var ? s.origin : static_cast<uint8_t>(rt), 0});
+                return;
+            }
+            case 0x21: case 0x20: {                            // addu / add
+                const Val a = R[rs], b = R[rt];
+                if (!(a.k || a.var) || !(b.k || b.var)) { set(rd, unknown); return; }
+                if (a.var && b.var) { set(rd, unknown); return; }
+                set(rd, Val{a.k && b.k, a.var || b.var, a.var ? a.origin : b.origin, a.v + b.v});
+                return;
+            }
+            case 0x25: {                                       // or
+                const Val a = R[rs], b = R[rt];
+                if (a.k && !a.var && b.k && !b.var) set(rd, Val{true, false, 0, a.v | b.v});
+                else set(rd, unknown);
+                return;
+            }
+            default:
+                if (rd != 0) R[rd] = unknown;
+                return;
+        }
+    }
+    switch (op) {
+        case 0x01:                                             // REGIMM: bltzal / bgezal write $31
+            if (rt == 0x10 || rt == 0x11) set(31, unknown);
+            return;
+        case 0x03: set(31, unknown); return;                   // jal
+        case 0x08: case 0x09:                                  // addi / addiu
+            if (R[rs].k && !R[rs].var) set(rt, Val{true, false, 0, R[rs].v + simm});
+            else if (R[rs].var) set(rt, Val{R[rs].k, true, R[rs].origin, R[rs].v + simm});
+            else set(rt, unknown);
+            return;
+        case 0x0C:                                             // andi
+            if (R[rs].k && !R[rs].var) set(rt, Val{true, false, 0, R[rs].v & imm});
+            else set(rt, unknown);
+            return;
+        case 0x0D:                                             // ori
+            if (R[rs].k && !R[rs].var) set(rt, Val{true, false, 0, R[rs].v | imm});
+            else set(rt, unknown);
+            return;
+        case 0x0F: set(rt, Val{true, false, 0, imm << 16}); return;   // lui
+        case 0x0A: case 0x0B: case 0x0E:                       // slti / sltiu / xori
+            set(rt, unknown);
+            return;
+        case 0x10: case 0x12:                                  // COP0/COP2: mfc/cfc write rt
+            if (rs == 0 || rs == 2) set(rt, unknown);
+            return;
+        case 0x20: case 0x21: case 0x22: case 0x23: case 0x24: case 0x25: case 0x26:
+            set(rt, unknown);                                  // loads
+            return;
+        default:
+            return;                                            // branches, stores, j, cop loads
+    }
+}
+
+bool IsUncondTransfer(uint32_t w) {
+    const uint32_t op = w >> 26;
+    if (op == 0x02 || op == 0x03) return true;                 // j / jal
+    return op == 0x00 && ((w & 63) == 0x08 || (w & 63) == 0x09);   // jr / jalr
+}
+
+// The register state just before `site`, built forward from the start of its straight-line
+// region. The region begins after the last unconditional transfer (skipping its delay slot) and is
+// capped at kRegionWords so the walk stays local.
+constexpr uint32_t kRegionWords = 96;
+
+struct Region {
+    uint32_t start = 0;
+};
+
+Region RegionBefore(const uint8_t* code, size_t size, uint32_t load, uint32_t site) {
+    auto word_at = [&](uint32_t a) { return LoadU32(code + (a - load)); };
+    Region reg;
+    reg.start = site >= load + 4 * kRegionWords ? site - 4 * kRegionWords : load;
+    for (uint32_t a = site; a > reg.start; a -= 4) {
+        const uint32_t prev = a - 4;
+        if (prev < load || static_cast<uint64_t>(prev) + 4 > static_cast<uint64_t>(load) + size) break;
+        if (IsUncondTransfer(word_at(prev))) {
+            reg.start = prev + 8;                               // skip the transfer and its delay slot
+            break;
+        }
+    }
+    return reg;
+}
+
+RegFile StateBefore(const uint8_t* code, size_t size, uint32_t load, uint32_t site) {
+    auto word_at = [&](uint32_t a) { return LoadU32(code + (a - load)); };
+    RegFile R{};
+    R[0] = Val{true, false, 0, 0};
+    const Region reg = RegionBefore(code, size, load, site);
+    for (uint32_t a = reg.start; a < site; a += 4) Apply(R, word_at(a));
+    return R;
+}
+
+// Switch-table recovery for `jr rX` (WP-14, step 2). Pattern handled:
+//   sltiu t, idx, N ; beq t, zero, default       (bound: idx < N)
+//   sll   s, idx, 2 ; lui b, hi ; addu b, b, s   (base register holds table base + scaled index)
+//   lw    rX, off(b)                             (off may be non-zero; base may come from addiu)
+// The table base is (hi << 16) + addiu constant + load offset. Anything not matched stays unresolved.
 struct JumpTable {
     uint32_t base = 0;
     uint32_t count = 0;
@@ -41,82 +163,46 @@ struct JumpTable {
 
 bool FindJumpTable(const uint8_t* code, size_t size, uint32_t load, uint32_t jr_addr, JumpTable& out) {
     auto word_at = [&](uint32_t a) { return LoadU32(code + (a - load)); };
-    auto in_code = [&](uint32_t a) {
-        return a >= load && static_cast<uint64_t>(a) + 4 <= static_cast<uint64_t>(load) + size && ((a - load) & 3u) == 0;
-    };
+    const Region reg = RegionBefore(code, size, load, jr_addr);
 
-    // Walk back to the start of the straight-line block, never crossing a control transfer.
-    uint32_t pc = jr_addr;
-    const uint32_t jr_word = word_at(pc);
-    const uint32_t jr_reg = (jr_word >> 21) & 31;            // rs of jr
-
-    // Find the lw that loads jr_reg (search backwards, stop at a transfer or a write to it).
+    // The last writer of the jump register must be the lw that loads the case address.
+    const uint32_t jr_reg = (word_at(jr_addr) >> 21) & 31;
     uint32_t lw_addr = 0;
-    bool found_lw = false;
-    for (uint32_t a = pc; a >= load + 4 && !found_lw; a -= 4) {
-        const uint32_t prev = a - 4;
-        if (!in_code(prev)) break;
-        const uint32_t w = word_at(prev);
-        const uint32_t op = w >> 26;
-        if (op == 0x00 && (w & 63) == 0x08) break;            // previous jr ends the block
-        if (op == 0x02 || op == 0x03 || (op >= 0x04 && op <= 0x07)) break;  // j/jal/branch
-        if (op == 0x23 && ((w >> 16) & 31) == jr_reg) {       // lw rX, off(base)
-            lw_addr = prev;
-            found_lw = true;
-        }
-    }
-    if (!found_lw) return false;
-
-    // The lw address is formed as addu(index_scaled, base): the lw register is the sum, so the
-    // table base lives in the other operand of that addu, built by a lui/addiu pair.
-    const uint32_t lw_word = word_at(lw_addr);
-    const uint32_t lw_base = (lw_word >> 21) & 31;
-    const int16_t lw_off = static_cast<int16_t>(lw_word & 0xFFFF);
-    if (lw_off != 0) return false;                             // table is read from element 0
-
-    uint32_t addu_addr = 0;
-    uint32_t addu_other = 0;                                   // the operand that is not the sum itself
-    bool found_addu = false;
-    for (uint32_t a = lw_addr; a >= load + 4 && !found_addu; a -= 4) {
-        const uint32_t prev = a - 4;
-        if (!in_code(prev)) break;
-        const uint32_t w = word_at(prev);
-        const uint32_t op = w >> 26;
-        if (op == 0x00 && (w & 63) == 0x21 && ((w >> 11) & 31) == lw_base) {   // addu lw_base, rs, rt
-            addu_addr = prev;
-            const uint32_t rs = (w >> 21) & 31;
-            const uint32_t rt = (w >> 16) & 31;
-            addu_other = (rs == lw_base) ? rt : rs;
-            found_addu = true;
-        }
-    }
-    if (!found_addu) return false;
-
-    uint32_t base_hi = 0, base_lo = 0;
-    bool have_hi = false, have_lo = false;
-    uint32_t sltiu_bound = 0;
-    bool have_bound = false;
-    for (uint32_t a = addu_addr; a >= load + 4; a -= 4) {
-        const uint32_t prev = a - 4;
-        if (!in_code(prev)) break;
-        const uint32_t w = word_at(prev);
+    bool found = false;
+    for (uint32_t a = jr_addr; a > reg.start && !found; a -= 4) {
+        const uint32_t w = word_at(a - 4);
         const uint32_t op = w >> 26;
         const uint32_t rt = (w >> 16) & 31;
-        if (op == 0x0F && rt == addu_other && !have_hi) {      // lui base, hi
-            base_hi = (w & 0xFFFF) << 16;
-            have_hi = true;
-        } else if (op == 0x09 && rt == addu_other && !have_lo) { // addiu base, base, lo
-            base_lo = static_cast<uint16_t>(w & 0xFFFF);
-            have_lo = true;
-        } else if (op == 0x0B && !have_bound) {                // sltiu t, idx, N
-            sltiu_bound = static_cast<uint16_t>(w & 0xFFFF);
-            have_bound = true;
+        if (op == 0x23 && rt == jr_reg) { lw_addr = a - 4; found = true; break; }
+        // any other writer of jr_reg means the target is not a plain table load
+        if (op == 0x00 && ((w >> 11) & 31) == jr_reg && (w & 63) != 0x08) return false;
+        const bool writes_rt = (op >= 0x08 && op <= 0x0F) || (op >= 0x20 && op <= 0x26);
+        if (writes_rt && rt == jr_reg) return false;
+    }
+    if (!found) return false;
+
+    // The load address: base register state just before the lw.
+    const uint32_t lw_word = word_at(lw_addr);
+    const RegFile before = StateBefore(code, size, load, lw_addr);
+    const Val b = before[(lw_word >> 21) & 31];
+    if (!b.k || !b.var) return false;                          // need a constant base and an index part
+    const uint32_t base = b.v + static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>(lw_word & 0xFFFF)));
+
+    // The bound: the last sltiu on the index register before the lw.
+    const uint8_t index = b.origin;
+    uint32_t count = 0;
+    bool bound = false;
+    for (uint32_t a = lw_addr; a > reg.start && !bound; a -= 4) {
+        const uint32_t w = word_at(a - 4);
+        if ((w >> 26) == 0x0B && ((w >> 21) & 31) == index) {
+            count = w & 0xFFFF;
+            bound = true;
         }
     }
-    if (!have_hi || !have_lo || !have_bound || sltiu_bound == 0) return false;
+    if (!bound || count == 0 || count > 4096) return false;
 
-    out.base = base_hi + base_lo;
-    out.count = sltiu_bound;
+    out.base = base;
+    out.count = count;
     return true;
 }
 
@@ -237,6 +323,14 @@ CfgReport AnalyzeControlFlow(const uint8_t* code, size_t size, uint32_t load, ui
                     pc = after;
                     break;
                 case InsnKind::IndirectJump: {
+                    {
+                        const Val tv = StateBefore(code, size, load, pc)[in.rs];
+                        if (tv.k && !tv.var && (tv.v == 0xA0 || tv.v == 0xB0 || tv.v == 0xC0)) {
+                            ++r.bios_calls;                    // BIOS vector: returns after the delay slot
+                            pc = after;
+                            break;
+                        }
+                    }
                     ++r.indirect_jumps;
                     JumpTable jt;
                     uint32_t read = 0;

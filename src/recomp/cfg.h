@@ -37,6 +37,7 @@ struct CfgReport {
     uint32_t syscalls = 0;
     uint32_t invalid_reached = 0;       // reserved encodings reached as code
     uint32_t out_of_range_targets = 0;  // branch/call/fall-through targets outside the image
+    uint32_t bios_calls = 0;            // jr to a BIOS vector (0xA0/0xB0/0xC0) with a constant target
     uint32_t resolved_jump_tables = 0;  // indirect jumps whose switch table yielded at least one entry
     uint32_t resolved_table_entries = 0; // in-image entries read from those tables
     std::vector<uint32_t> function_entries;     // sorted, in-image

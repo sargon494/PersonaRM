@@ -271,8 +271,9 @@ static void TestDiscs() {
     AnalyzeOptions withcfg; withcfg.cfg = true;
     DiscReport cfgr;
     CHECK(AnalyzeDisc(iso, withcfg, cfgr, err) && cfgr.has_cfg);
-    // MakeCode ends each function in a BIOS stub (jr $t2): the first one is an unresolved indirect jump.
-    CHECK(cfgr.boot_cfg.indirect_jumps == 1 && cfgr.boot_cfg.reachable_words > 0);
+    // MakeCode ends each function in a BIOS stub (li $t2,0xA0 ; jr $t2): these are BIOS calls, not indirect jumps.
+    CHECK(cfgr.boot_cfg.bios_calls >= 1 && cfgr.boot_cfg.indirect_jumps == 0 && cfgr.boot_cfg.indirect_sites.empty());
+    CHECK(cfgr.boot_cfg.reachable_words > 0);
     CHECK(cfgr.boot_cfg.invalid_reached == 0);
     CHECK(RenderMarkdown({cfgr}).find("Control de flujo") != std::string::npos);
     CHECK(!r.has_cfg);
