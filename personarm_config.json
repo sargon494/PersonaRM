@@ -1,0 +1,428 @@
+{
+  "audio": {
+    "bgm_volume": 0.800000012,
+    "high_quality_resampling": true,
+    "master_volume": 1,
+    "sfx_volume": 0.899999976,
+    "voice_volume": 1
+  },
+  "auto_launch": false,
+  "game": {
+    "active_disc": 1,
+    "disc1_path": "",
+    "disc2_path": "",
+    "id": "P2EP",
+    "rom_path": "",
+    "title": "Persona 2: Eternal Punishment",
+    "verified": false,
+    "version": "1.0.0"
+  },
+  "input": {
+    "active_profile": "Keyboard & Mouse",
+    "device_preference": "auto",
+    "modern_shortcuts_enabled": true,
+    "profiles": [
+      {
+        "bindings": {
+          "AutoBattle": [
+            {
+              "code": "R",
+              "device": "keyboard"
+            }
+          ],
+          "BattleAttack": [
+            {
+              "code": "1",
+              "device": "keyboard"
+            }
+          ],
+          "BattleContact": [
+            {
+              "code": "4",
+              "device": "keyboard"
+            }
+          ],
+          "BattleFusion": [
+            {
+              "code": "3",
+              "device": "keyboard"
+            }
+          ],
+          "BattleItem": [
+            {
+              "code": "5",
+              "device": "keyboard"
+            }
+          ],
+          "BattlePersona": [
+            {
+              "code": "2",
+              "device": "keyboard"
+            }
+          ],
+          "BattleStrategy": [
+            {
+              "code": "6",
+              "device": "keyboard"
+            }
+          ],
+          "CameraRotateLeft": [
+            {
+              "code": "Q",
+              "device": "keyboard"
+            }
+          ],
+          "CameraRotateRight": [
+            {
+              "code": "E",
+              "device": "keyboard"
+            }
+          ],
+          "Cancel": [
+            {
+              "code": "Esc",
+              "device": "keyboard"
+            },
+            {
+              "code": "MouseRight",
+              "device": "mouse"
+            }
+          ],
+          "Confirm": [
+            {
+              "code": "Space",
+              "device": "keyboard"
+            },
+            {
+              "code": "Enter",
+              "device": "keyboard"
+            },
+            {
+              "code": "MouseLeft",
+              "device": "mouse"
+            }
+          ],
+          "Dash": [
+            {
+              "code": "LShift",
+              "device": "keyboard"
+            }
+          ],
+          "DialogueBacklog": [
+            {
+              "code": "WheelUp",
+              "device": "mouse"
+            },
+            {
+              "code": "B",
+              "device": "keyboard"
+            }
+          ],
+          "Map": [
+            {
+              "code": "M",
+              "device": "keyboard"
+            }
+          ],
+          "Menu": [
+            {
+              "code": "Tab",
+              "device": "keyboard"
+            }
+          ],
+          "MoveDown": [
+            {
+              "code": "S",
+              "device": "keyboard"
+            },
+            {
+              "code": "Down",
+              "device": "keyboard"
+            }
+          ],
+          "MoveLeft": [
+            {
+              "code": "A",
+              "device": "keyboard"
+            },
+            {
+              "code": "Left",
+              "device": "keyboard"
+            }
+          ],
+          "MoveRight": [
+            {
+              "code": "D",
+              "device": "keyboard"
+            },
+            {
+              "code": "Right",
+              "device": "keyboard"
+            }
+          ],
+          "MoveUp": [
+            {
+              "code": "W",
+              "device": "keyboard"
+            },
+            {
+              "code": "Up",
+              "device": "keyboard"
+            }
+          ],
+          "QuickLoad": [
+            {
+              "code": "F9",
+              "device": "keyboard"
+            }
+          ],
+          "QuickSave": [
+            {
+              "code": "F5",
+              "device": "keyboard"
+            }
+          ],
+          "Turbo": [
+            {
+              "code": "LCtrl",
+              "device": "keyboard"
+            }
+          ]
+        },
+        "controller": "keyboard_mouse",
+        "enable_turbo_hold": true,
+        "invert_camera_y": false,
+        "mouse_sensitivity": 1,
+        "name": "Keyboard & Mouse",
+        "stick_deadzone": 0.150000006,
+        "toggle_dash": true,
+        "turbo_speed": 3
+      },
+      {
+        "bindings": {
+          "AutoBattle": [
+            {
+              "code": "R3",
+              "device": "gamepad"
+            }
+          ],
+          "BattleAttack": [],
+          "BattleContact": [],
+          "BattleFusion": [],
+          "BattleItem": [],
+          "BattlePersona": [],
+          "BattleStrategy": [],
+          "CameraRotateLeft": [
+            {
+              "code": "LB",
+              "device": "gamepad"
+            }
+          ],
+          "CameraRotateRight": [
+            {
+              "code": "RB",
+              "device": "gamepad"
+            }
+          ],
+          "Cancel": [
+            {
+              "code": "East",
+              "device": "gamepad"
+            }
+          ],
+          "Confirm": [
+            {
+              "code": "South",
+              "device": "gamepad"
+            }
+          ],
+          "Dash": [
+            {
+              "code": "West",
+              "device": "gamepad"
+            }
+          ],
+          "DialogueBacklog": [
+            {
+              "code": "LT",
+              "device": "gamepad"
+            }
+          ],
+          "Map": [
+            {
+              "code": "Back",
+              "device": "gamepad"
+            }
+          ],
+          "Menu": [
+            {
+              "code": "North",
+              "device": "gamepad"
+            }
+          ],
+          "MoveDown": [
+            {
+              "code": "DPadDown",
+              "device": "gamepad"
+            }
+          ],
+          "MoveLeft": [
+            {
+              "code": "DPadLeft",
+              "device": "gamepad"
+            }
+          ],
+          "MoveRight": [
+            {
+              "code": "DPadRight",
+              "device": "gamepad"
+            }
+          ],
+          "MoveUp": [
+            {
+              "code": "DPadUp",
+              "device": "gamepad"
+            }
+          ],
+          "QuickLoad": [],
+          "QuickSave": [],
+          "Turbo": [
+            {
+              "code": "RT",
+              "device": "gamepad"
+            }
+          ]
+        },
+        "controller": "xbox",
+        "enable_turbo_hold": true,
+        "invert_camera_y": false,
+        "mouse_sensitivity": 1,
+        "name": "Xbox Controller",
+        "stick_deadzone": 0.150000006,
+        "toggle_dash": true,
+        "turbo_speed": 3
+      },
+      {
+        "bindings": {
+          "AutoBattle": [
+            {
+              "code": "R3",
+              "device": "gamepad"
+            }
+          ],
+          "BattleAttack": [],
+          "BattleContact": [],
+          "BattleFusion": [],
+          "BattleItem": [],
+          "BattlePersona": [],
+          "BattleStrategy": [],
+          "CameraRotateLeft": [
+            {
+              "code": "LB",
+              "device": "gamepad"
+            }
+          ],
+          "CameraRotateRight": [
+            {
+              "code": "RB",
+              "device": "gamepad"
+            }
+          ],
+          "Cancel": [
+            {
+              "code": "East",
+              "device": "gamepad"
+            }
+          ],
+          "Confirm": [
+            {
+              "code": "South",
+              "device": "gamepad"
+            }
+          ],
+          "Dash": [
+            {
+              "code": "West",
+              "device": "gamepad"
+            }
+          ],
+          "DialogueBacklog": [
+            {
+              "code": "LT",
+              "device": "gamepad"
+            }
+          ],
+          "Map": [
+            {
+              "code": "Back",
+              "device": "gamepad"
+            }
+          ],
+          "Menu": [
+            {
+              "code": "North",
+              "device": "gamepad"
+            }
+          ],
+          "MoveDown": [
+            {
+              "code": "DPadDown",
+              "device": "gamepad"
+            }
+          ],
+          "MoveLeft": [
+            {
+              "code": "DPadLeft",
+              "device": "gamepad"
+            }
+          ],
+          "MoveRight": [
+            {
+              "code": "DPadRight",
+              "device": "gamepad"
+            }
+          ],
+          "MoveUp": [
+            {
+              "code": "DPadUp",
+              "device": "gamepad"
+            }
+          ],
+          "QuickLoad": [],
+          "QuickSave": [],
+          "Turbo": [
+            {
+              "code": "RT",
+              "device": "gamepad"
+            }
+          ]
+        },
+        "controller": "playstation",
+        "enable_turbo_hold": true,
+        "invert_camera_y": false,
+        "mouse_sensitivity": 1,
+        "name": "PlayStation Controller",
+        "stick_deadzone": 0.150000006,
+        "toggle_dash": true,
+        "turbo_speed": 3
+      }
+    ]
+  },
+  "texture_overrides": {
+    "cache_mb": 256,
+    "directory": "texture_packs/hd",
+    "enabled": true,
+    "hash_algorithm": "fnv1a",
+    "hash_scope": "full"
+  },
+  "version": 2,
+  "video": {
+    "height": 1080,
+    "internal_resolution_scale": 2,
+    "target_fps": 60,
+    "vsync": true,
+    "widescreen": true,
+    "width": 1920,
+    "window_mode": "borderless"
+  }
+}

@@ -1,4 +1,5 @@
 #include "input_manager.h"
+#include "input_profile.h"
 #include <iostream>
 #include <algorithm>
 #include <cmath>
@@ -19,6 +20,8 @@ bool InputManager::Initialize() {
     m_axes = AnalogAxes{};
     m_mouse = MouseState{};
     m_active_device = ControllerType::KeyboardAndMouse;
+    m_profile.reset();
+    m_pulse_actions.clear();
 
     m_initialized = true;
     return true;
@@ -31,6 +34,12 @@ void InputManager::Shutdown() {
 void InputManager::Update(float delta_time) {
     (void)delta_time;
     if (!m_initialized) return;
+
+    // One-frame pulses (mouse wheel): a pulse fired between two Update() calls is visible as
+    // JustPressed during the next Update and released at the one after that.
+    for (VirtualAction a : m_pulse_release) SimulateActionRelease(a);
+    m_pulse_release = std::move(m_pulse_actions);
+    m_pulse_actions.clear();
 
     // Edge detection: "previous" is the state captured at the prior Update();
     // events that arrived since then are already in m_action_states.
@@ -80,6 +89,7 @@ bool InputManager::IsActionJustReleased(VirtualAction action) const {
 }
 
 std::string InputManager::GetActionGlyphDescription(VirtualAction action) const {
+    if (m_profile) return m_profile->GlyphFor(action);
     switch (m_active_device) {
         case ControllerType::KeyboardAndMouse:
             switch (action) {
@@ -175,6 +185,54 @@ void InputManager::SimulateActionRelease(VirtualAction action) {
     if (idx < m_action_states.size()) {
         m_action_states[idx] = false;
     }
+}
+
+void InputManager::ApplyProfile(const InputProfile& profile) {
+    m_profile = std::make_shared<InputProfile>(profile);
+    m_active_device = profile.controller;
+    m_config.stick_deadzone = profile.stick_deadzone;
+    m_config.mouse_sensitivity = profile.mouse_sensitivity;
+    m_config.invert_camera_y = profile.invert_camera_y;
+    m_config.toggle_dash = profile.toggle_dash;
+    m_config.enable_turbo_hold = profile.enable_turbo_hold;
+    m_config.turbo_speed = profile.turbo_speed;
+    // Drop held state: bindings may have changed under the player's fingers.
+    std::fill(m_action_states.begin(), m_action_states.end(), false);
+}
+
+bool InputManager::ProcessRawInput(InputDeviceKind kind, const std::string& code, bool pressed) {
+    if (!m_initialized || !m_profile) return false;
+
+    bool affected = false;
+    const bool is_wheel = kind == InputDeviceKind::Mouse && (code == "WheelUp" || code == "WheelDown");
+    if (kind == InputDeviceKind::Mouse) {
+        if (code == "MouseLeft") { m_mouse.left_button_down = pressed; affected = true; }
+        else if (code == "MouseRight") { m_mouse.right_button_down = pressed; affected = true; }
+        else if (code == "MouseMiddle") { m_mouse.middle_button_down = pressed; affected = true; }
+        else if (is_wheel && pressed) { m_mouse.wheel_delta += code == "WheelUp" ? 1 : -1; affected = true; }
+        else if (is_wheel) return false; // wheels have no release event
+    }
+
+    for (VirtualAction action : m_profile->ActionsForCode(kind, code)) {
+        if (pressed) {
+            SimulateActionPress(action);
+            if (is_wheel) m_pulse_actions.push_back(action);
+        } else {
+            SimulateActionRelease(action);
+        }
+        affected = true;
+    }
+    return affected;
+}
+
+void InputManager::SimulateMouseButton(bool left, bool right, bool middle) {
+    m_mouse.left_button_down = left;
+    m_mouse.right_button_down = right;
+    m_mouse.middle_button_down = middle;
+}
+
+void InputManager::SimulateMouseWheel(int32_t notches) {
+    m_mouse.wheel_delta += notches;
 }
 
 void InputManager::SimulateMouseMove(int32_t x, int32_t y) {

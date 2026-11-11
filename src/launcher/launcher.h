@@ -4,6 +4,7 @@
 #include <vector>
 #include <cstdint>
 #include <optional>
+#include "input/input_profile.h"
 
 namespace personarm {
 
@@ -41,12 +42,21 @@ enum class InputDevicePreference {
 
 struct InputSettings {
     InputDevicePreference device_preference = InputDevicePreference::AutoDetect;
-    float stick_deadzone = 0.15f;
-    float mouse_sensitivity = 1.0f;
-    bool invert_camera_y = false;
-    bool enable_turbo_hold = true;
-    uint32_t turbo_multiplier = 3; // 2x, 3x, 4x
     bool modern_shortcuts_enabled = true; // 1-6 keys for battle commands
+    // Sensitivity, deadzone, turbo speed and key/button bindings live in
+    // LauncherConfig::input_profiles (one set of values per profile).
+};
+
+// ───────────────────────────────────────────────────────────────────────
+// HD Texture Override Settings (see rendering/texture_override.h)
+// ───────────────────────────────────────────────────────────────────────
+
+struct TextureOverrideSettings {
+    bool enabled = true;
+    std::string directory = "texture_packs/hd";
+    std::string hash_algorithm = "fnv1a"; // "fnv1a" | "crc32"
+    std::string hash_scope = "full";      // "full" | "pixels"
+    uint32_t cache_mb = 256;
 };
 
 // ───────────────────────────────────────────────────────────────────────
@@ -83,6 +93,8 @@ struct GameMetadata {
 struct LauncherConfig {
     VideoSettings video;
     InputSettings input;
+    InputProfileManager input_profiles;
+    TextureOverrideSettings texture_overrides;
     AudioSettings audio;
     GameMetadata game;
     bool auto_launch = false;

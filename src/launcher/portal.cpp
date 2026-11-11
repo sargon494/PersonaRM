@@ -210,7 +210,7 @@ void Portal::DisplayStatus(std::ostream& os) const {
     os << "  Resolution          : " << m_config.video.width << "x" << m_config.video.height
        << " @ " << m_config.video.target_fps << " FPS (VSync: " << (m_config.video.vsync ? "ON" : "OFF") << ")\n";
     os << "  Widescreen Viewport : " << (m_config.video.enable_widescreen_patch ? "16:9 Active" : "Original 4:3") << "\n";
-    os << "  Turbo Mode          : " << m_config.input.turbo_multiplier << "x Fast-Forward\n";
+    os << "  Turbo Mode          : " << m_config.input_profiles.Active().turbo_speed << "x Fast-Forward\n";
     os << "  Audio Volume        : Master " << static_cast<int>(m_config.audio.master_volume * 100) << "%, BGM "
        << static_cast<int>(m_config.audio.bgm_volume * 100) << "%\n";
     os << "-----------------------------------------------------------------------\n";

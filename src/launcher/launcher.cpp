@@ -1,5 +1,8 @@
 #include "launcher.h"
 #include "loader/disc_reader.h"
+#include "launcher/config_io.h"
+#include "core/json_lite.h"
+#include <sstream>
 #include <iostream>
 #include <fstream>
 #include <filesystem>
@@ -21,68 +24,73 @@ bool Launcher::Initialize() {
 }
 
 bool Launcher::LoadConfig(const std::string& config_path) {
-    if (!fs::exists(config_path)) {
+    std::error_code ec;
+    if (!fs::exists(config_path, ec)) {
         // Use defaults and save
-        SaveConfig(config_path);
-        return true;
+        return SaveConfig(config_path);
     }
 
-    // Basic key-value parser for config without needing external heavy JSON deps yet
-    std::ifstream file(config_path);
+    std::ifstream file(config_path, std::ios::binary);
     if (!file.is_open()) {
         return false;
     }
+    std::stringstream buffer;
+    buffer << file.rdbuf();
+    const std::string text = buffer.str();
 
-    std::string line;
-    while (std::getline(file, line)) {
-        if (line.find("width=") != std::string::npos) {
-            m_config.video.width = std::stoul(line.substr(6));
-        } else if (line.find("height=") != std::string::npos) {
-            m_config.video.height = std::stoul(line.substr(7));
-        } else if (line.find("vsync=") != std::string::npos) {
-            m_config.video.vsync = (line.substr(6) == "1" || line.substr(6) == "true");
-        } else if (line.find("target_fps=") != std::string::npos) {
-            m_config.video.target_fps = std::stoul(line.substr(11));
-        } else if (line.find("disc1_path=") != std::string::npos) {
-            m_config.game.disc1_path = line.substr(11);
-            if (m_config.game.legal_rom_path.empty()) {
-                m_config.game.legal_rom_path = m_config.game.disc1_path;
-            }
-        } else if (line.find("disc2_path=") != std::string::npos) {
-            m_config.game.disc2_path = line.substr(11);
-        } else if (line.find("active_disc=") != std::string::npos) {
-            m_config.game.active_disc = std::stoi(line.substr(12));
-        } else if (line.find("rom_path=") != std::string::npos) {
-            m_config.game.legal_rom_path = line.substr(9);
-            if (m_config.game.disc1_path.empty()) {
-                m_config.game.disc1_path = m_config.game.legal_rom_path;
-            }
+    LauncherConfig loaded;
+    size_t first = text.find_first_not_of(" \t\r\n\xEF\xBB\xBF");
+    if (first != std::string::npos && text[first] == '{') {
+        std::string error;
+        auto json = JsonValue::Parse(text, &error);
+        if (!json) {
+            std::cerr << "[Launcher] Invalid " << config_path << " (" << error << "); keeping current settings.\n";
+            return false;
         }
+        size_t skipped = ConfigFromJson(*json, loaded);
+        if (skipped > 0) {
+            std::cerr << "[Launcher] Ignored " << skipped << " invalid entr" << (skipped == 1 ? "y" : "ies")
+                      << " in " << config_path << "\n";
+        }
+    } else {
+        // Pre-JSON releases wrote "key=value" lines into the same file name: migrate them.
+        loaded = m_config;
+        ParseLegacyConfig(text, loaded);
+        std::cout << "[Launcher] Migrated legacy config to JSON: " << config_path << "\n";
+        m_config = loaded;
+        return SaveConfig(config_path);
     }
 
+    m_config = std::move(loaded);
     return true;
 }
 
 bool Launcher::SaveConfig(const std::string& config_path) const {
-    std::ofstream file(config_path);
-    if (!file.is_open()) {
-        return false;
+    // Write to a temporary file first so a crash mid-write cannot corrupt the existing config.
+    const std::string tmp_path = config_path + ".tmp";
+    {
+        std::ofstream file(tmp_path, std::ios::binary | std::ios::trunc);
+        if (!file.is_open()) {
+            return false;
+        }
+        file << ConfigToJson(m_config).Dump(2) << "\n";
+        file.flush();
+        if (!file) {
+            return false;
+        }
     }
-
-    file << "# PersonaRM Launcher Configuration\n";
-    file << "width=" << m_config.video.width << "\n";
-    file << "height=" << m_config.video.height << "\n";
-    file << "vsync=" << (m_config.video.vsync ? "1" : "0") << "\n";
-    file << "target_fps=" << m_config.video.target_fps << "\n";
-    file << "widescreen=" << (m_config.video.enable_widescreen_patch ? "1" : "0") << "\n";
-    file << "stick_deadzone=" << m_config.input.stick_deadzone << "\n";
-    file << "mouse_sensitivity=" << m_config.input.mouse_sensitivity << "\n";
-    file << "turbo_multiplier=" << m_config.input.turbo_multiplier << "\n";
-    file << "rom_path=" << m_config.game.legal_rom_path << "\n";
-    file << "disc1_path=" << m_config.game.disc1_path << "\n";
-    file << "disc2_path=" << m_config.game.disc2_path << "\n";
-    file << "active_disc=" << m_config.game.active_disc << "\n";
-
+    std::error_code ec;
+    fs::rename(tmp_path, config_path, ec);
+    if (ec) {
+        // Some platforms refuse to rename over an existing file.
+        fs::remove(config_path, ec);
+        ec.clear();
+        fs::rename(tmp_path, config_path, ec);
+        if (ec) {
+            fs::remove(tmp_path, ec);
+            return false;
+        }
+    }
     return true;
 }
 
@@ -143,7 +151,7 @@ int Launcher::LaunchGame() {
     std::cout << "  V-Sync:           " << (m_config.video.vsync ? "Enabled" : "Disabled") << "\n";
     std::cout << "  Widescreen (16:9):" << (m_config.video.enable_widescreen_patch ? "Active" : "Original 4:3") << "\n";
     std::cout << "  Input Profile:    Auto-Detect (KBM & Modern Gamepad)\n";
-    std::cout << "  Turbo Mode:       Active (Hold RT / Tab for " << m_config.input.turbo_multiplier << "x)\n";
+    std::cout << "  Turbo Mode:       Active (Hold RT / Ctrl for " << m_config.input_profiles.Active().turbo_speed << "x)\n";
     std::cout << "--------------------------------------------------------\n";
 
     if (m_config.game.legal_rom_path.empty()) {
