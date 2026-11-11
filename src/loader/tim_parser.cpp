@@ -75,15 +75,20 @@ std::optional<TimImage> TimParser::ParseFromMemory(const uint8_t* data, size_t s
         std::memcpy(&clut_h, data + offset + 10, sizeof(uint16_t));
 
         size_t total_entries = static_cast<size_t>(clut_w) * clut_h;
-        if (offset + clut_size > size) {
-            PRM_LOG_ERROR("TimParser", "CLUT size exceeds buffer");
+        if (clut_size < 12 || clut_size > size - offset) {
+            PRM_LOG_ERROR("TimParser", "CLUT block size invalid or exceeds buffer");
+            return std::nullopt;
+        }
+        if (total_entries * 2 > static_cast<size_t>(clut_size) - 12) {
+            PRM_LOG_ERROR("TimParser", "CLUT dimensions exceed declared block size");
             return std::nullopt;
         }
 
-        const uint16_t* clut_data = reinterpret_cast<const uint16_t*>(data + offset + 12);
+        const uint8_t* clut_bytes = data + offset + 12;
         clut_palette.reserve(total_entries);
         for (size_t i = 0; i < total_entries; ++i) {
-            clut_palette.push_back(ConvertPs1ColorToRGBA(clut_data[i]));
+            uint16_t entry = static_cast<uint16_t>(clut_bytes[i * 2] | (clut_bytes[i * 2 + 1] << 8));
+            clut_palette.push_back(ConvertPs1ColorToRGBA(entry));
         }
 
         offset += clut_size;
@@ -105,8 +110,13 @@ std::optional<TimImage> TimParser::ParseFromMemory(const uint8_t* data, size_t s
     std::memcpy(&img_w_words, data + offset + 8, sizeof(uint16_t));
     std::memcpy(&img_h, data + offset + 10, sizeof(uint16_t));
 
-    if (offset + img_size > size) {
-        PRM_LOG_ERROR("TimParser", "Image data size exceeds buffer");
+    if (img_size < 12 || img_size > size - offset) {
+        PRM_LOG_ERROR("TimParser", "Image block size invalid or exceeds buffer");
+        return std::nullopt;
+    }
+    // The pixel payload must actually fit inside the declared block (prevents out-of-range reads).
+    if (static_cast<uint64_t>(img_w_words) * img_h * 2 > static_cast<uint64_t>(img_size) - 12) {
+        PRM_LOG_ERROR("TimParser", "Image dimensions exceed declared block size");
         return std::nullopt;
     }
 
@@ -165,9 +175,9 @@ std::optional<TimImage> TimParser::ParseFromMemory(const uint8_t* data, size_t s
             result.pixels_rgba[i] = (color_idx < clut_palette.size()) ? clut_palette[color_idx] : TimColorRGBA{};
         }
     } else if (bpp_mode == TimBppMode::Direct15Bit) {
-        const uint16_t* words = reinterpret_cast<const uint16_t*>(pixel_bytes);
         for (size_t i = 0; i < total_pixels; ++i) {
-            result.pixels_rgba[i] = ConvertPs1ColorToRGBA(words[i]);
+            uint16_t word = static_cast<uint16_t>(pixel_bytes[i * 2] | (pixel_bytes[i * 2 + 1] << 8));
+            result.pixels_rgba[i] = ConvertPs1ColorToRGBA(word);
         }
     } else if (bpp_mode == TimBppMode::Direct24Bit) {
         size_t byte_idx = 0;

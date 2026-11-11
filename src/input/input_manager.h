@@ -5,8 +5,11 @@
 #include <vector>
 #include <unordered_map>
 #include <functional>
+#include <memory>
 
 namespace personarm {
+
+struct InputProfile;
 
 // ───────────────────────────────────────────────────────────────────────
 // Virtual Actions Enumeration
@@ -57,6 +60,9 @@ enum class ControllerType {
     GamepadNintendo,
     GenericGamepad
 };
+
+/// Physical device family a binding code belongs to (see input_profile.h).
+enum class InputDeviceKind { Keyboard, Mouse, Gamepad };
 
 // ───────────────────────────────────────────────────────────────────────
 // Mouse Cursor State for In-Game Menus & Point-and-Click
@@ -132,7 +138,21 @@ public:
     InputConfig& GetConfig() { return m_config; }
     const InputConfig& GetConfig() const { return m_config; }
 
+    // ── Input profiles (remappable bindings) ──────────────────────────
+    /// Activates a profile: copies its tuning values into InputConfig, selects the device
+    /// used for glyph prompts and routes ProcessRawInput through its bindings.
+    void ApplyProfile(const InputProfile& profile);
+    bool HasProfile() const { return m_profile != nullptr; }
+    const InputProfile* GetProfile() const { return m_profile.get(); }
+
+    /// Feeds a physical input event (SDL-independent). Returns true if any VirtualAction or
+    /// mouse state was affected.
+    /// Mouse wheel codes ("WheelUp"/"WheelDown") are one-frame pulses: they release on the next Update().
+    bool ProcessRawInput(InputDeviceKind device, const std::string& code, bool pressed);
+
     // Internal simulation & testing triggers
+    void SimulateMouseButton(bool left, bool right, bool middle);
+    void SimulateMouseWheel(int32_t notches);
     void SimulateActionPress(VirtualAction action);
     void SimulateActionRelease(VirtualAction action);
     void SimulateMouseMove(int32_t x, int32_t y);
@@ -150,6 +170,10 @@ private:
 
     AnalogAxes m_axes;
     MouseState m_mouse;
+
+    std::shared_ptr<InputProfile> m_profile;
+    std::vector<VirtualAction> m_pulse_actions;
+    std::vector<VirtualAction> m_pulse_release; // pulses to release on the next Update() // actions released at the start of the next Update()
 
     bool m_initialized = false;
 };

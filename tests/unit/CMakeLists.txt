@@ -22,3 +22,10 @@ set_tests_properties(unit_test_core PROPERTIES
     TIMEOUT 120
 )
 
+
+add_executable(unit_test_phase7 test_phase7.cpp)
+target_link_libraries(unit_test_phase7 PRIVATE personarm_core)
+target_include_directories(unit_test_phase7 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(unit_test_phase7 PRIVATE cxx_std_17)
+add_test(NAME unit_test_phase7 COMMAND unit_test_phase7)
+set_tests_properties(unit_test_phase7 PROPERTIES LABELS "unit" TIMEOUT 120)

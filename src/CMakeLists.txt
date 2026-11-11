@@ -7,6 +7,8 @@
 set(LAUNCHER_SOURCES
     launcher/launcher.cpp
     launcher/launcher.h
+    launcher/config_io.cpp
+    launcher/config_io.h
 )
 
 set(CORE_SOURCES
@@ -14,6 +16,9 @@ set(CORE_SOURCES
     core/memory_manager.h
     core/logger.cpp
     core/logger.h
+    core/json_lite.cpp
+    core/json_lite.h
+    core/hash.h
     core/save_manager.cpp
     core/save_manager.h
 )
@@ -21,6 +26,10 @@ set(CORE_SOURCES
 set(INPUT_SOURCES
     input/input_manager.cpp
     input/input_manager.h
+    input/input_profile.cpp
+    input/input_profile.h
+    input/mouse_navigation.cpp
+    input/mouse_navigation.h
 )
 
 set(AUDIO_SOURCES
@@ -42,6 +51,8 @@ set(LOADER_SOURCES
     loader/disc_reader.h
     loader/tim_parser.cpp
     loader/tim_parser.h
+    loader/png_codec.cpp
+    loader/png_codec.h
     loader/ps1_bios_hle.cpp
     loader/ps1_bios_hle.h
     loader/exe_loader.cpp
@@ -52,6 +63,8 @@ set(LOADER_SOURCES
 set(RENDERING_SOURCES
     rendering/renderer.cpp
     rendering/renderer.h
+    rendering/texture_override.cpp
+    rendering/texture_override.h
     rendering/ps1_gpu.cpp
     rendering/ps1_gpu.h
     rendering/window_context.cpp
