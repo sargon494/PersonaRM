@@ -223,6 +223,55 @@ static void TestCfgUnresolvedContextLimit() {
     CHECK(r.unresolved_contexts.size() == 4);
 }
 
+// Switch with a load offset and no addiu, as the compiler emits for large case counts:
+//   sltiu $2,$3,4 ; beq $2,$0,default ; nop ; sll $2,$3,2 ; lui $1,hi ; addu $1,$1,$2
+//   lw $2,lo($1) ; nop ; jr $2 ; nop
+static void TestCfgSwitchOffsetLoad() {
+    const uint32_t table = kBase + 16 * 4;                   // 0x80010040: hi = 0x8001, lo = 0x40
+    auto code = Bytes({
+        0x2C620004u,                                          // 0 sltiu $2,$3,4
+        0x10400009u,                                          // 1 beq $2,$0,+9 (to word 11)
+        kNop,                                                 // 2
+        0x00031080u,                                          // 3 sll $2,$3,2
+        0x3C010000u | (table >> 16),                          // 4 lui $1,0x8001
+        0x00220821u,                                          // 5 addu $1,$1,$2
+        0x8C220000u | (table & 0xFFFF),                       // 6 lw $2,0x40($1)
+        kNop,                                                 // 7
+        0x00400008u,                                          // 8 jr $2
+        kNop,                                                 // 9
+        kNop,                                                 // 10
+        kJrRa, kNop,                                          // 11-12 default
+        kNop, kNop, kNop,                                     // 13-15
+        0, 0, 0, 0,                                           // 16-19 table entries (filled below)
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,        // 20-35 case blocks (filled below)
+    });
+    const uint32_t cases[4] = {kBase + 20 * 4, kBase + 24 * 4, kBase + 28 * 4, kBase + 32 * 4};
+    for (int i = 0; i < 4; ++i) {
+        const uint32_t w = cases[i];
+        for (int b = 0; b < 4; ++b) code[(16 + i) * 4 + b] = static_cast<uint8_t>(w >> (8 * b));
+    }
+    for (int i = 0; i < 4; ++i) {
+        const uint32_t words[4] = {0x24020000u | static_cast<uint32_t>(i), kJrRa, kNop, kNop};
+        for (int k = 0; k < 4; ++k)
+            for (int b = 0; b < 4; ++b) code[(20 + 4 * i + k) * 4 + b] = static_cast<uint8_t>(words[k] >> (8 * b));
+    }
+    CfgReport r = AnalyzeControlFlow(code.data(), code.size(), kBase, kBase);
+    CHECK(r.resolved_jump_tables == 1);
+    CHECK(r.resolved_table_entries == 4);
+    CHECK(r.indirect_sites.empty());
+    CHECK(r.out_of_range_targets == 0);
+}
+
+// `li $10,0xB0 ; jr $10 ; li $9,fn` is a BIOS call, not an indirect jump; execution resumes after it.
+static void TestCfgBiosCall() {
+    auto code = Bytes({0x240A00B0u, 0x01400008u, 0x24090033u, kJrRa, kNop});
+    CfgReport r = AnalyzeControlFlow(code.data(), code.size(), kBase, kBase);
+    CHECK(r.bios_calls == 1);
+    CHECK(r.indirect_jumps == 0 && r.indirect_sites.empty());
+    CHECK(r.returns == 1);
+    CHECK(r.reachable_words == 5);
+}
+
 int main() {
     TestDecode();
     TestCfgCallsAndDelaySlots();
@@ -231,6 +280,8 @@ int main() {
     TestCfgCoverage();
     TestCfgJumpTable();
     TestCfgJumpTableOutOfRange();
+    TestCfgSwitchOffsetLoad();
+    TestCfgBiosCall();
     TestDescribeInsn();
     TestCfgUnresolvedContextLimit();
     std::cout << "recomp tests passed (" << g_checks << " checks)\n";

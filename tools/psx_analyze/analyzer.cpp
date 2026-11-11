@@ -419,7 +419,7 @@ std::string RenderMarkdown(const std::vector<DiscReport>& reports) {
                 os << "| Llamadas directas / saltos directos / ramas condicionales | " << c.direct_calls << " / "
                    << c.direct_jumps << " / " << c.conditional_branches << " |\n";
                 os << "| Retornos (`jr $ra`) | " << c.returns << " |\n";
-                os << "| Saltos indirectos `jr` (total, incluidos los resueltos) / `jalr` sin resolver | "
+                os << "| Llamadas a BIOS (`jr` a 0xA0/0xB0/0xC0) / `jr` sin contar BIOS / `jalr` sin resolver | " << c.bios_calls << " / "
                    << c.indirect_jumps << " / " << c.indirect_calls << " |\n";
                 os << "| Tablas de salto resueltas / entradas leídas | " << c.resolved_jump_tables << " / "
                    << c.resolved_table_entries << " |\n";
