@@ -30,6 +30,8 @@ struct CfgReport {
     uint32_t syscalls = 0;
     uint32_t invalid_reached = 0;       // reserved encodings reached as code
     uint32_t out_of_range_targets = 0;  // branch/call/fall-through targets outside the image
+    uint32_t resolved_jump_tables = 0;  // indirect jumps whose switch table was decoded
+    uint32_t resolved_table_entries = 0; // in-image entries read from those tables
     std::vector<uint32_t> function_entries;     // sorted, in-image
     std::vector<uint32_t> indirect_sites;       // addresses of unresolved indirect jumps/calls
     std::vector<uint32_t> invalid_sites;        // addresses of reserved words reached
