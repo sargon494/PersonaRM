@@ -419,13 +419,21 @@ std::string RenderMarkdown(const std::vector<DiscReport>& reports) {
                 os << "| Llamadas directas / saltos directos / ramas condicionales | " << c.direct_calls << " / "
                    << c.direct_jumps << " / " << c.conditional_branches << " |\n";
                 os << "| Retornos (`jr $ra`) | " << c.returns << " |\n";
-                os << "| Saltos y llamadas indirectas sin resolver | " << c.indirect_jumps << " / " << c.indirect_calls << " |\n";
+                os << "| Saltos indirectos `jr` (total, incluidos los resueltos) / `jalr` sin resolver | "
+                   << c.indirect_jumps << " / " << c.indirect_calls << " |\n";
+                os << "| Tablas de salto resueltas / entradas leídas | " << c.resolved_jump_tables << " / "
+                   << c.resolved_table_entries << " |\n";
                 os << "| Palabras reservadas alcanzadas como código | " << c.invalid_reached << " |\n";
                 os << "| Destinos fuera de la imagen | " << c.out_of_range_targets << " |\n";
                 os << "| Llamadas al sistema (syscall/break) | " << c.syscalls << " |\n\n";
                 if (!c.indirect_sites.empty()) {
                     os << "Primeros saltos indirectos sin resolver: ";
                     for (size_t i = 0; i < c.indirect_sites.size() && i < 10; ++i) os << (i ? ", " : "") << Hex(c.indirect_sites[i]);
+                    os << "\n\n";
+                }
+                if (!c.out_of_range_sites.empty()) {
+                    os << "Primeros puntos que apuntan fuera de la imagen: ";
+                    for (size_t i = 0; i < c.out_of_range_sites.size() && i < 10; ++i) os << (i ? ", " : "") << Hex(c.out_of_range_sites[i]);
                     os << "\n\n";
                 }
                 os << "_Lectura: el CFG solo sigue saltos directos. Lo que no alcanza (saltos indirectos, overlays, código generado) es lo que decidirá si hace falta el respaldo del intérprete._\n\n";
