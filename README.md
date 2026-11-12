@@ -24,7 +24,7 @@ PersonaRM aims to run *Persona 2: Eternal Punishment* natively on Windows and Li
 
 > **The game does not run yet.** PersonaRM is a research-driven work in progress: the disc and executable analysis is far along, while the hardware core is still being built. See [Status](#status) for what exists today.
 >
-> **Current phase: step 2 of 6, completing the machine core.** Step 1 (CPU correctness) is done: a 161-check R3000A conformance suite passes. Next up: interrupts, VBlank, timers, and a common trace format for comparing against a reference emulator.
+> **Current phase: step 2 of 6, completing the machine core.** Step 1 (CPU correctness) is done. In step 2, the GTE, the GPU rasterizer, interrupts, VBlank, timers and the trace format are in; the kernel event chain, CD-ROM, DMA and SPU accuracy are being built now.
 
 PersonaRM follows a strict **Bring Your Own Copy (BYOC)** model:
 
@@ -63,14 +63,16 @@ A JIT is not planned: the PS1 workload does not call for one.
 |---|---|
 | Disc reading (ISO 9660 and raw 2352-byte images, `.cue` resolution) | ✅ Implemented |
 | `PS-X EXE` loader | ✅ Implemented (ELF is not supported) |
-| MIPS-I CPU interpreter | ✅ Instructions, delay slots and exceptions pass a 161-check conformance suite; interrupt delivery is in progress |
+| MIPS-I CPU interpreter | ✅ Instructions, delay slots, exceptions and interrupts pass a 199-check conformance suite |
 | Static analysis tools (`psx_analyze`: FILEPOS, file extraction, chunks, RLE, hazard scan, control-flow graph) | ✅ Implemented |
-| GTE (geometry engine) | 🟡 Partial: 6 of about 22 commands |
-| GPU and VRAM | 🟡 VRAM and blits only; polygons and rectangles are not drawn yet |
+| GTE (geometry engine) | ✅ All 22 commands, FLAG and UNR division (not yet checked against real-hardware results) |
+| GPU and VRAM | ✅ Software rasterizer: polygons, lines, sprites, textures with CLUT, semi-transparency, GPUREAD |
 | MDEC video decoder | 🟡 Partial |
 | SPU audio | 🟡 Partial: fixed-step ADSR, no reverb |
-| BIOS HLE | 🟡 About a handful of calls |
-| Interrupts, DMA, timers, CD-ROM | ⏳ Not started |
+| BIOS HLE | 🟡 A handful of calls and critical sections; kernel events and the IRQ chain are in progress |
+| Interrupts, VBlank, root counters | ✅ Implemented (timing approximated) |
+| DMA, CD-ROM | 🔨 In progress |
+| Trace format for reference comparison (`PRMTRACE v1`) | ✅ Format and comparator; not wired into the engine yet |
 | Static recompiler (code generation) | ⏳ Not started |
 | Windowed SDL / OpenGL display and host audio | ⏳ Stubs only |
 | Launcher | 🟡 Disc scan and verification; launching the game is a stub |
