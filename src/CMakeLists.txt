@@ -82,6 +82,12 @@ set(RENDERING_SOURCES
     rendering/mdec_decoder.cpp
     rendering/mdec_decoder.h
 )
+set(HW_SOURCES
+    hw/cdrom.cpp
+    hw/cdrom.h
+    hw/dma.cpp
+    hw/dma.h
+)
 set(ENGINE_SOURCES
     engine/engine.cpp
     engine/engine.h
@@ -100,6 +106,7 @@ add_library(personarm_core STATIC
     ${LOADER_SOURCES}
     ${RENDERING_SOURCES}
     ${ENGINE_SOURCES}
+    ${HW_SOURCES}
 )
 
 
