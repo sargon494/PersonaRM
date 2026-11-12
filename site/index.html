@@ -146,6 +146,9 @@
             <p class="intro reveal">PersonaRM is in active development and the game does not run yet. The plan:
                 get the CPU provably correct, finish the machine core, boot the game, then compile its code ahead of
                 time.</p>
+            <p class="intro reveal"><strong>Current phase: step 2 of 6, completing the machine core.</strong> Step 1,
+                CPU correctness, is done: a 161-check R3000A conformance suite passes. Next: interrupts, VBlank,
+                timers, and a trace format to compare against a reference emulator.</p>
             <div class="status-table reveal" role="table" aria-label="Subsystem status">
                 <div class="row head" role="row"><span role="columnheader">Subsystem</span><span
                         role="columnheader">Status</span></div>
@@ -156,7 +159,7 @@
                 <div class="row" role="row"><span role="cell">Static analysis tools</span><span role="cell"
                         class="tag ok">Implemented</span></div>
                 <div class="row" role="row"><span role="cell">MIPS-I CPU interpreter</span><span role="cell"
-                        class="tag progress">Partial</span></div>
+                        class="tag ok">Conformance suite passing</span></div>
                 <div class="row" role="row"><span role="cell">GTE, GPU, MDEC, SPU</span><span role="cell"
                         class="tag progress">Partial</span></div>
                 <div class="row" role="row"><span role="cell">BIOS HLE</span><span role="cell"

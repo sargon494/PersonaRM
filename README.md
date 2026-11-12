@@ -23,6 +23,8 @@
 PersonaRM aims to run *Persona 2: Eternal Punishment* natively on Windows and Linux, without an external emulator. It rebuilds the PlayStation 1 hardware the game depends on (MIPS R3000A CPU, GTE, GPU, MDEC, SPU, CD-ROM) and wraps it in a launcher that manages your disc images, controls, and display options.
 
 > **The game does not run yet.** PersonaRM is a research-driven work in progress: the disc and executable analysis is far along, while the hardware core is still being built. See [Status](#status) for what exists today.
+>
+> **Current phase: step 2 of 6, completing the machine core.** Step 1 (CPU correctness) is done: a 161-check R3000A conformance suite passes. Next up: interrupts, VBlank, timers, and a common trace format for comparing against a reference emulator.
 
 PersonaRM follows a strict **Bring Your Own Copy (BYOC)** model:
 
@@ -46,8 +48,8 @@ Verified by reading the Japanese release's discs and executable (nothing here is
 
 The chosen approach is an **interpreter-first native runtime**, with static recompilation added on top once the interpreter can be checked against a reference emulator:
 
-1. **CPU correctness.** A conformance test suite for every MIPS-I instruction, including delay slots, load delays, unaligned access, and edge cases of `DIV`.
-2. **Complete machine core.** Interrupt controller, DMA, timers, CD-ROM, joypad bus, and a real GPU rasterizer.
+1. ✅ **CPU correctness.** A conformance test suite for every MIPS-I instruction, including delay slots, load delays, unaligned access, overflow traps, exceptions, and edge cases of `DIV`.
+2. 🔨 **Complete machine core.** Interrupt controller, DMA, timers, CD-ROM, joypad bus, and a real GPU rasterizer.
 3. **First boot.** Run the game's main executable up to the first overlay load, and compare against a reference trace.
 4. **Static recompilation.** Translate the main executable and each overlay ahead of time, with the interpreter as fallback.
 5. **Replace library routines** (video playback, pad, memory card, CD, SPU, GPU) with hand-written native code.
@@ -61,8 +63,8 @@ A JIT is not planned: the PS1 workload does not call for one.
 |---|---|
 | Disc reading (ISO 9660 and raw 2352-byte images, `.cue` resolution) | ✅ Implemented |
 | `PS-X EXE` loader | ✅ Implemented (ELF is not supported) |
-| MIPS-I CPU interpreter | 🟡 Core instructions work; exceptions, interrupts and some COP0 behaviour are missing |
-| Static analysis tools (`psx_analyze`, control-flow graph) | ✅ Implemented |
+| MIPS-I CPU interpreter | ✅ Instructions, delay slots and exceptions pass a 161-check conformance suite; interrupt delivery is in progress |
+| Static analysis tools (`psx_analyze`: FILEPOS, file extraction, chunks, RLE, hazard scan, control-flow graph) | ✅ Implemented |
 | GTE (geometry engine) | 🟡 Partial: 6 of about 22 commands |
 | GPU and VRAM | 🟡 VRAM and blits only; polygons and rectangles are not drawn yet |
 | MDEC video decoder | 🟡 Partial |
