@@ -24,7 +24,7 @@ PersonaRM aims to run *Persona 2: Eternal Punishment* natively on Windows and Li
 
 > **The game does not run yet.** PersonaRM is a research-driven work in progress: the disc and executable analysis is far along, while the hardware core is still being built. See [Status](#status) for what exists today.
 >
-> **Current phase: step 2 of 6, completing the machine core.** Step 1 (CPU correctness) is done. In step 2, the GTE, the GPU rasterizer, interrupts, VBlank, timers and the trace format are in; the kernel event chain, CD-ROM, DMA and SPU accuracy are being built now.
+> **Current phase: step 2 of 6, completing the machine core.** Step 1 (CPU correctness) is done. In step 2, the GTE, GPU rasterizer, interrupts, timers, kernel events, CD-ROM, DMA, SPU and the trace format are in. Now: wiring CD-ROM, DMA and SPU into the bus, MDEC video and XA audio, and the first boot attempt of the real game (the gate into step 3).
 
 PersonaRM follows a strict **Bring Your Own Copy (BYOC)** model:
 
@@ -68,11 +68,11 @@ A JIT is not planned: the PS1 workload does not call for one.
 | GTE (geometry engine) | ✅ All 22 commands, FLAG and UNR division (not yet checked against real-hardware results) |
 | GPU and VRAM | ✅ Software rasterizer: polygons, lines, sprites, textures with CLUT, semi-transparency, GPUREAD |
 | MDEC video decoder | 🟡 Partial |
-| SPU audio | 🟡 Partial: fixed-step ADSR, no reverb |
-| BIOS HLE | 🟡 A handful of calls and critical sections; kernel events and the IRQ chain are in progress |
+| SPU audio | 🟡 Registers, ADPCM, pitch, ADSR and reverb; the interpolation table is an approximation and it is not wired into the bus yet |
+| BIOS HLE | ✅ Kernel events, interrupt chain, patchable tables and file calls the game uses (memory card still missing) |
 | Interrupts, VBlank, root counters | ✅ Implemented (timing approximated) |
-| DMA, CD-ROM | 🔨 In progress |
-| Trace format for reference comparison (`PRMTRACE v1`) | ✅ Format and comparator; not wired into the engine yet |
+| DMA, CD-ROM | 🟡 Implemented as devices with tests; wiring into the bus is in progress |
+| Trace format for reference comparison (`PRMTRACE v1`) | ✅ Format, comparator and `--trace-out` |
 | Static recompiler (code generation) | ⏳ Not started |
 | Windowed SDL / OpenGL display and host audio | ⏳ Stubs only |
 | Launcher | 🟡 Disc scan and verification; launching the game is a stub |

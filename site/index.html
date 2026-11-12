@@ -147,8 +147,9 @@
                 get the CPU provably correct, finish the machine core, boot the game, then compile its code ahead of
                 time.</p>
             <p class="intro reveal"><strong>Current phase: step 2 of 6, completing the machine core.</strong> Step 1,
-                CPU correctness, is done. In step 2 the GTE, the GPU rasterizer, interrupts, VBlank, timers and the
-                trace format are in; the kernel event chain, CD-ROM, DMA and SPU accuracy are being built now.</p>
+                CPU correctness, is done. In step 2 the GTE, GPU rasterizer, interrupts, timers, kernel events, CD-ROM,
+                DMA, SPU and the trace format are in. Now: wiring them into the bus, MDEC video and XA audio, and the
+                first boot attempt of the real game.</p>
             <div class="status-table reveal" role="table" aria-label="Subsystem status">
                 <div class="row head" role="row"><span role="columnheader">Subsystem</span><span
                         role="columnheader">Status</span></div>
@@ -164,12 +165,12 @@
                         class="tag ok">Implemented</span></div>
                 <div class="row" role="row"><span role="cell">MDEC and SPU</span><span role="cell"
                         class="tag progress">Partial</span></div>
-                <div class="row" role="row"><span role="cell">BIOS HLE</span><span role="cell"
-                        class="tag progress">Partial</span></div>
+                <div class="row" role="row"><span role="cell">BIOS HLE and kernel events</span><span role="cell"
+                        class="tag ok">Implemented</span></div>
                 <div class="row" role="row"><span role="cell">Interrupts, VBlank and timers</span><span role="cell"
                         class="tag ok">Implemented</span></div>
-                <div class="row" role="row"><span role="cell">DMA and CD-ROM</span><span role="cell"
-                        class="tag progress">In progress</span></div>
+                <div class="row" role="row"><span role="cell">DMA, CD-ROM and SPU</span><span role="cell"
+                        class="tag progress">Built, being wired</span></div>
                 <div class="row" role="row"><span role="cell">Static recompiler</span><span role="cell"
                         class="tag prototype">Not started</span></div>
                 <div class="row" role="row"><span role="cell">Window, display and host audio</span><span role="cell"
