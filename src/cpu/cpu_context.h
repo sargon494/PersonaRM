@@ -57,6 +57,9 @@ public:
     void Step();
     uint64_t GetCycleCount() const { return m_cycles; }
 
+    // Hardware interrupt line driven by the bus: (I_STAT AND I_MASK) != 0 -> CAUSE.IP2.
+    void SetIrqLine(bool asserted);
+
     const CpuRegisters& GetRegisters() const { return m_regs; }
     void SetRegisters(const CpuRegisters& regs) { m_regs = regs; m_next_pc = regs.pc + 4; m_prev_was_branch = false; }
 
