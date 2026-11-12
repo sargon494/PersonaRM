@@ -46,19 +46,34 @@ bool Ps1BiosHle::HandleBiosHook(CpuContext& cpu, uint8_t* ram, size_t ram_size) 
         uint32_t func = cpu.GetGPR(9);
         return ExecuteCall(BiosVector::VectorC, func, cpu, ram, ram_size);
     } else if (masked_pc == 0x80) {
-        // Exception vector with no BIOS in RAM: return past the faulting opcode and pop SR (rfe).
-        // shortcut: SYSCALL 1/2 (Enter/ExitCriticalSection) do not touch SR.IEc and IRQs are not
-        // dispatched; upgrade when interrupts are emulated (GAP-CPU-06).
+        // Exception vector with no BIOS in RAM: resume and pop SR (rfe).
         CpuRegisters regs = cpu.GetRegisters();
-        // Only SYSCALL (8) and BREAK (9) are expected here; a fault (Ov, AdEL, AdES...) means a
-        // real bug, so make it visible instead of silently resuming.
         const uint32_t exc = (regs.cp0_cause >> 2) & 0x1Fu;
-        if (exc != 8 && exc != 9) {
+        regs.pc = regs.cp0_epc + 4;
+        if (exc == 0) {
+            // Int. The real kernel saves the registers to the TCB, walks the SysEnqIntRP priority
+            // chain (VBlank/timer handlers DeliverEvent RCnt classes and auto-ack per
+            // ChangeClearRCnt), runs the HookEntryInt hook, then ReturnFromException to EPC.
+            // shortcut: no chain, events or hook; Engine::RunFrame acknowledges the enabled I_STAT
+            // bits before calling us and we only resume the interrupted opcode (EPC, not EPC+4).
+            // Upgrade with the HLE IRQ chain (SVC-031) so libetc VSync()/callbacks advance.
+            regs.pc = regs.cp0_epc;
+        } else if (exc == 8) {
+            // psx-spx "BIOS Misc Functions" (from memory): SYS(01h) EnterCriticalSection clears SR
+            // bits 2 and 10 of the mode RFE restores (IEp, IM2) and returns 1 if interrupts were
+            // enabled, else 0; SYS(02h) ExitCriticalSection sets them. Other SYS numbers: no-op.
+            if (regs.gpr[4] == 1) {
+                regs.gpr[2] = (regs.cp0_status & 0x404u) == 0x404u ? 1u : 0u;
+                regs.cp0_status &= ~0x404u;
+            } else if (regs.gpr[4] == 2) {
+                regs.cp0_status |= 0x404u;
+            }
+        } else if (exc != 9) {
+            // A fault (Ov, AdEL, AdES...) means a real bug, so make it visible instead of silently resuming.
             std::ostringstream m;
             m << "unhandled CPU exception code " << exc << " at EPC 0x" << std::hex << regs.cp0_epc;
             PRM_LOG_ERROR("HLE", m.str());
         }
-        regs.pc = regs.cp0_epc + 4;
         regs.cp0_status = (regs.cp0_status & ~0x0Fu) | ((regs.cp0_status >> 2) & 0x0Fu);
         cpu.SetRegisters(regs);
         return true;

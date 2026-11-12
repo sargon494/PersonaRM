@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <memory>
@@ -101,6 +102,21 @@ private:
     // Memory read/write dispatchers mapped to MIPS address space
     uint32_t ReadBus(uint32_t address, uint32_t size);
     void WriteBus(uint32_t address, uint32_t value, uint32_t size);
+
+    // Interrupt controller (psx-spx "Interrupt Control") and root counters (psx-spx "Timers").
+    void RaiseIrq(uint32_t bit) { m_i_stat |= 1u << bit; UpdateIrqLine(); }
+    void UpdateIrqLine() { m_cpu.SetIrqLine((m_i_stat & m_i_mask) != 0); }
+    void TickTimers(uint32_t cycles);
+
+    struct RootCounter {
+        uint32_t value = 0, mode = 0, target = 0;
+        uint32_t prescale = 0;  // sysclk/8 remainder (Timer 2)
+        bool irq_done = false;  // one-shot mode already fired since the last MODE write
+    };
+    uint32_t m_i_stat = 0; // 1F801070h
+    uint32_t m_i_mask = 0; // 1F801074h
+    std::array<RootCounter, 3> m_timers{};
+    uint64_t m_timer_cycles = 0; // CPU cycle count the timers were last advanced to
 
     EngineState m_state = EngineState::Uninitialized;
     EngineBootConfig m_config;
