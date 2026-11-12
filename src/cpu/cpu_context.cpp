@@ -18,8 +18,6 @@ void CpuContext::Reset() {
     m_cycles = 0;
 
     m_next_pc = m_regs.pc + 4;
-    m_branch_target.reset();
-    m_in_delay_slot = false;
     m_load_delay_reg = 0;
     m_load_delay_val = 0;
     m_gte.Reset();
@@ -41,7 +39,7 @@ void CpuContext::SetMemoryHooks(ReadMemoryFunc read_fn, WriteMemoryFunc write_fn
 }
 
 void CpuContext::ScheduleBranch(uint32_t target_address) {
-    m_branch_target = target_address;
+    m_next_pc = target_address;
 }
 
 void CpuContext::Step() {
@@ -51,30 +49,25 @@ void CpuContext::Step() {
         return;
     }
 
-    // Apply delayed load if pending from previous cycle
-    if (m_load_delay_reg != 0) {
-        SetGPR(m_load_delay_reg, m_load_delay_val);
-        m_load_delay_reg = 0;
-    }
+    // Load delay: the instruction right after a load still sees the OLD register value,
+    // so the previous load is only written back after this instruction has executed.
+    m_prev_load_reg = m_load_delay_reg;
+    m_prev_load_val = m_load_delay_val;
+    m_load_delay_reg = 0;
 
     uint32_t current_pc = m_regs.pc;
     uint32_t opcode = m_read_memory(current_pc, 4);
 
-    // Update PC pipeline: advance to next_pc or branch destination
-    if (m_in_delay_slot && m_branch_target.has_value()) {
-        m_regs.pc = *m_branch_target;
-        m_next_pc = m_regs.pc + 4;
-        m_branch_target.reset();
-        m_in_delay_slot = false;
-    } else {
-        m_regs.pc = m_next_pc;
-        m_next_pc += 4;
-        if (m_branch_target.has_value()) {
-            m_in_delay_slot = true;
-        }
-    }
+    // Two-stage PC pipeline: a taken branch rewrites m_next_pc, so the delay slot
+    // (already in m_regs.pc) runs once and the target follows it.
+    m_regs.pc = m_next_pc;
+    m_next_pc += 4;
 
     ExecuteInstruction(opcode);
+    // A newer load to the same register supersedes the old one.
+    if (m_prev_load_reg != 0 && m_load_delay_reg != m_prev_load_reg) {
+        SetGPR(m_prev_load_reg, m_prev_load_val);
+    }
     m_cycles++;
 }
 
@@ -343,8 +336,8 @@ void CpuContext::ExecuteInstruction(uint32_t opcode) {
                 uint32_t shift = (addr & 3) * 8;
                 uint32_t aligned_val = m_read_memory(aligned_addr, 4);
 
-                uint32_t cur_val = (m_load_delay_reg == rt) ? m_load_delay_val : rt_val;
-                uint32_t mask = 0x00FFFFFF >> (24 - shift);
+                uint32_t cur_val = (m_prev_load_reg == rt) ? m_prev_load_val : rt_val;
+                uint32_t mask = 0x00FFFFFF >> shift;
                 uint32_t result = (cur_val & mask) | (aligned_val << (24 - shift));
 
                 m_load_delay_reg = rt;
@@ -386,7 +379,7 @@ void CpuContext::ExecuteInstruction(uint32_t opcode) {
                 uint32_t shift = (addr & 3) * 8;
                 uint32_t aligned_val = m_read_memory(aligned_addr, 4);
 
-                uint32_t cur_val = (m_load_delay_reg == rt) ? m_load_delay_val : rt_val;
+                uint32_t cur_val = (m_prev_load_reg == rt) ? m_prev_load_val : rt_val;
                 uint32_t mask = (shift == 0) ? 0x00000000 : (0xFFFFFF00 << (24 - shift));
                 uint32_t result = (cur_val & mask) | (aligned_val >> shift);
 
