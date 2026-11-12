@@ -147,13 +147,23 @@ void CpuContext::ExecuteInstruction(uint32_t opcode) {
                     break;
                 }
                 case 0x1A: // DIV (signed)
-                    if (rt_val != 0) {
+                    // R3000A never traps on divide; results for the edge cases per psx-spx.
+                    if (rt_val == 0) {
+                        m_regs.lo = (static_cast<int32_t>(rs_val) < 0) ? 1u : 0xFFFFFFFFu;
+                        m_regs.hi = rs_val;
+                    } else if (rs_val == 0x80000000u && rt_val == 0xFFFFFFFFu) {
+                        m_regs.lo = 0x80000000u; // INT_MIN / -1 (UB in C++)
+                        m_regs.hi = 0;
+                    } else {
                         m_regs.lo = static_cast<uint32_t>(static_cast<int32_t>(rs_val) / static_cast<int32_t>(rt_val));
                         m_regs.hi = static_cast<uint32_t>(static_cast<int32_t>(rs_val) % static_cast<int32_t>(rt_val));
                     }
                     break;
                 case 0x1B: // DIVU (unsigned)
-                    if (rt_val != 0) {
+                    if (rt_val == 0) {
+                        m_regs.lo = 0xFFFFFFFFu;
+                        m_regs.hi = rs_val;
+                    } else {
                         m_regs.lo = rs_val / rt_val;
                         m_regs.hi = rs_val % rt_val;
                     }

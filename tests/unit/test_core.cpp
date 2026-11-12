@@ -464,6 +464,35 @@ int main() {
         std::cout << "  ✓ MIPS load delay test passed.\n";
     }
 
+    // 12e. DIV/DIVU edge cases: never trap; values per psx-spx (verify against HW-005)
+    {
+        std::vector<uint32_t> code(0x10000 / 4, 0);
+        const uint32_t kMfLo = 0x00001812, kMfHi = 0x00002010; // mflo r3 ; mfhi r4
+        auto run = [&](uint32_t div_op, uint32_t n, uint32_t d, uint32_t& lo, uint32_t& hi) {
+            personarm::CpuContext cpu;
+            code[0x1000 / 4] = div_op;
+            code[0x1004 / 4] = kMfLo;
+            code[0x1008 / 4] = kMfHi;
+            cpu.SetMemoryHooks(
+                [&code](uint32_t addr, uint32_t) -> uint32_t { return code[(addr & 0xFFFF) / 4]; },
+                [](uint32_t, uint32_t, uint32_t) {});
+            cpu.SetGPR(1, n);
+            cpu.SetGPR(2, d);
+            cpu.SetPC(0x1000);
+            for (int i = 0; i < 4; ++i) cpu.Step();
+            lo = cpu.GetGPR(3);
+            hi = cpu.GetGPR(4);
+        };
+        const uint32_t kDiv = 0x0022001A, kDivu = 0x0022001B;
+        uint32_t lo = 0, hi = 0;
+        run(kDiv, 7, 0, lo, hi);            assert(lo == 0xFFFFFFFFu && hi == 7);
+        run(kDiv, 0xFFFFFFF9u, 0, lo, hi);  assert(lo == 1 && hi == 0xFFFFFFF9u); // -7 / 0
+        run(kDiv, 0x80000000u, 0xFFFFFFFFu, lo, hi); assert(lo == 0x80000000u && hi == 0);
+        run(kDivu, 7, 0, lo, hi);           assert(lo == 0xFFFFFFFFu && hi == 7);
+        run(kDiv, 7, 2, lo, hi);            assert(lo == 3 && hi == 1);
+        std::cout << "  ✓ MIPS DIV/DIVU edge case test passed.\n";
+    }
+
     // 12c. LWL (little-endian): word 0xAABBCCDD at 0x2000, lwl r1,0x2001(r0) keeps low 16 bits of r1
     {
         personarm::CpuContext cpu;
