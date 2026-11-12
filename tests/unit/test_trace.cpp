@@ -108,6 +108,44 @@ int main() {
     std::istringstream ok("{\"v\":1}\r\n{\"ev\":\"future\",\"seq\":0}\r\n\r\n");
     CHECK(ReadTrace(ok, &tf, &err) && tf.events.size() == 1);
 
+    // Collapsed polling calls (TRACE_FORMAT.md 3.1): 5 identical TestEvent polls -> one event, n=5.
+    auto polls = [](int n, bool collapse_via_writer, int vsync_after) {
+        std::ostringstream os;
+        if (collapse_via_writer) {
+            TraceWriter w(os, Hdr("prm"));
+            for (int i = 0; i < n; ++i) w.OnBiosCall(0xB0, 0x0B, {0xF1000000, 0, 0, 0}, 0x80010000);
+            if (vsync_after) w.OnVsync(1, "", 0);
+            w.OnBiosCall(0xB0, 0x0B, {0xF1000001, 0, 0, 0}, 0x80010000);
+            // destructor flushes the pending call
+        } else {  // an uncollapsed producer (e.g. Redux Lua): one line per call, no "n"
+            os << "{\"v\":1,\"disc\":\"SLPS-00000\",\"exe_sha256\":\"00\",\"mode\":\"events\",\"ram_masks\":[[\"0x00000000\",\"0x00010000\"]],\"src\":\"redux\"}\n";
+            int seq = 0;
+            auto call = [&](const char* a0) {
+                os << "{\"a0\":\"" << a0 << "\",\"a1\":\"0x00000000\",\"a2\":\"0x00000000\",\"a3\":\"0x00000000\",\"ev\":\"call\","
+                   << "\"fn\":11,\"kind\":\"bios\",\"ra\":\"0x80010000\",\"seq\":" << seq++ << ",\"vec\":\"0x000000b0\"}\n";
+            };
+            for (int i = 0; i < n; ++i) call("0xf1000000");
+            if (vsync_after) os << "{\"ev\":\"vsync\",\"frame\":1,\"seq\":" << seq++ << "}\n";
+            call("0xf1000001");
+        }
+        return os.str();
+    };
+    TraceFile c5 = Parse(polls(5, true, 0));
+    CHECK(c5.events.size() == 2);
+    CHECK(c5.events[0].NumberOr("n", 0) == 5 && c5.events[0].NumberOr("seq", -1) == 0);
+    CHECK(c5.events[1].Find("n") == nullptr && c5.events[1].NumberOr("seq", -1) == 1);
+    CHECK(Parse(polls(2, true, 1)).events.size() == 3);  // another event ends a run
+    // Collapsed vs uncollapsed producer, and different poll counts: equal by default.
+    CHECK(!CompareTraces(c5, Parse(polls(5, false, 0))).found);
+    CHECK(!CompareTraces(c5, Parse(polls(9, false, 0))).found);
+    CompareOptions strict;
+    strict.compare_repeat_counts = true;
+    CHECK(!CompareTraces(c5, Parse(polls(5, false, 0)), strict).found);
+    Divergence dn = CompareTraces(c5, Parse(polls(9, true, 0)), strict);
+    CHECK(dn.found && dn.index == 0 && dn.reason.find("repeat count") != std::string::npos);
+    // A different call after the run still diverges.
+    CHECK(CompareTraces(c5, Parse(polls(5, false, 1))).found);
+
     std::puts("unit_test_trace: all checks passed");
     return 0;
 }

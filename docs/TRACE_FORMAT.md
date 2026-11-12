@@ -46,6 +46,14 @@ Ordering rule when several events happen at one vsync: `vsync` first, then any `
 Unknown `ev` values are accepted by the reader and compared field-by-field.
 Optional fields are omitted when the producer cannot supply them (Redux: `gp0_*`, `vram_hash`).
 
+### 3.1 Collapsed calls (v1 extension)
+
+A polling loop (`TestEvent`, `CdSync`-style waits) would emit one `call` per poll. The writer therefore
+collapses a run of **consecutive identical** `call` events (all fields equal except `seq`) into one event
+with an extra integer field `n` = number of calls in the run (`n` is omitted when the run has one call).
+Any other event ends the run, so ordering is preserved; the collapsed event gets the `seq` of the moment it
+is flushed (still strictly increasing). Readers that do not know `n` see a valid v1 event, so `v` stays 1.
+
 ## 4. Hashing
 
 All hashes are **FNV-1a 64** (offset `0xCBF29CE484222325`, prime `0x100000001B3`), not cryptographic.
@@ -61,6 +69,10 @@ All hashes are **FNV-1a 64** (offset `0xCBF29CE484222325`, prime `0x100000001B3`
    `src` and `build` are ignored. Mismatch => divergence at index 0, reason `header ...`.
 2. Both event streams are filtered: `irq` and `mmio` are dropped (delivery timing differs between emulators,
    RC-015); configurable via `CompareOptions::ignore_events`.
+   After filtering, consecutive identical `call` events (ignoring `seq` and `n`) are merged on each side and
+   their repeat counts summed, so a collapsing producer (section 3.1) aligns with a non-collapsing one.
+   The count itself is not compared by default (poll counts depend on timing); `CompareOptions::
+   compare_repeat_counts` turns that on (reason `repeat count: A vs B`).
 3. The remaining events are aligned **by position** (the n-th compared event of A with the n-th of B);
    `seq` is never compared. Equivalent to per-type ordinals because both streams hold the same event kinds.
 4. Two events match when `ev` and `kind` are equal and every field present on **both** sides is equal
@@ -80,7 +92,9 @@ Empty lines are skipped.
 ## 7. Where the engine is wired
 
 Done: `--trace-out`, header at boot, `call` (HLE vector dispatch), `vsync` + `ckpt` (`vsync_N`) per frame,
-`irq` at the exception vector, `end` at shutdown. Still open: `load_file`, `cd_read`, `mmio`.
+`irq` at the exception vector, `end` at shutdown, collapsed `call` runs (3.1). The headless boot harness
+(`personarm --boot <disc.cue> [--max-frames N] [--trace-out f]`) also emits `load_file` (PC hook on
+`load_file_by_id`) and `cd_read` (PC hook on `cd_read_start`). Still open: `mmio`, `gp0_hash`.
 
 `ITraceSink` (in `trace.h`) is the only interface the runtime needs; a null pointer means tracing off.
 `TraceWriter` implements it. Planned call sites (owned by other work in progress, hence not edited here):

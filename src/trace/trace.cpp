@@ -59,7 +59,19 @@ TraceWriter::TraceWriter(std::ostream& out, const TraceHeader& h) : m_out(out), 
     m_out << j.Dump(-1) << '\n';
 }
 
+TraceWriter::~TraceWriter() { FlushCall(); }
+
+void TraceWriter::FlushCall() {
+    if (!m_call_n) return;
+    JsonValue rec = std::move(m_call);
+    if (m_call_n > 1) rec.Set("n", m_call_n);
+    m_call_n = 0;
+    rec.Set("seq", (double)m_seq++);
+    m_out << rec.Dump(-1) << '\n';
+}
+
 void TraceWriter::Emit(JsonValue rec) {
+    FlushCall();
     rec.Set("seq", (double)m_seq++);
     m_out << rec.Dump(-1) << '\n';
 }
@@ -73,7 +85,10 @@ void TraceWriter::OnBiosCall(uint32_t vec, uint32_t fn, const std::array<uint32_
     j.Set("fn", fn);
     for (int i = 0; i < 4; ++i) j.Set("a" + std::to_string(i), Hex32(a[i]));
     j.Set("ra", Hex32(ra));
-    Emit(std::move(j));
+    if (m_call_n && m_call.Dump(-1) == j.Dump(-1)) { ++m_call_n; return; }
+    FlushCall();
+    m_call = std::move(j);
+    m_call_n = 1;
 }
 
 void TraceWriter::OnLoadFile(uint32_t id, uint32_t dest, uint32_t ra) {
@@ -184,10 +199,35 @@ bool ReadTrace(std::istream& in, TraceFile* out, std::string* error) {
 
 // ── Comparator ─────────────────────────────────────────────────────────────
 
-static std::vector<const JsonValue*> Filter(const TraceFile& t, const CompareOptions& o) {
+// Repeat count of a `call` (absent "n" = 1).
+static double Repeats(const JsonValue& e) {
+    const JsonValue* n = e.Find("n");
+    return n && n->IsNumber() ? n->AsNumber() : 1;
+}
+
+// Drops ignored events and merges consecutive identical `call` events (any "n", seq ignored), so a
+// collapsed and an uncollapsed producer align. Merged runs keep their first event; counts go to `reps`.
+static std::vector<const JsonValue*> Filter(const TraceFile& t, const CompareOptions& o, std::vector<double>& reps) {
     std::vector<const JsonValue*> r;
-    for (const auto& e : t.events)
-        if (!o.ignore_events.count(e.StringOr("ev", ""))) r.push_back(&e);
+    auto key = [](const JsonValue& e) {
+        std::string k;
+        for (const auto& [name, v] : e.Members())
+            if (name != "seq" && name != "n") k += name + "=" + v.Dump(-1) + ";";
+        return k;
+    };
+    std::string last;
+    for (const auto& e : t.events) {
+        if (o.ignore_events.count(e.StringOr("ev", ""))) continue;
+        if (e.StringOr("ev", "") == "call") {
+            std::string k = key(e);
+            if (!r.empty() && k == last) { reps.back() += Repeats(e); continue; }
+            last = std::move(k);
+        } else {
+            last.clear();
+        }
+        r.push_back(&e);
+        reps.push_back(Repeats(e));
+    }
     return r;
 }
 
@@ -207,7 +247,8 @@ static std::string Key(const JsonValue& e) { return e.StringOr("ev", "") + "/" +
 
 Divergence CompareTraces(const TraceFile& a, const TraceFile& b, const CompareOptions& opt) {
     Divergence d;
-    auto ea = Filter(a, opt), eb = Filter(b, opt);
+    std::vector<double> ra, rb;
+    auto ea = Filter(a, opt, ra), eb = Filter(b, opt, rb);
     auto done = [&](size_t i, std::string why) {
         auto ctx = [&](const std::vector<const JsonValue*>& s) {
             std::vector<std::string> r;
@@ -227,8 +268,11 @@ Divergence CompareTraces(const TraceFile& a, const TraceFile& b, const CompareOp
     for (size_t i = 0; i < n; ++i) {
         if (Key(*ea[i]) != Key(*eb[i]))
             return done(i, "event type: " + Key(*ea[i]) + " vs " + Key(*eb[i]));
-        std::string f = DiffFields(*ea[i], *eb[i], {"seq"});
+        std::string f = DiffFields(*ea[i], *eb[i], {"seq", "n"});
         if (!f.empty()) return done(i, "event '" + Key(*ea[i]) + "' " + f);
+        if (opt.compare_repeat_counts && ra[i] != rb[i])
+            return done(i, "event '" + Key(*ea[i]) + "' repeat count: " + std::to_string((long long)ra[i]) +
+                               " vs " + std::to_string((long long)rb[i]));
     }
     if (ea.size() != eb.size())
         return done(n, std::string("trace ") + (ea.size() < eb.size() ? "A" : "B") + " ends early");

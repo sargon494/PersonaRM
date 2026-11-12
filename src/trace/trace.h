@@ -71,6 +71,8 @@ class TraceWriter final : public ITraceSink {
 public:
     /// Writes the header line immediately. `out` must outlive the writer.
     TraceWriter(std::ostream& out, const TraceHeader& header);
+    /// Flushes a pending collapsed `call` (TRACE_FORMAT.md section 3.1).
+    ~TraceWriter() override;
 
     void OnBiosCall(uint32_t vec, uint32_t fn, const std::array<uint32_t, 4>& a, uint32_t ra) override;
     void OnLoadFile(uint32_t file_id, uint32_t dest, uint32_t ra) override;
@@ -89,7 +91,11 @@ public:
 
 private:
     void Emit(JsonValue rec);
+    void FlushCall();
     std::ostream& m_out;
+    // Consecutive identical `call` events collapse into one with "n" = repeat count (section 3.1).
+    JsonValue m_call;
+    uint32_t m_call_n = 0;
     std::vector<AddrRange> m_masks;
     uint64_t m_seq = 0;
 };
@@ -108,6 +114,9 @@ struct CompareOptions {
     /// Event types dropped from both sides before alignment (timing-dependent by default).
     std::set<std::string> ignore_events = {"irq", "mmio"};
     size_t context = 5; // events of context shown around the divergence
+    /// Compare the "n" repeat count of collapsed `call` runs. Off by default: polling counts
+    /// (TestEvent loops) depend on emulation timing.
+    bool compare_repeat_counts = false;
 };
 
 struct Divergence {
