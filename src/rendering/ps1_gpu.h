@@ -79,6 +79,8 @@ public:
 
     const std::vector<uint16_t>& GetVram() const { return m_vram; }
     void SetVram(const std::vector<uint16_t>& vram) { m_vram = vram; }
+    /// GP0 polygon commands (20h-3Fh) executed since construction (boot instrumentation).
+    uint64_t GetPolygonCount() const { return m_polygon_count; }
 
 private:
     // One rasterizer vertex: VRAM-space position (drawing offset applied), 24-bit color, texcoord.
@@ -116,6 +118,7 @@ private:
     uint32_t m_texwindow = 0;
     bool m_mask_set = false;
     bool m_mask_check = false;
+    uint64_t m_polygon_count = 0;
 
     // Polyline (GP0 48h-4Fh / 58h-5Fh) streaming state
     bool m_in_polyline = false;

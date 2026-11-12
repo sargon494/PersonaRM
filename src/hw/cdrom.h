@@ -5,7 +5,7 @@
 // docs/research/PS1_HARDWARE_REQUIREMENTS.md). Anything recalled without re-reading
 // the source is marked `unverified:` in cdrom.cpp.
 //
-// WIRING (Engine, later change):
+// WIRING (done in Engine::WireDevices, src/engine/engine.cpp):
 //   1. Own a `hw::DiscSectorSource src(disc_reader)` and `hw::CdRom cd(&src)`.
 //   2. Bus: for addr in [CdRom::kBase, kBase+3] route Read8/Write8 (and 16/32) with
 //      offset = addr - CdRom::kBase.

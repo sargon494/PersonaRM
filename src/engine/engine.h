@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <fstream>
+#include <functional>
 #include <string>
 #include <memory>
 #include <vector>
@@ -16,6 +17,8 @@
 #include "core/memory_manager.h"
 #include "input/input_manager.h"
 #include "trace/trace.h"
+#include "hw/cdrom.h"
+#include "hw/dma.h"
 
 namespace personarm {
 
@@ -25,8 +28,14 @@ namespace personarm {
 
 constexpr uint32_t PS1_CPU_CLOCK_HZ    = 33868800; // 33.8688 MHz
 constexpr uint32_t PS1_CYCLES_PER_FRAME_NTSC = 564480; // ~60 Hz (33868800 / 60)
+// shortcut: 263 NTSC lines spread over the engine's frame budget (hardware: ~2172 cycles/line);
+// keeps Timer1 Hblank counts consistent with the end-of-frame VBlank.
+constexpr uint32_t kCyclesPerHblank = PS1_CYCLES_PER_FRAME_NTSC / 263;
 constexpr size_t   PS1_MAIN_RAM_SIZE   = 2 * 1024 * 1024; // 2 MB Main RAM
 constexpr size_t   PS1_SCRATCHPAD_SIZE = 1024; // 1 KB Data Scratchpad (D-Cache)
+
+/// STACK value of a SYSTEM.CNF text (hex), or `fallback` when absent/unparsable.
+uint32_t ParseSystemCnfStack(const std::string& cnf, uint32_t fallback);
 
 enum class EngineState {
     Uninitialized,
@@ -75,6 +84,21 @@ public:
     SpuEmulator& GetSpu() { return m_spu; }
     const SpuEmulator& GetSpu() const { return m_spu; }
     Ps1BiosHle& GetBios() { return m_bios; }
+    hw::CdRom& GetCdRom() { return *m_cdrom; }
+    hw::Dma& GetDma() { return *m_dma; }
+
+    /// Physical bus access as the CPU sees it (tests, tooling).
+    uint32_t Read(uint32_t address, uint32_t size) { return ReadBus(address, size); }
+    void Write(uint32_t address, uint32_t value, uint32_t size) { WriteBus(address, value, size); }
+
+    /// Called before every guest instruction (null = off). Return false to stop the run
+    /// (state becomes Stopped, RunFrame returns at once). For boot instrumentation, not gameplay.
+    using StepHook = std::function<bool(CpuContext&)>;
+    void SetStepHook(StepHook hook) { m_step_hook = std::move(hook); }
+    /// Called on each SPU key-on write (KON 1F801D88h/8Ah) with the voice mask; and on each GP0 word.
+    void SetSpuKeyOnHook(std::function<void(uint32_t)> hook) { m_kon_hook = std::move(hook); }
+
+    trace::ITraceSink* GetTraceSink() const { return m_trace; }
 
     const std::vector<uint8_t>& GetRam() const { return m_ram; }
     void SetRam(const std::vector<uint8_t>& ram) { m_ram = ram; }
@@ -124,6 +148,16 @@ private:
     uint32_t m_i_stat = 0; // 1F801070h
     uint32_t m_i_mask = 0; // 1F801074h
     std::array<RootCounter, 3> m_timers{};
+    void TickDevices(uint32_t cycles);
+    void WireDevices();
+
+    // DMA view of main RAM (word access, physical address masked to 2 MB).
+    struct RamDma : hw::DmaMemory {
+        std::vector<uint8_t>& ram;
+        explicit RamDma(std::vector<uint8_t>& r) : ram(r) {}
+        uint32_t ReadWord(uint32_t a) override;
+        void WriteWord(uint32_t a, uint32_t v) override;
+    };
     uint64_t m_timer_cycles = 0; // CPU cycle count the timers were last advanced to
 
     EngineState m_state = EngineState::Uninitialized;
@@ -136,6 +170,13 @@ private:
     Ps1BiosHle& m_bios;
     DiscReader m_disc_reader;
     InputManager& m_input;
+    hw::DiscSectorSource m_cd_source{m_disc_reader};
+    std::unique_ptr<RamDma> m_dma_mem;
+    std::unique_ptr<hw::CdRom> m_cdrom;
+    std::unique_ptr<hw::Dma> m_dma;
+    StepHook m_step_hook;
+    std::function<void(uint32_t)> m_kon_hook;
+    uint32_t m_boot_sp = 0x801FFFF0; // SYSTEM.CNF STACK (BIOS default) when the EXE header has none
 
     // Physical Memory Buffers
     std::vector<uint8_t> m_ram;        // 2 MB Main RAM

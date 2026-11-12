@@ -95,7 +95,10 @@ void CdRom::Write8(uint32_t offset, uint8_t v) {
     default:
         if (m_index == 0) {  // HCHPCTL: bit7 BFRD loads the sector buffer into the data FIFO
             if (v & 0x80) {
-                LoadDataFifo();
+                // A BFRD write while data is still pending does not rewind the FIFO (DuckStation-like,
+                // unverified on hw): libcd reads the 3-word header, then the game's CdGetSector sets
+                // BFRD again and expects the user data that follows.
+                if (!DataBytesRemaining()) LoadDataFifo();
             } else {
                 m_data.clear();
                 m_data_pos = 0;
