@@ -24,6 +24,7 @@ static void Usage() {
         "  --max-scan-mb <N>   Tamano maximo por archivo para buscar codigo (por defecto 8)\n"
         "  --full-paths        Muestra la ruta de la imagen tal cual en vez de su nombre\n"
         "  --cfg               Analiza el alcance del control de flujo del ejecutable de arranque (WP-14)\n"
+        "  --extract-boot <f>  Guarda el ejecutable de arranque de tu disco en un fichero local (solo con un disco)\n"
         "  --help              Muestra esta ayuda\n";
 }
 
@@ -38,6 +39,7 @@ int main(int argc, char** argv) {
         if (a == "--hash") { options.hash = true; continue; }
         if (a == "--full-paths") { options.full_paths = true; continue; }
         if (a == "--cfg") { options.cfg = true; continue; }
+        if (a == "--extract-boot" && i + 1 < argc) { options.extract_boot = argv[++i]; continue; }
         if (a == "--out" && i + 1 < argc) { out_path = argv[++i]; continue; }
         if (a == "--max-scan-mb" && i + 1 < argc) {
             const long mb = std::strtol(argv[++i], nullptr, 10);
@@ -49,6 +51,10 @@ int main(int argc, char** argv) {
         inputs.push_back(a);
     }
     if (inputs.empty()) { Usage(); return 1; }
+    if (!options.extract_boot.empty() && inputs.size() != 1) {
+        std::cerr << "--extract-boot solo admite un disco\n";
+        return 1;
+    }
 
     std::vector<DiscReport> reports;
     for (const auto& path : inputs) {
@@ -59,6 +65,8 @@ int main(int argc, char** argv) {
             std::cerr << "Error: " << error << "\n";
             return 2;
         }
+        if (!r.extract_error.empty()) { std::cerr << "Error: " << r.extract_error << "\n"; return 3; }
+        if (!options.extract_boot.empty()) std::cerr << "Ejecutable de arranque guardado en " << options.extract_boot << "\n";
         reports.push_back(std::move(r));
     }
 

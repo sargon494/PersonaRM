@@ -101,12 +101,14 @@ struct DiscReport {
     recomp::CfgReport boot_cfg;
     recomp::CfgReport boot_cfg_follow;   // same analysis with the experimental pointer-following option
     std::map<std::string, uint32_t> sdk_hints;
+    std::string extract_error;   // set when --extract-boot could not write the file
 };
 
 struct AnalyzeOptions {
     bool hash = false;                 // CRC32 of the whole image (slow on 700 MB)
     bool full_paths = false;           // print the image path as given instead of its base name
     bool cfg = false;                  // control-flow reachability of the boot executable (WP-14)
+    std::string extract_boot;          // write the boot executable (the user's own copy) to this local path
     size_t max_scan_bytes = 8u << 20;  // per file; the boot executable is always scanned
 };
 

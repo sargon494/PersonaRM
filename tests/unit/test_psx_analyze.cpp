@@ -281,6 +281,21 @@ static void TestDiscs() {
     CHECK(RenderMarkdown({cfgr}).find("Control de flujo") != std::string::npos);
     CHECK(!r.has_cfg);
 
+    // --extract-boot writes the boot executable byte for byte (the user's own copy, locally).
+    {
+        const std::string out_exe = (dir / "boot.exe").string();
+        AnalyzeOptions ex; ex.extract_boot = out_exe;
+        DiscReport er;
+        CHECK(AnalyzeDisc(iso, ex, er, err) && er.has_boot && er.extract_error.empty());
+        std::ifstream f(out_exe, std::ios::binary);
+        std::vector<char> got((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+        CHECK(got.size() == er.boot.size && got.size() > 0x800);
+        CHECK(std::string(got.begin(), got.begin() + 8) == "PS-X EXE");
+        AnalyzeOptions bad; bad.extract_boot = (dir / "no_such_dir" / "boot.exe").string();
+        DiscReport br;
+        CHECK(AnalyzeDisc(iso, bad, br, err) && !br.extract_error.empty());
+    }
+
     DiscReport full;
     AnalyzeOptions fp; fp.full_paths = true;
     CHECK(AnalyzeDisc(iso, fp, full, err) && full.image_name == iso);

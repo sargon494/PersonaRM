@@ -313,6 +313,11 @@ bool AnalyzeDisc(const std::string& image_path, const AnalyzeOptions& options,
             if (disc.ReadFile(e.name, data) && !data.empty()) {
                 AnalyzeBuffer(data, rep);
                 if (is_boot) {
+                    if (!options.extract_boot.empty()) {
+                        std::ofstream f(options.extract_boot, std::ios::binary | std::ios::trunc);
+                        if (f) f.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
+                        if (!f) out.extract_error = "no se pudo escribir " + options.extract_boot;
+                    }
                     out.sdk_hints = FindSdkHints(data.data(), data.size());
                     if (options.cfg && rep.is_psx_exe) {
                         const size_t payload = std::min<size_t>(rep.exe.payload_size, data.size() - 0x800);
