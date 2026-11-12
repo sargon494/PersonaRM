@@ -35,7 +35,7 @@ public:
     ~CpuContext() = default;
 
     void Reset();
-    void SetPC(uint32_t address) { m_regs.pc = address; m_next_pc = address + 4; }
+    void SetPC(uint32_t address) { m_regs.pc = address; m_next_pc = address + 4; m_prev_was_branch = false; }
     uint32_t GetPC() const { return m_regs.pc; }
 
     // Register access
@@ -58,7 +58,7 @@ public:
     uint64_t GetCycleCount() const { return m_cycles; }
 
     const CpuRegisters& GetRegisters() const { return m_regs; }
-    void SetRegisters(const CpuRegisters& regs) { m_regs = regs; m_next_pc = regs.pc + 4; }
+    void SetRegisters(const CpuRegisters& regs) { m_regs = regs; m_next_pc = regs.pc + 4; m_prev_was_branch = false; }
 
     // Coprocessor 2 (GTE) Access
     Gte& GetGTE() { return m_gte; }
@@ -70,11 +70,18 @@ private:
     // Branch / Jump delay slot pipeline handling
     void ScheduleBranch(uint32_t target_address);
 
+    // Enter an exception (ExcCode per psx-spx "COP0 - Exception Handling").
+    void RaiseException(uint32_t exc_code);
+
     CpuRegisters m_regs;
     Gte m_gte;
     uint64_t m_cycles = 0;
 
     uint32_t m_next_pc = 0;
+    uint32_t m_current_pc = 0;       // address of the instruction being executed
+    bool m_prev_was_branch = false;  // previous instruction was a branch/jump
+    bool m_in_delay_slot = false;    // current instruction sits in a branch delay slot
+    uint32_t m_cp0_badvaddr = 0;     // COP0 r8; kept out of CpuRegisters so the save layout is unchanged
 
     // Load Delay Slot simulation
     uint32_t m_load_delay_reg = 0;

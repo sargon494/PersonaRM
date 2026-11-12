@@ -20,6 +20,8 @@ void CpuContext::Reset() {
     m_next_pc = m_regs.pc + 4;
     m_load_delay_reg = 0;
     m_load_delay_val = 0;
+    m_prev_was_branch = false;
+    m_cp0_badvaddr = 0;
     m_gte.Reset();
 }
 
@@ -42,6 +44,15 @@ void CpuContext::ScheduleBranch(uint32_t target_address) {
     m_next_pc = target_address;
 }
 
+void CpuContext::RaiseException(uint32_t exc_code) {
+    // psx-spx "COP0 - Exception Handling": EPC/BD, ExcCode, push the KU/IE stack, jump to vector.
+    m_regs.cp0_epc = m_in_delay_slot ? m_current_pc - 4 : m_current_pc;
+    m_regs.cp0_cause = (m_regs.cp0_cause & ~0x8000007Cu) | (exc_code << 2) | (m_in_delay_slot ? 0x80000000u : 0);
+    m_regs.cp0_status = (m_regs.cp0_status & ~0x3Fu) | ((m_regs.cp0_status << 2) & 0x3Fu);
+    m_regs.pc = (m_regs.cp0_status & 0x00400000u) ? 0xBFC00180u : 0x80000080u; // BEV
+    m_next_pc = m_regs.pc + 4;
+}
+
 void CpuContext::Step() {
     if (!m_read_memory) {
         m_regs.pc += 4;
@@ -57,6 +68,10 @@ void CpuContext::Step() {
 
     uint32_t current_pc = m_regs.pc;
     uint32_t opcode = m_read_memory(current_pc, 4);
+    m_current_pc = current_pc;
+    m_in_delay_slot = m_prev_was_branch;
+    uint32_t op = opcode >> 26, fn = opcode & 0x3F;
+    m_prev_was_branch = (op >= 0x01 && op <= 0x07) || (op == 0x00 && (fn == 0x08 || fn == 0x09));
 
     // Two-stage PC pipeline: a taken branch rewrites m_next_pc, so the delay slot
     // (already in m_regs.pc) runs once and the target follows it.
@@ -114,12 +129,10 @@ void CpuContext::ExecuteInstruction(uint32_t opcode) {
                     ScheduleBranch(rs_val);
                     break;
                 case 0x0C: // SYSCALL
-                    m_regs.cp0_cause = (m_regs.cp0_cause & ~0x7C) | (0x08 << 2);
-                    m_regs.cp0_epc = m_regs.pc - 4;
-                    PRM_LOG_DEBUG("CPU", "SYSCALL encountered at PC: " + std::to_string(m_regs.cp0_epc));
+                    RaiseException(0x08);
                     break;
                 case 0x0D: // BREAK
-                    PRM_LOG_WARN("CPU", "BREAK breakpoint at PC: " + std::to_string(m_regs.pc - 4));
+                    RaiseException(0x09);
                     break;
                 case 0x10: // MFHI
                     SetGPR(rd, m_regs.hi);
@@ -168,11 +181,21 @@ void CpuContext::ExecuteInstruction(uint32_t opcode) {
                         m_regs.hi = rs_val % rt_val;
                     }
                     break;
-                case 0x20: // ADD
+                case 0x20: { // ADD (traps on signed overflow, rd untouched)
+                    uint32_t res = rs_val + rt_val;
+                    if (~(rs_val ^ rt_val) & (rs_val ^ res) & 0x80000000u) RaiseException(0x0C);
+                    else SetGPR(rd, res);
+                    break;
+                }
                 case 0x21: // ADDU
                     SetGPR(rd, rs_val + rt_val);
                     break;
-                case 0x22: // SUB
+                case 0x22: { // SUB (traps on signed overflow, rd untouched)
+                    uint32_t res = rs_val - rt_val;
+                    if ((rs_val ^ rt_val) & (rs_val ^ res) & 0x80000000u) RaiseException(0x0C);
+                    else SetGPR(rd, res);
+                    break;
+                }
                 case 0x23: // SUBU
                     SetGPR(rd, rs_val - rt_val);
                     break;
@@ -253,7 +276,13 @@ void CpuContext::ExecuteInstruction(uint32_t opcode) {
             }
             break;
 
-        case 0x08: // ADDI
+        case 0x08: { // ADDI (traps on signed overflow, rt untouched)
+            uint32_t uimm = static_cast<uint32_t>(simm);
+            uint32_t res = rs_val + uimm;
+            if (~(rs_val ^ uimm) & (rs_val ^ res) & 0x80000000u) RaiseException(0x0C);
+            else SetGPR(rt, res);
+            break;
+        }
         case 0x09: // ADDIU
             SetGPR(rt, rs_val + simm);
             break;
@@ -283,10 +312,14 @@ void CpuContext::ExecuteInstruction(uint32_t opcode) {
             break;
 
         case 0x10: // COP0 (Coprocessor 0 - System Control)
-            if (rs == 0x00) { // MFC0 rt, rd
-                if (rd == 12) SetGPR(rt, m_regs.cp0_status);
-                else if (rd == 13) SetGPR(rt, m_regs.cp0_cause);
-                else if (rd == 14) SetGPR(rt, m_regs.cp0_epc);
+            if (rs == 0x00) { // MFC0 rt, rd (load delay, like memory loads)
+                uint32_t val = rt_val; // unmodelled registers keep the old value (GAP-CPU-07)
+                if (rd == 8) val = m_cp0_badvaddr;
+                else if (rd == 12) val = m_regs.cp0_status;
+                else if (rd == 13) val = m_regs.cp0_cause;
+                else if (rd == 14) val = m_regs.cp0_epc;
+                m_load_delay_reg = rt;
+                m_load_delay_val = val;
             } else if (rs == 0x04) { // MTC0 rt, rd
                 if (rd == 12) m_regs.cp0_status = rt_val;
                 else if (rd == 13) m_regs.cp0_cause = rt_val;
@@ -302,11 +335,13 @@ void CpuContext::ExecuteInstruction(uint32_t opcode) {
                 m_gte.ExecuteCommand(opcode);
             } else {
                 switch (rs) {
-                    case 0x00: // MFC2 rt, rd
-                        SetGPR(rt, m_gte.ReadDataRegister(rd));
+                    case 0x00: // MFC2 rt, rd (load delay)
+                        m_load_delay_reg = rt;
+                        m_load_delay_val = m_gte.ReadDataRegister(rd);
                         break;
-                    case 0x02: // CFC2 rt, rd
-                        SetGPR(rt, m_gte.ReadControlRegister(rd));
+                    case 0x02: // CFC2 rt, rd (load delay)
+                        m_load_delay_reg = rt;
+                        m_load_delay_val = m_gte.ReadControlRegister(rd);
                         break;
                     case 0x04: // MTC2 rt, rd
                         m_gte.WriteDataRegister(rd, rt_val);
@@ -333,6 +368,7 @@ void CpuContext::ExecuteInstruction(uint32_t opcode) {
         case 0x21: { // LH (Load Halfword signed)
             if (m_read_memory) {
                 uint32_t addr = rs_val + simm;
+                if (addr & 1) { m_cp0_badvaddr = addr; RaiseException(0x04); break; } // AdEL
                 int16_t val = static_cast<int16_t>(m_read_memory(addr, 2));
                 m_load_delay_reg = rt;
                 m_load_delay_val = static_cast<int32_t>(val);
@@ -358,6 +394,7 @@ void CpuContext::ExecuteInstruction(uint32_t opcode) {
         case 0x23: { // LW (Load Word)
             if (m_read_memory) {
                 uint32_t addr = rs_val + simm;
+                if (addr & 3) { m_cp0_badvaddr = addr; RaiseException(0x04); break; } // AdEL
                 uint32_t val = m_read_memory(addr, 4);
                 m_load_delay_reg = rt;
                 m_load_delay_val = val;
@@ -376,6 +413,7 @@ void CpuContext::ExecuteInstruction(uint32_t opcode) {
         case 0x25: { // LHU (Load Halfword unsigned)
             if (m_read_memory) {
                 uint32_t addr = rs_val + simm;
+                if (addr & 1) { m_cp0_badvaddr = addr; RaiseException(0x04); break; } // AdEL
                 uint16_t val = static_cast<uint16_t>(m_read_memory(addr, 2));
                 m_load_delay_reg = rt;
                 m_load_delay_val = val;
@@ -406,11 +444,14 @@ void CpuContext::ExecuteInstruction(uint32_t opcode) {
             }
             break;
 
-        case 0x29: // SH (Store Halfword)
+        case 0x29: { // SH (Store Halfword)
+            uint32_t addr = rs_val + simm;
+            if (addr & 1) { m_cp0_badvaddr = addr; RaiseException(0x05); break; } // AdES
             if (m_write_memory) {
-                m_write_memory(rs_val + simm, rt_val & 0xFFFF, 2);
+                m_write_memory(addr, rt_val & 0xFFFF, 2);
             }
             break;
+        }
 
         case 0x2A: { // SWL (Store Word Left - Little Endian)
             if (m_read_memory && m_write_memory) {
@@ -426,11 +467,14 @@ void CpuContext::ExecuteInstruction(uint32_t opcode) {
             break;
         }
 
-        case 0x2B: // SW (Store Word)
+        case 0x2B: { // SW (Store Word)
+            uint32_t addr = rs_val + simm;
+            if (addr & 3) { m_cp0_badvaddr = addr; RaiseException(0x05); break; } // AdES
             if (m_write_memory) {
-                m_write_memory(rs_val + simm, rt_val, 4);
+                m_write_memory(addr, rt_val, 4);
             }
             break;
+        }
 
         case 0x2E: { // SWR (Store Word Right - Little Endian)
             if (m_read_memory && m_write_memory) {
