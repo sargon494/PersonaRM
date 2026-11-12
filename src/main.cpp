@@ -57,6 +57,7 @@ static void PrintUsage(const char* prog) {
               << "  --disc2 <path>     Link Disc 2 image (Special Preview / Swap Disc)\n"
               << "  --swap-disc <1|2>  Switch active disc target\n"
               << "  --verify-disc <f>  Inspect and display technical details of any disc image\n"
+              << "  --trace-out <file> Write a PRMTRACE v1 execution trace (docs/TRACE_FORMAT.md)\n"
               << "  --config           Open interactive settings menu\n"
               << "  --scan [dir]       Scan directory for legal game disc images (.iso/.bin/.cue)\n"
               << "  --diagnostics      Run full diagnostic suite\n"
@@ -333,12 +334,12 @@ static int RunBiosSelfTest() {
         personarm::MemoryManager mem;
         mem.Initialize(1024 * 1024);
 
-        cpu.SetGPR(9, 0x00); // FileOpen
+        cpu.SetGPR(9, 0x00); // A(00h) open: no disc linked, so the file cannot exist -> -1
         cpu.SetGPR(31, 0x80010020);
         cpu.SetPC(0x000000A0);
 
-        if (!bios.HandleBiosHook(cpu, mem) || cpu.GetGPR(2) != 1) {
-            std::cerr << "[FAIL] BIOS FileOpen hook failed.\n";
+        if (!bios.HandleBiosHook(cpu, mem) || cpu.GetGPR(2) != 0xFFFFFFFFu || cpu.GetPC() != 0x80010020) {
+            std::cerr << "[FAIL] BIOS open hook failed.\n";
             return 1;
         }
 
@@ -784,6 +785,14 @@ int main(int argc, char* argv[]) {
             if (std::strcmp(argv[i], "--help") == 0) {
                 PrintUsage(argv[0]);
                 return EXIT_SUCCESS;
+            }
+            if (std::strcmp(argv[i], "--trace-out") == 0) {
+                if (i + 1 >= argc) {
+                    std::cerr << "--trace-out needs a file path\n";
+                    return EXIT_FAILURE;
+                }
+                personarm::Engine::Instance().SetTraceOutput(argv[++i]); // modifier: keep parsing
+                continue;
             }
             if (std::strcmp(argv[i], "--launch") == 0) {
                 return launcher.LaunchGame();
