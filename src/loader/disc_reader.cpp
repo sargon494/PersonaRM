@@ -20,6 +20,25 @@ DiscReader::~DiscReader() {
     Close();
 }
 
+bool DiscReader::ReadRawSector(uint32_t lba, uint8_t* out) {
+    if (!m_is_open) return false;
+    m_stream.clear();
+    if (m_sector_size == CD_RAW_SECTOR_SIZE) {
+        m_stream.seekg(static_cast<uint64_t>(lba) * CD_RAW_SECTOR_SIZE, std::ios::beg);
+        m_stream.read(reinterpret_cast<char*>(out), CD_RAW_SECTOR_SIZE);
+        return m_stream.gcount() == static_cast<std::streamsize>(CD_RAW_SECTOR_SIZE);
+    }
+    std::memset(out, 0, CD_RAW_SECTOR_SIZE);
+    std::memset(out + 1, 0xFF, 10);
+    auto bcd = [](uint32_t v) { return static_cast<uint8_t>(((v / 10) << 4) | (v % 10)); };
+    uint32_t a = lba + 150;
+    out[12] = bcd(a / 4500); out[13] = bcd((a / 75) % 60); out[14] = bcd(a % 75); out[15] = 2;
+    out[18] = out[22] = 0x08; // submode: data
+    m_stream.seekg(static_cast<uint64_t>(lba) * ISO_SECTOR_SIZE, std::ios::beg);
+    m_stream.read(reinterpret_cast<char*>(out + 24), ISO_SECTOR_SIZE);
+    return m_stream.gcount() == static_cast<std::streamsize>(ISO_SECTOR_SIZE);
+}
+
 void DiscReader::Close() {
     if (m_stream.is_open()) {
         m_stream.close();

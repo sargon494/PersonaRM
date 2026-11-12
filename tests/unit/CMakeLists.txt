@@ -65,6 +65,18 @@ target_compile_features(unit_test_trace PRIVATE cxx_std_17)
 add_test(NAME unit_test_trace COMMAND unit_test_trace)
 set_tests_properties(unit_test_trace PROPERTIES LABELS "unit" TIMEOUT 120)
 
+add_executable(unit_test_cdrom test_cdrom.cpp)
+target_link_libraries(unit_test_cdrom PRIVATE personarm_core)
+target_compile_features(unit_test_cdrom PRIVATE cxx_std_17)
+add_test(NAME unit_test_cdrom COMMAND unit_test_cdrom)
+set_tests_properties(unit_test_cdrom PROPERTIES LABELS "unit" TIMEOUT 120)
+
+add_executable(unit_test_dma test_dma.cpp)
+target_link_libraries(unit_test_dma PRIVATE personarm_core)
+target_compile_features(unit_test_dma PRIVATE cxx_std_17)
+add_test(NAME unit_test_dma COMMAND unit_test_dma)
+set_tests_properties(unit_test_dma PROPERTIES LABELS "unit" TIMEOUT 120)
+
 add_executable(unit_test_hle_kernel test_hle_kernel.cpp)
 target_link_libraries(unit_test_hle_kernel PRIVATE personarm_core)
 target_compile_features(unit_test_hle_kernel PRIVATE cxx_std_17)
