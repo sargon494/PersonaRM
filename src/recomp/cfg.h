@@ -60,7 +60,9 @@ struct CfgReport {
     uint32_t conditional_branches = 0;
     uint32_t returns = 0;
     uint32_t indirect_jumps = 0;
-    uint32_t indirect_calls = 0;
+    uint32_t indirect_calls = 0;        // all jalr reached
+    uint32_t indirect_calls_assigned = 0;   // jalr whose slot has in-image constant stores (candidates known, not followed)
+    uint32_t indirect_calls_unresolved = 0; // the rest: indirect_calls - indirect_calls_assigned
     uint32_t syscalls = 0;
     uint32_t invalid_reached = 0;       // reserved encodings reached as code
     uint32_t out_of_range_targets = 0;  // branch/call/fall-through targets outside the image

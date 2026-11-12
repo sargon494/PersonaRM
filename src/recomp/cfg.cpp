@@ -497,6 +497,9 @@ CfgReport AnalyzeControlFlow(const uint8_t* code, size_t size, uint32_t load, ui
         }
     }
 
+    r.indirect_calls_assigned = r.pointers.assigned_in_image;
+    r.indirect_calls_unresolved = r.indirect_calls - r.indirect_calls_assigned;
+
     r.function_entries.assign(functions.begin(), functions.end());
     r.functions = static_cast<uint32_t>(functions.size());
     if (words > 0) {
