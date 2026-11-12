@@ -49,9 +49,10 @@
                 <p class="eyebrow">Native PC runtime · Persona 2: Eternal Punishment</p>
                 <h1>Run the game natively. <span>Bring your own copy.</span></h1>
                 <p class="lead">
-                    PersonaRM is an open-source runtime and launcher for Windows and Linux.
-                    It recreates the PlayStation 1 hardware the game needs, so you can play
-                    with widescreen display, modern controllers, and quicksave.
+                    PersonaRM is an open-source runtime and launcher for Windows and Linux, in
+                    active development. It rebuilds the PlayStation 1 hardware the game needs.
+                    The game does not run yet; the disc and executable analysis is far along and
+                    the hardware core is next.
                 </p>
                 <div class="actions">
                     <a class="btn btn-primary" href="#start">Get started</a>
@@ -84,8 +85,8 @@
                         or <code>.img</code>.</p>
                 </article>
                 <article class="card reveal">
-                    <h3>Modern enhancements</h3>
-                    <p>Widescreen viewports, controller glyphs, turbo speed up to 16×, and instant quicksave.</p>
+                    <h3>Planned enhancements</h3>
+                    <p>Widescreen viewports, controller glyphs, turbo speed up to 16×, and instant quicksave, once the game boots.</p>
                 </article>
             </div>
         </section>
@@ -94,45 +95,44 @@
         <section class="section" id="features" aria-labelledby="features-title">
             <header class="section-head reveal">
                 <span class="num">02</span>
-                <h2 id="features-title">Hardware, <em>faithfully rebuilt</em></h2>
+                <h2 id="features-title">Hardware, <em>being rebuilt</em></h2>
             </header>
             <div class="grid features">
                 <article class="feature reveal">
                     <h3>MIPS-I CPU</h3>
-                    <p>R3000A interpreter with branch and load delay slots, and COP0 <code>RFE</code>.</p>
+                    <p>R3000A interpreter with branch and load delay slots. It is the reference the rest is checked against.</p>
                 </article>
                 <article class="feature reveal">
                     <h3>Geometry engine</h3>
-                    <p>GTE vector and matrix math: <code>RTPS</code>, <code>RTPT</code>, <code>NCLIP</code>,
-                        <code>AVSZ3/4</code>.</p>
+                    <p>GTE vector and matrix math. Partial today: about 6 of 22 commands.</p>
                 </article>
                 <article class="feature reveal">
                     <h3>GPU and VRAM</h3>
-                    <p>1 MB VRAM at 1024×512, with GP0 and GP1 packet processing.</p>
+                    <p>1 MB VRAM at 1024×512 with GP0 and GP1 handling. Polygon drawing is not implemented yet.</p>
                 </article>
                 <article class="feature reveal">
                     <h3>MDEC video</h3>
-                    <p>Macroblock decoding with 8×8 IDCT and PlayStation quantization.</p>
+                    <p>Macroblock decoder, partial. The game's videos are 320×240 STR streams with XA audio.</p>
                 </article>
                 <article class="feature reveal">
                     <h3>SPU audio</h3>
-                    <p>24 voices with ADPCM decoding, stereo mixing, and <code>.VAG</code> support.</p>
+                    <p>24 voices with ADPCM decoding and stereo mixing. Pitch, envelopes and reverb are still to do.</p>
                 </article>
                 <article class="feature reveal">
                     <h3>Disc handling</h3>
-                    <p>ISO 9660 and raw CD-ROM XA images, <code>.cue</code> resolution, and dual-disc swapping.</p>
+                    <p>ISO 9660 and raw CD-ROM XA images with <code>.cue</code> resolution, plus tools that map the game's data files.</p>
                 </article>
                 <article class="feature reveal">
                     <h3>Display modes</h3>
-                    <p>4:3 pillarboxed, 16:9, 21:9 UltraWide, and Fill.</p>
+                    <p>Planned: 4:3 pillarboxed, 16:9, 21:9 UltraWide, and Fill.</p>
                 </article>
                 <article class="feature reveal">
                     <h3>Controllers</h3>
-                    <p>Keyboard, mouse, and gamepad, with auto-detected PlayStation, Xbox, and Nintendo profiles.</p>
+                    <p>Planned: keyboard, mouse, and gamepad, with PlayStation, Xbox, and Nintendo profiles.</p>
                 </article>
                 <article class="feature reveal">
                     <h3>Memory card and saves</h3>
-                    <p>A virtual 128 KB PS1 memory card, plus instant quicksave.</p>
+                    <p>A virtual 128 KB PS1 memory card, plus quicksave, in the prototype save manager.</p>
                 </article>
             </div>
         </section>
@@ -143,27 +143,30 @@
                 <span class="num">03</span>
                 <h2 id="status-title">Project <em>status</em></h2>
             </header>
-            <p class="intro reveal">PersonaRM is in active development. Each subsystem is covered by automated tests on
-                Windows and Linux.</p>
+            <p class="intro reveal">PersonaRM is in active development and the game does not run yet. The plan:
+                get the CPU provably correct, finish the machine core, boot the game, then compile its code ahead of
+                time.</p>
             <div class="status-table reveal" role="table" aria-label="Subsystem status">
                 <div class="row head" role="row"><span role="columnheader">Subsystem</span><span
                         role="columnheader">Status</span></div>
                 <div class="row" role="row"><span role="cell">BYOC launcher and configuration</span><span role="cell"
                         class="tag prototype">Prototype</span></div>
-                <div class="row" role="row"><span role="cell">Dual-disc manager and disc loader</span><span role="cell"
-                        class="tag ok">Working</span></div>
-                <div class="row" role="row"><span role="cell">PS-X EXE and ELF loader</span><span role="cell"
-                        class="tag ok">Working</span></div>
+                <div class="row" role="row"><span role="cell">Disc reader and PS-X EXE loader</span><span role="cell"
+                        class="tag ok">Implemented</span></div>
+                <div class="row" role="row"><span role="cell">Static analysis tools</span><span role="cell"
+                        class="tag ok">Implemented</span></div>
                 <div class="row" role="row"><span role="cell">MIPS-I CPU interpreter</span><span role="cell"
-                        class="tag ok">Working</span></div>
+                        class="tag progress">Partial</span></div>
                 <div class="row" role="row"><span role="cell">GTE, GPU, MDEC, SPU</span><span role="cell"
-                        class="tag ok">Working</span></div>
-                <div class="row" role="row"><span role="cell">BIOS HLE and controller SPI</span><span role="cell"
-                        class="tag ok">Working</span></div>
-                <div class="row" role="row"><span role="cell">Turbo mode and save manager</span><span role="cell"
-                        class="tag ok">Working</span></div>
-                <div class="row" role="row"><span role="cell">Windowed SDL2 / OpenGL display</span><span role="cell"
-                        class="tag progress">In progress</span></div>
+                        class="tag progress">Partial</span></div>
+                <div class="row" role="row"><span role="cell">BIOS HLE</span><span role="cell"
+                        class="tag progress">Partial</span></div>
+                <div class="row" role="row"><span role="cell">Interrupts, DMA, timers, CD-ROM</span><span role="cell"
+                        class="tag prototype">Not started</span></div>
+                <div class="row" role="row"><span role="cell">Static recompiler</span><span role="cell"
+                        class="tag prototype">Not started</span></div>
+                <div class="row" role="row"><span role="cell">Window, display and host audio</span><span role="cell"
+                        class="tag prototype">Stubs only</span></div>
             </div>
         </section>
 
@@ -174,13 +177,13 @@
                 <h2 id="start-title">Quick <em>start</em></h2>
             </header>
             <div class="notice reveal">
-                <strong>Technical preview.</strong> The on-screen window is still in progress. The current build is for
-                testing and development.
+                <strong>Not playable yet.</strong> There is no game window. The commands below manage disc images and
+                configuration for development.
             </div>
             <ol class="steps">
                 <li class="reveal">
                     <h3>Get a legal copy</h3>
-                    <p>You need Disc 1 and/or Disc 2 of <em>Persona 2: Eternal Punishment</em>, from a copy you own.</p>
+                    <p>You need the disc of <em>Persona 2: Eternal Punishment</em>, from a copy you own.</p>
                 </li>
                 <li class="reveal">
                     <h3>Download or build PersonaRM</h3>
@@ -188,11 +191,10 @@
                 </li>
                 <li class="reveal">
                     <h3>Point it at your discs</h3>
-                    <p>Scan a folder, verify the image, then link both discs:</p>
+                    <p>Scan a folder and verify the image:</p>
                     <div class="code">
                         <pre><code>personarm --scan "/path/to/discs"
 personarm --verify-disc "/path/to/disc1.cue"
-personarm --disc1 "/path/to/disc1.cue" --disc2 "/path/to/disc2.cue"
 personarm --portal</code></pre>
                         <button class="copy" type="button" aria-label="Copy commands">Copy</button>
                     </div>

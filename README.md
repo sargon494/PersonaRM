@@ -12,7 +12,7 @@
 [![CI](https://github.com/sargon494/PersonaRM/actions/workflows/ci.yml/badge.svg)](https://github.com/sargon494/PersonaRM/actions)
 [![Project site](https://img.shields.io/badge/Website-GitHub%20Pages-6e0b14.svg)](https://sargon494.github.io/PersonaRM/)
 
-[Website](https://sargon494.github.io/PersonaRM/) · [Status](#status) · [Quick start](#quick-start) · [Building](#building-from-source) · [Documentation](#documentation) · [Contributing](#contributing)
+[Website](https://sargon494.github.io/PersonaRM/) · [Status](#status) · [Roadmap](#roadmap) · [Quick start](#quick-start) · [Building](#building-from-source) · [Documentation](#documentation) · [Contributing](#contributing)
 
 </div>
 
@@ -20,59 +20,66 @@
 
 ## Overview
 
-PersonaRM is an open-source runtime that executes *Persona 2: Eternal Punishment* natively on Windows and Linux. It emulates the PlayStation 1 hardware the game depends on (MIPS R3000A CPU, Geometry Transform Engine, GPU, MDEC video decoder, SPU audio, and controller interface), and wraps it in a launcher that manages your disc images, controls, and display options.
+PersonaRM aims to run *Persona 2: Eternal Punishment* natively on Windows and Linux, without an external emulator. It rebuilds the PlayStation 1 hardware the game depends on (MIPS R3000A CPU, GTE, GPU, MDEC, SPU, CD-ROM) and wraps it in a launcher that manages your disc images, controls, and display options.
+
+> **The game does not run yet.** PersonaRM is a research-driven work in progress: the disc and executable analysis is far along, while the hardware core is still being built. See [Status](#status) for what exists today.
 
 PersonaRM follows a strict **Bring Your Own Copy (BYOC)** model:
 
-- **No game content is distributed.** The project contains no game binaries, ROMs, or assets.
-- **You supply your own disc.** Provide a legally obtained image (`.cue`/`.bin`, `.iso`, or `.img`) from a copy you own.
-- **Modern enhancements.** Widescreen viewports, controller glyphs for PlayStation, Xbox, and Nintendo layouts, turbo speed up to 16×, and quicksave.
+- **No game content is distributed.** The repository contains no game binaries, ROMs, or assets.
+- **You supply your own disc.** Provide an image (`.cue`/`.bin`, `.iso`, or `.img`) from a copy you own.
+- **Planned enhancements.** Widescreen viewports, controller glyphs for PlayStation, Xbox, and Nintendo layouts, turbo speed up to 16×, and quicksave.
 
 New to the codebase? Start with the [Developer Guide](docs/DEVELOPER_GUIDE.md) and the [Architecture overview](ARCHITECTURE.md).
 
-## Features
+## What we know about the game
 
-| Area | What it does |
-|---|---|
-| **Disc management** | Detects Disc 1 and Disc 2 of the game (`SLPS-02785`, `SLPS-02786`, `SLUS-01158`, `SLUS-01339`), and swaps discs at runtime. |
-| **Disc loading** | ISO 9660 and raw 2352-byte CD-ROM XA Mode 2 Form 1 images, with `.cue` sheet resolution. |
-| **Executable loading** | PS-X EXE and ELF header parsing, with code segment loading and memory fill. |
-| **CPU** | MIPS-I (R3000A) interpreter with branch and load delay slots and COP0 `RFE`. |
-| **Geometry** | GTE (COP2) vector and matrix math, including `RTPS`/`RTPT`, `NCLIP`, and `AVSZ3`/`AVSZ4`. |
-| **Graphics** | PS1 GPU with 1 MB VRAM (1024×512), GP0/GP1 packet processing, and an MDEC macroblock decoder. |
-| **Audio** | SPU with 24 voices, ADPCM decoding, stereo mixing, and `.VAG` support. |
-| **Display** | 4:3 (pillarboxed), 16:9, 21:9 UltraWide, and Fill viewports. |
-| **Input** | Keyboard, mouse, and gamepad with auto-detected profiles for PlayStation, Xbox, and Nintendo controllers. |
-| **Speed** | Turbo mode from 1× to 16×, activated by hold detection. |
-| **Saves** | Virtual 128 KB PS1 memory card and instant quicksave (`PRMSTATE`). |
+Verified by reading the Japanese release's discs and executable (nothing here is copied from the game):
+
+- The main game is one disc. The Japanese *Deluxe Pack* adds a separate **Sumaru TV Special Preview Disc**, which boots on its own with its own executable and is not a second story disc.
+- Both discs use the standard `PS-X EXE` format and share one engine, built with the Sony PsyQ libraries.
+- Game data lives in numbered `F*.BIN` / `F*.EXT` containers indexed by a position table on the disc. Many containers are RLE-compressed. Videos are 320×240 STR streams with XA audio.
+- The game calls both BIOS routines and PlayStation hardware registers directly, so a faithful runtime needs both a BIOS layer and real hardware behaviour.
+- Large parts of the game code are **overlays**: raw MIPS code loaded from the disc into fixed memory slots on demand. This shapes the design below.
+
+## Roadmap
+
+The chosen approach is an **interpreter-first native runtime**, with static recompilation added on top once the interpreter can be checked against a reference emulator:
+
+1. **CPU correctness.** A conformance test suite for every MIPS-I instruction, including delay slots, load delays, unaligned access, and edge cases of `DIV`.
+2. **Complete machine core.** Interrupt controller, DMA, timers, CD-ROM, joypad bus, and a real GPU rasterizer.
+3. **First boot.** Run the game's main executable up to the first overlay load, and compare against a reference trace.
+4. **Static recompilation.** Translate the main executable and each overlay ahead of time, with the interpreter as fallback.
+5. **Replace library routines** (video playback, pad, memory card, CD, SPU, GPU) with hand-written native code.
+6. **Host layer.** SDL3 window and input, OpenGL display, host audio, then the launcher and modern enhancements.
+
+A JIT is not planned: the PS1 workload does not call for one.
 
 ## Status
 
-PersonaRM is under active development. Each subsystem is covered by automated unit and integration tests on Windows and Linux.
-
 | Subsystem | Status |
 |---|---|
-| BYOC launcher and configuration | ✅ Prototype |
-| Dual-disc manager and disc loader | ✅ Working |
-| PS-X EXE / ELF loader | ✅ Working |
-| MIPS-I CPU interpreter | ✅ Working |
-| GTE (geometry engine) | ✅ Working |
-| PS1 GPU and VRAM | ✅ Working |
-| MDEC video decoder | ✅ Working |
-| SPU 24-voice mixer | ✅ Working |
-| BIOS HLE (syscalls A0, B0, C0) | ✅ Working |
-| Controller SPI bus | ✅ Working |
-| Turbo mode | ✅ Working |
-| Save manager (memory card and quicksave) | ✅ Working |
-| Windowed SDL2 / OpenGL display | 🟡 In progress (headless presentation works) |
+| Disc reading (ISO 9660 and raw 2352-byte images, `.cue` resolution) | ✅ Implemented |
+| `PS-X EXE` loader | ✅ Implemented (ELF is not supported) |
+| MIPS-I CPU interpreter | 🟡 Core instructions work; exceptions, interrupts and some COP0 behaviour are missing |
+| Static analysis tools (`psx_analyze`, control-flow graph) | ✅ Implemented |
+| GTE (geometry engine) | 🟡 Partial: 6 of about 22 commands |
+| GPU and VRAM | 🟡 VRAM and blits only; polygons and rectangles are not drawn yet |
+| MDEC video decoder | 🟡 Partial |
+| SPU audio | 🟡 Partial: fixed-step ADSR, no reverb |
+| BIOS HLE | 🟡 About a handful of calls |
+| Interrupts, DMA, timers, CD-ROM | ⏳ Not started |
+| Static recompiler (code generation) | ⏳ Not started |
+| Windowed SDL / OpenGL display and host audio | ⏳ Stubs only |
+| Launcher | 🟡 Disc scan and verification; launching the game is a stub |
 
 ## Quick start
 
-> **Note:** The on-screen SDL2/OpenGL window is still in progress, so the current build is a technical preview for testing and development.
+> **Note:** There is no playable build. The commands below manage disc images and configuration for development.
 
 **Requirements**
 
-- A legally obtained copy of *Persona 2: Eternal Punishment*, Disc 1 and/or Disc 2.
+- A legally obtained copy of *Persona 2: Eternal Punishment*.
 - Windows 10/11 or a modern Linux distribution.
 
 **Usage**
@@ -84,14 +91,8 @@ personarm --scan "/path/to/your/discs"
 # Check that a disc image is recognized
 personarm --verify-disc "/path/to/disc1.cue"
 
-# Link both discs
-personarm --disc1 "/path/to/disc1.cue" --disc2 "/path/to/disc2.cue"
-
 # Open the interactive Portal (game hub and configuration)
 personarm --portal
-
-# Start the game
-personarm --launch
 
 # Show every option
 personarm --help
@@ -119,8 +120,6 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
 
-The executable is written to `build/Release/personarm.exe`.
-
 ### Linux (GCC or Clang)
 
 ```bash
@@ -128,35 +127,19 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j$(nproc)
 ```
 
-The executable is written to `build/Release/personarm`.
-
 ## Testing
 
-PersonaRM ships C++ unit tests and a cross-platform Python integration runner.
+Tests are off by default. Enable them at configure time and run them with CTest:
 
 ```bash
-# C++ unit tests
-./build/Release/personarm_tests
-
-# Integration suite
-python tests/integration/run_tests.py
+cmake -S . -B build -DBUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Debug
+cmake --build build
+ctest --test-dir build -C Debug --output-on-failure
 ```
 
-Each subsystem also exposes a self-test flag:
+There is also a cross-platform integration runner: `python tests/integration/run_tests.py`. Note that it rewrites `personarm_config.json`; restore the file afterwards.
 
-```bash
-./personarm --test-portal     # Portal and disc management
-./personarm --test-engine     # Engine core and frame loop
-./personarm --test-window     # Window context and presentation
-./personarm --test-mdec       # MDEC macroblock decoder
-./personarm --test-save       # Memory card and quicksave
-./personarm --test-gpu        # GPU VRAM and GP0/GP1 commands
-./personarm --test-bios       # BIOS HLE syscall dispatcher
-./personarm --test-gte        # GTE math and projection
-./personarm --test-spu        # SPU voice mixer
-./personarm --test-str        # STR / CD-ROM XA demuxer
-./personarm --test-performance  # Frame-time benchmarks
-```
+Tests that need a real disc are not part of CI and are skipped when no disc is available.
 
 ## Architecture
 
@@ -175,7 +158,7 @@ Each subsystem also exposes a self-test flag:
 └──────────┴────────────┴────────────┴────────────┴────────────┘
 ```
 
-Full hardware specifications and bus routing are in [ARCHITECTURE.md](ARCHITECTURE.md).
+This is the current layout. The planned target separates the PS1 machine core from the host platform and removes global singletons. Hardware details and bus routing are in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Documentation
 
@@ -183,7 +166,7 @@ Full hardware specifications and bus routing are in [ARCHITECTURE.md](ARCHITECTU
 |---|---|
 | [Architecture](ARCHITECTURE.md) | Hardware model, memory bus, and execution pipeline |
 | [Developer Guide](docs/DEVELOPER_GUIDE.md) | Codebase walkthrough and workflow |
-| [Gameplay and Controls](docs/GAMEPLAY_AND_CONTROLS.md) | Controller mapping and in-game options |
+| [Gameplay and Controls](docs/GAMEPLAY_AND_CONTROLS.md) | Controller mapping and in-game options (planned behaviour) |
 | [Project Audit](docs/PROJECT_AUDIT.md) | Technical audit and known issues |
 | [Contributing](CONTRIBUTING.md) | Bug reports, feature requests, and pull request rules |
 

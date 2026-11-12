@@ -139,7 +139,7 @@ em {
 }
 
 .topbar .nav-cta:hover {
-    background: var(--red-hi);
+    background: #a80f1f; /* darker, not lighter: white on --red-hi was 3.6:1 */
 }
 
 @media (max-width: 680px) {
@@ -286,7 +286,7 @@ em {
 }
 
 .btn-primary:hover {
-    background: var(--red-hi);
+    background: #a80f1f;
     border-color: var(--red-hi);
 }
 
