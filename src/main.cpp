@@ -359,7 +359,7 @@ static int RunGteSelfTest() {
         gte.WriteDataRegister(12, 0);                 // SXY0 = (0, 0)
         gte.WriteDataRegister(13, (0 << 16) | 20);    // SXY1 = (20, 0)
         gte.WriteDataRegister(14, (20 << 16) | 0);    // SXY2 = (0, 20)
-        gte.CommandNCLIP();
+        gte.ExecuteCommand(0x4A000006); // NCLIP
         int32_t mac0 = static_cast<int32_t>(gte.ReadDataRegister(24));
         if (mac0 == 0) {
             std::cerr << "[FAIL] GTE NCLIP produced zero normal.\n";
@@ -371,8 +371,9 @@ static int RunGteSelfTest() {
         gte.WriteDataRegister(17, 150);
         gte.WriteDataRegister(18, 150);
         gte.WriteDataRegister(19, 150);
-        gte.CommandAVSZ3();
-        uint32_t otz = gte.ReadDataRegister(20);
+        gte.ExecuteCommand(0x4A00002D); // AVSZ3
+        // OTZ is data r7 (psx-spx "GTE Registers"); r20 is RGB0.
+        uint32_t otz = gte.ReadDataRegister(7);
         if (otz < 145 || otz > 155) {
             std::cerr << "[FAIL] GTE AVSZ3 computed incorrect average Z.\n";
             return 1;
