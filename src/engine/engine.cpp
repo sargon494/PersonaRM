@@ -47,6 +47,10 @@ void Engine::Reset() {
     m_frame_counter = 0;
     m_joy_step = 0;
     m_joy_rx_fifo.clear();
+    m_i_stat = 0;
+    m_i_mask = 0;
+    m_timers = {};
+    m_timer_cycles = 0;
     m_state = EngineState::Idle;
 }
 
@@ -131,6 +135,21 @@ uint32_t Engine::ReadBus(uint32_t address, uint32_t size) {
             stat |= 0x80; // ACK flag
         }
         return stat;
+    }
+
+    // Interrupt controller (psx-spx "Interrupt Control")
+    if (physical == 0x1F801070) return m_i_stat;
+    if (physical == 0x1F801074) return m_i_mask;
+
+    // Root counters 0-2 (psx-spx "Timers"): +0 counter, +4 mode, +8 target
+    if (physical >= 0x1F801100 && physical < 0x1F801130) {
+        RootCounter& t = m_timers[(physical >> 4) & 3];
+        switch (physical & 0xC) {
+            case 0x0: return t.value;
+            case 0x4: { uint32_t mode = t.mode; t.mode &= ~0x1800u; return mode; } // bits 11-12 reset after read
+            case 0x8: return t.target;
+        }
+        return 0;
     }
 
     // 4. GPU Hardware Registers (0x1F801810 / 0x1F801814)
@@ -219,6 +238,21 @@ void Engine::WriteBus(uint32_t address, uint32_t value, uint32_t size) {
             if (m_input.IsActionPressed(VirtualAction::Map))               b2 &= ~(1 << 7); // Square
             m_joy_step = 0;
             m_joy_rx_fifo.push_back(b2);
+        }
+        return;
+    }
+
+    // Interrupt controller: writing 0 to an I_STAT bit acknowledges it; I_MASK has 11 sources.
+    if (physical == 0x1F801070) { m_i_stat &= value; UpdateIrqLine(); return; }
+    if (physical == 0x1F801074) { m_i_mask = value & 0x7FFu; UpdateIrqLine(); return; }
+
+    // Root counters: writing MODE resets the counter and sets bit 10 (no IRQ request).
+    if (physical >= 0x1F801100 && physical < 0x1F801130) {
+        RootCounter& t = m_timers[(physical >> 4) & 3];
+        switch (physical & 0xC) {
+            case 0x0: t.value = value & 0xFFFFu; break;
+            case 0x4: t = RootCounter{0, (value & 0x3FFu) | 0x400u, t.target}; break;
+            case 0x8: t.target = value & 0xFFFFu; break;
         }
         return;
     }
@@ -317,15 +351,60 @@ void Engine::RunFrame() {
         // Fast BIOS HLE hook check: intercept at the exception vector 0x80 and at 0xA0, 0xB0, 0xC0
         if (m_config.enable_bios_hle) {
             uint32_t masked_pc = m_cpu.GetPC() & 0x1FFFFFFF;
+            if (masked_pc == 0x00000080 && ((m_cpu.GetRegisters().cp0_cause >> 2) & 0x1Fu) == 0) {
+                // shortcut: no kernel IRQ chain yet, so every enabled pending IRQ is acknowledged
+                // and dropped here (else Int would re-fire forever); upgrade with SVC-031.
+                m_i_stat &= ~m_i_mask;
+                UpdateIrqLine();
+            }
             if (masked_pc == 0x00000080 || masked_pc == 0x000000A0 || masked_pc == 0x000000B0 || masked_pc == 0x000000C0) {
                 m_bios.HandleBiosHook(m_cpu, m_ram.data(), m_ram.size());
             }
         }
 
         m_cpu.Step();
+        uint64_t now = m_cpu.GetCycleCount();
+        TickTimers(static_cast<uint32_t>(now - m_timer_cycles));
+        m_timer_cycles = now;
     }
 
+    // VBlank IRQ0 once per frame. shortcut: raised at the end of the frame's cycle budget rather
+    // than at scanline 240 of 263, and GPUSTAT bit 31 (interlace field) does not toggle;
+    // upgrade with a scanline-based scheduler.
+    RaiseIrq(0);
     m_frame_counter++;
+}
+
+void Engine::TickTimers(uint32_t cycles) {
+    for (uint32_t i = 0; i < 3; ++i) {
+        RootCounter& t = m_timers[i];
+        uint32_t ticks = cycles;
+        if (i == 2 && (t.mode & 0x200u)) { // Timer 2 clock source 2/3 = sysclk/8
+            t.prescale += cycles;
+            ticks = t.prescale / 8;
+            t.prescale %= 8;
+        }
+        // shortcut: Timer0 dotclock / Timer1 hblank sources (mode bit 8) and sync modes (bits 0-2)
+        // count as plain sysclk; upgrade when the GPU exposes a dot/line clock.
+        while (ticks--) {
+            t.value = (t.value + 1) & 0xFFFFu;
+            bool irq = false;
+            if (t.value == 0xFFFFu) { t.mode |= 0x1000u; irq |= (t.mode & 0x20u) != 0; }
+            if (t.value == t.target) {
+                t.mode |= 0x800u;
+                irq |= (t.mode & 0x10u) != 0;
+                // shortcut (from memory, DuckStation-like): reset-at-target wraps to 0 on the tick
+                // that reaches target (period = target); verify against hardware tests.
+                if (t.mode & 0x8u) t.value = 0;
+            }
+            if (!irq || (!(t.mode & 0x40u) && t.irq_done)) continue; // bit 6 = 0: one-shot
+            t.irq_done = true;
+            // bit 7: 0 = short pulse (bit 10 dips to 0 and returns to 1), 1 = toggle bit 10
+            if (t.mode & 0x80u) t.mode ^= 0x400u; else t.mode &= ~0x400u;
+            if (!(t.mode & 0x400u)) RaiseIrq(4 + i);
+            if (!(t.mode & 0x80u)) t.mode |= 0x400u;
+        }
+    }
 }
 
 void Engine::GetCurrentFrame(std::vector<uint32_t>& out_rgba, uint32_t& out_w, uint32_t& out_h) {

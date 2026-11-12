@@ -5,8 +5,11 @@
 #endif
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <vector>
 #include "cpu/cpu_context.h"
+#include "engine/engine.h"
+#include "loader/exe_loader.h"
 #include "loader/ps1_bios_hle.h"
 
 using personarm::CpuContext;
@@ -339,6 +342,186 @@ static void TestAluMisc() {
     }
 }
 
+// ── 7. Hardware interrupts (CPU side) ───────────────────────────────────────
+// psx-spx "Interrupt Control": CAUSE bit 10 (IP2) mirrors (I_STAT AND I_MASK) != 0
+// and is not a latch; the CPU takes it when SR bit 10 (IM2) and SR bit 0 (IEc)
+// are set. "COP0 - Exception Handling": ExcCode 00h Int, EPC = the opcode that
+// was not executed (or its branch, with BD, when it is a delay slot).
+// "COP0 - Register Summary": only CAUSE bits 8-9 are software-writable.
+static void TestInterrupts() {
+    const uint32_t kAddiu7 = I(0x09, 0, 1, 7); // addiu r1,r0,7
+    struct Case { const char* name; uint32_t sr; bool taken; };
+    const Case cases[] = {
+        {"IRQ taken (IEc+IM2)", 0x00000401, true},
+        {"IRQ masked IEc=0",    0x00000400, false},
+        {"IRQ masked IM2=0",    0x00000001, false},
+    };
+    for (const Case& c : cases) {
+        Machine m;
+        m.Code(0x1000, {kAddiu7, kNop});
+        m.SetSR(c.sr);
+        m.cpu.SetIrqLine(true);
+        CHECK_EQ(c.name, (m.Regs().cp0_cause >> 10) & 1, 1);
+        m.Run(0x1000, 1);
+        if (c.taken) {
+            CHECK_EQ(c.name, m.cpu.GetPC(), kVecBev0);
+            CHECK_EQ(c.name, m.ExcCode(), 0);
+            CHECK_EQ(c.name, m.Regs().cp0_epc, 0x1000);
+            CHECK_EQ(c.name, m.Regs().cp0_cause >> 31, 0);
+            CHECK_EQ(c.name, m.Regs().cp0_status, 0x00000404);
+            CHECK_EQ(c.name, m.cpu.GetGPR(1), 0); // interrupted opcode not executed
+        } else {
+            CHECK_EQ(c.name, m.cpu.GetPC(), 0x1004);
+            CHECK_EQ(c.name, m.cpu.GetGPR(1), 7);
+        }
+    }
+
+    // IRQ arriving before a delay slot: EPC = branch, BD set.
+    {
+        Machine m;
+        m.Code(0x1000, {I(0x04, 0, 0, 4), kAddiu7}); // beq r0,r0,+4 ; addiu
+        m.SetSR(0x00000401);
+        m.Run(0x1000, 1);
+        m.cpu.SetIrqLine(true);
+        m.cpu.Step();
+        CHECK_EQ("IRQ before delay slot", m.cpu.GetPC(), kVecBev0);
+        CHECK_EQ("IRQ before delay slot", m.Regs().cp0_epc, 0x1000);
+        CHECK_EQ("IRQ before delay slot", m.Regs().cp0_cause >> 31, 1);
+        CHECK_EQ("IRQ before delay slot", m.cpu.GetGPR(1), 0);
+    }
+
+    // IP2 follows the line; MTC0 CAUSE cannot clear it (only bits 8-9 writable).
+    {
+        Machine m;
+        m.cpu.SetIrqLine(true);
+        m.Code(0x1000, {COP(0, kMtc0, 0, 13), kNop}); // mtc0 r0,CAUSE
+        m.Run(0x1000, 1);
+        CHECK_EQ("MTC0 CAUSE keeps IP2", (m.Regs().cp0_cause >> 10) & 1, 1);
+        m.cpu.SetIrqLine(false);
+        CHECK_EQ("IRQ line deassert", (m.Regs().cp0_cause >> 10) & 1, 0);
+    }
+
+    // HLE vector: an Int resumes the interrupted opcode (EPC, not EPC+4) with SR popped.
+    {
+        Machine m;
+        m.Code(0x1000, {kAddiu7, kNop});
+        m.SetSR(0x00000401);
+        m.cpu.SetIrqLine(true);
+        m.Run(0x1000, 1);
+        m.cpu.SetIrqLine(false); // the engine acknowledges I_STAT before the HLE returns
+        bool handled = personarm::Ps1BiosHle::Instance().HandleBiosHook(m.cpu, m.mem.data(), m.mem.size());
+        CHECK_EQ("HLE Int return", handled, 1);
+        CHECK_EQ("HLE Int return", m.cpu.GetPC(), 0x1000);
+        CHECK_EQ("HLE Int return", m.Regs().cp0_status, 0x00000401);
+        m.cpu.Step();
+        CHECK_EQ("HLE Int return", m.cpu.GetGPR(1), 7);
+    }
+
+    // SYS(01h) EnterCriticalSection / SYS(02h) ExitCriticalSection through the HLE vector:
+    // clear/set SR bits 2 and 10 of the mode RFE restores; Enter returns 1 if they were set.
+    {
+        Machine m;
+        m.Code(0x1000, {kSyscall});
+        m.SetSR(0x00000401);
+        auto sys = [&](uint32_t fn) {
+            m.cpu.SetGPR(4, fn);
+            m.cpu.SetGPR(2, 0xDEAD);
+            m.Run(0x1000, 1);
+            personarm::Ps1BiosHle::Instance().HandleBiosHook(m.cpu, m.mem.data(), m.mem.size());
+        };
+        sys(1);
+        CHECK_EQ("EnterCriticalSection", m.Regs().cp0_status, 0);
+        CHECK_EQ("EnterCriticalSection", m.cpu.GetGPR(2), 1);
+        CHECK_EQ("EnterCriticalSection", m.cpu.GetPC(), 0x1004);
+        sys(1);
+        CHECK_EQ("EnterCriticalSection twice", m.cpu.GetGPR(2), 0);
+        sys(2);
+        CHECK_EQ("ExitCriticalSection", m.Regs().cp0_status, 0x00000401);
+    }
+}
+
+// ── 8. I_STAT/I_MASK, VBlank and root counters through the engine bus ───────
+// psx-spx "Interrupt Control": I_STAT 1F801070h (write 0 to acknowledge a bit),
+// I_MASK 1F801074h; IRQ0 VBlank, IRQ4-6 Timer0-2. "Timers": 1F801100h+10h*N
+// counter/mode/target; mode bit 3 reset at target, bit 4 IRQ at target, bit 6
+// repeat, bit 10 IRQ request (1=no), bit 11 reached target (reset after read).
+static const uint32_t kAt = 1, kT0 = 8, kT1 = 9, kT2 = 10, kT3 = 11, kT4 = 12;
+static uint32_t J(uint32_t addr) { return (0x02u << 26) | ((addr >> 2) & 0x03FFFFFF); }
+
+static personarm::Engine& BootProgram(const std::vector<uint32_t>& code) {
+    auto& engine = personarm::Engine::Instance();
+    personarm::EngineBootConfig config;
+    config.enable_bios_hle = true;
+    engine.Initialize(config);
+    std::vector<uint8_t> exe(4096, 0);
+    auto* hdr = reinterpret_cast<personarm::PsxExeHeader*>(exe.data());
+    std::memcpy(hdr->magic, "PS-X EXE", 8);
+    hdr->initial_pc = 0x80010000;
+    hdr->destination_ram = 0x80010000;
+    hdr->file_size = 2048;
+    hdr->initial_sp_base = 0x801FFF00;
+    std::memcpy(exe.data() + 2048, code.data(), code.size() * 4);
+    engine.BootExecutable(exe.data(), exe.size());
+    return engine;
+}
+static uint32_t Ram32(personarm::Engine& e, uint32_t a) {
+    const auto& r = e.GetRam();
+    return r[a] | (r[a + 1] << 8) | (r[a + 2] << 16) | (uint32_t(r[a + 3]) << 24);
+}
+
+// Waits for I_STAT != 0, stores it at 0x100, acknowledges exactly those bits, then
+// stores I_STAT again (0x104) and two reads of Timer2 MODE (0x108, 0x10C).
+static std::vector<uint32_t> WaitIrqProgram(bool with_timer2) {
+    std::vector<uint32_t> p = {I(0x0F, 0, kAt, 0x1F80)}; // lui at,0x1F80
+    if (with_timer2) {
+        p.insert(p.end(), {I(0x09, 0, kT0, 100), I(0x2B, kAt, kT0, 0x1128),     // T2 target = 100
+                           I(0x09, 0, kT0, 0x58), I(0x2B, kAt, kT0, 0x1124)});  // T2 mode: reset+IRQ at target, repeat
+    }
+    uint32_t wait = uint32_t(p.size());
+    p.insert(p.end(), {I(0x23, kAt, kT0, 0x1070), kNop});
+    p.push_back(I(0x04, kT0, 0, uint32_t(int32_t(wait) - int32_t(p.size() + 1)))); // beq t0,r0,wait
+    p.insert(p.end(), {kNop, I(0x2B, 0, kT0, 0x100), R(0x27, kT0, 0, kT1), I(0x2B, kAt, kT1, 0x1070),
+                       I(0x23, kAt, kT2, 0x1070), I(0x23, kAt, kT3, 0x1124), I(0x23, kAt, kT4, 0x1124),
+                       I(0x2B, 0, kT2, 0x104), I(0x2B, 0, kT3, 0x108), I(0x2B, 0, kT4, 0x10C)});
+    p.insert(p.end(), {J(0x80010000 + uint32_t(p.size()) * 4), kNop});
+    return p;
+}
+
+static void TestIrqController() {
+    {
+        auto& e = BootProgram(WaitIrqProgram(false));
+        e.RunFrame();
+        CHECK_EQ("VBlank not before frame end", Ram32(e, 0x100), 0);
+        e.RunFrame();
+        CHECK_EQ("VBlank IRQ0 in I_STAT", Ram32(e, 0x100), 0x001);
+        CHECK_EQ("I_STAT ack", Ram32(e, 0x104), 0);
+    }
+    {
+        auto& e = BootProgram(WaitIrqProgram(true));
+        e.RunFrame();
+        CHECK_EQ("Timer2 target IRQ6", Ram32(e, 0x100), 0x040);
+        CHECK_EQ("Timer2 I_STAT ack", Ram32(e, 0x104), 0);
+        CHECK_EQ("Timer2 MODE reached target", Ram32(e, 0x108), 0xC58);
+        CHECK_EQ("Timer2 MODE read clears bit 11", Ram32(e, 0x10C), 0x458);
+    }
+    // End to end: I_MASK=1, SR=401h; VBlank is taken at the HLE vector, acknowledged,
+    // and the program keeps running (no interrupt livelock).
+    {
+        const uint32_t loop = 0x80010014;
+        auto& e = BootProgram({I(0x0F, 0, kAt, 0x1F80), I(0x09, 0, kT0, 1), I(0x2B, kAt, kT0, 0x1074),
+                               I(0x09, 0, kT0, 0x401), COP(0, kMtc0, kT0, 12),
+                               I(0x23, 0, kT1, 0x200), kNop, I(0x09, kT1, kT1, 1), I(0x2B, 0, kT1, 0x200),
+                               J(loop), kNop});
+        e.RunFrame();
+        e.RunFrame();
+        e.RunFrame();
+        const auto& r = e.GetCpu().GetRegisters();
+        CHECK_EQ("VBlank delivered: EPC in loop", r.cp0_epc >= loop && r.cp0_epc < loop + 0x18, 1);
+        CHECK_EQ("VBlank delivered: SR restored", r.cp0_status, 0x401);
+        CHECK_EQ("VBlank delivered: program runs", Ram32(e, 0x200) > 1000, 1);
+    }
+}
+
 int main() {
     std::printf("[UNIT TEST] CPU conformance (R3000A, psx-spx)\n");
     TestOverflow();
@@ -347,6 +530,8 @@ int main() {
     TestUnaligned();
     TestCopLoadDelay();
     TestAluMisc();
+    TestInterrupts();
+    TestIrqController();
     std::printf("  %d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }
