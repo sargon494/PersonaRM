@@ -177,3 +177,25 @@ discs/
 *.swo
 *.bak
 
+
+# Local-only reverse engineering workspace (extracted copyrighted data, Ghidra projects)
+research/local/
+
+# Defensive: never commit game data / formats extracted from the user's discs
+SLPS_*
+SLUS_*
+SCUS_*
+*.str
+*.xa
+*.vab
+*.vb
+*.seq
+*.tim
+FILEPOS.DAT
+
+# Ghidra projects and generated analysis output
+*.gpr
+*.rep/
+*.lock
+*.lock~
+graphify-out/

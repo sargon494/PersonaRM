@@ -424,6 +424,63 @@ int main() {
         std::cout << "  ✓ PS1 GTE Coprocessor 2 tests passed.\n";
     }
 
+    // 12b. Branch delay slot: the delay slot runs once, the instruction after it is skipped
+    {
+        personarm::CpuContext cpu;
+        std::vector<uint32_t> code(0x1000 / 4 + 8, 0);
+        const uint32_t base = 0x1000 / 4;
+        code[base + 0] = 0x10000002; // beq r0,r0,+2  -> target = 0x1004 + 8 = 0x100C
+        code[base + 1] = 0x24010001; // delay slot: addiu r1,r0,1
+        code[base + 2] = 0x24020001; // skipped:    addiu r2,r0,1
+        code[base + 3] = 0x24030001; // target:     addiu r3,r0,1
+        cpu.SetMemoryHooks(
+            [&code](uint32_t addr, uint32_t) -> uint32_t { return code[(addr & 0xFFFF) / 4]; },
+            [](uint32_t, uint32_t, uint32_t) {});
+        cpu.SetPC(0x1000);
+        for (int i = 0; i < 3; ++i) cpu.Step();
+        assert(cpu.GetGPR(1) == 1);
+        assert(cpu.GetGPR(2) == 0);
+        assert(cpu.GetGPR(3) == 1);
+        std::cout << "  ✓ MIPS branch delay slot test passed.\n";
+    }
+
+    // 12d. Load delay: the instruction after lw still reads the OLD r1; r1 updates afterwards
+    {
+        personarm::CpuContext cpu;
+        std::vector<uint32_t> code(0x10000 / 4, 0);
+        code[0x1000 / 4] = 0x8C012000; // lw r1,0x2000(r0)
+        code[0x1004 / 4] = 0x24220000; // addiu r2,r1,0  (must see old r1)
+        code[0x2000 / 4] = 9;
+        cpu.SetMemoryHooks(
+            [&code](uint32_t addr, uint32_t) -> uint32_t { return code[(addr & 0xFFFF) / 4]; },
+            [](uint32_t, uint32_t, uint32_t) {});
+        cpu.SetGPR(1, 5);
+        cpu.SetPC(0x1000);
+        cpu.Step();
+        cpu.Step();
+        cpu.Step(); // nop
+        assert(cpu.GetGPR(2) == 5);
+        assert(cpu.GetGPR(1) == 9);
+        std::cout << "  ✓ MIPS load delay test passed.\n";
+    }
+
+    // 12c. LWL (little-endian): word 0xAABBCCDD at 0x2000, lwl r1,0x2001(r0) keeps low 16 bits of r1
+    {
+        personarm::CpuContext cpu;
+        std::vector<uint32_t> code(0x10000 / 4, 0);
+        code[0x1000 / 4] = 0x88012001; // lwl r1,0x2001(r0)
+        code[0x2000 / 4] = 0xAABBCCDD;
+        cpu.SetMemoryHooks(
+            [&code](uint32_t addr, uint32_t) -> uint32_t { return code[(addr & 0xFFFF) / 4]; },
+            [](uint32_t, uint32_t, uint32_t) {});
+        cpu.SetGPR(1, 0x11223344);
+        cpu.SetPC(0x1000);
+        cpu.Step();
+        cpu.Step(); // load delay: result lands at the next step
+        assert(cpu.GetGPR(1) == 0xCCDD3344);
+        std::cout << "  ✓ MIPS LWL test passed.\n";
+    }
+
     // 13. PS-X EXE Loader Tests
     {
         std::vector<uint8_t> dummy_exe(4096, 0);

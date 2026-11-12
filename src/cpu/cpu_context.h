@@ -75,12 +75,12 @@ private:
     uint64_t m_cycles = 0;
 
     uint32_t m_next_pc = 0;
-    std::optional<uint32_t> m_branch_target;
-    bool m_in_delay_slot = false;
 
     // Load Delay Slot simulation
     uint32_t m_load_delay_reg = 0;
     uint32_t m_load_delay_val = 0;
+    uint32_t m_prev_load_reg = 0; // load issued by the previous instruction, still in flight
+    uint32_t m_prev_load_val = 0;
 
     ReadMemoryFunc m_read_memory;
     WriteMemoryFunc m_write_memory;
