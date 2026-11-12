@@ -45,6 +45,23 @@ bool Ps1BiosHle::HandleBiosHook(CpuContext& cpu, uint8_t* ram, size_t ram_size) 
         // Vector C: function code passed in register $t1 ($9)
         uint32_t func = cpu.GetGPR(9);
         return ExecuteCall(BiosVector::VectorC, func, cpu, ram, ram_size);
+    } else if (masked_pc == 0x80) {
+        // Exception vector with no BIOS in RAM: return past the faulting opcode and pop SR (rfe).
+        // shortcut: SYSCALL 1/2 (Enter/ExitCriticalSection) do not touch SR.IEc and IRQs are not
+        // dispatched; upgrade when interrupts are emulated (GAP-CPU-06).
+        CpuRegisters regs = cpu.GetRegisters();
+        // Only SYSCALL (8) and BREAK (9) are expected here; a fault (Ov, AdEL, AdES...) means a
+        // real bug, so make it visible instead of silently resuming.
+        const uint32_t exc = (regs.cp0_cause >> 2) & 0x1Fu;
+        if (exc != 8 && exc != 9) {
+            std::ostringstream m;
+            m << "unhandled CPU exception code " << exc << " at EPC 0x" << std::hex << regs.cp0_epc;
+            PRM_LOG_ERROR("HLE", m.str());
+        }
+        regs.pc = regs.cp0_epc + 4;
+        regs.cp0_status = (regs.cp0_status & ~0x0Fu) | ((regs.cp0_status >> 2) & 0x0Fu);
+        cpu.SetRegisters(regs);
+        return true;
     }
 
     return false;

@@ -314,10 +314,10 @@ void Engine::RunFrame() {
         static_cast<uint64_t>(PS1_CYCLES_PER_FRAME_NTSC * effective_multiplier);
 
     while (m_cpu.GetCycleCount() < target_cycles && m_state == EngineState::Running) {
-        // Fast BIOS HLE hook check: only intercept at vectors 0xA0, 0xB0, 0xC0
+        // Fast BIOS HLE hook check: intercept at the exception vector 0x80 and at 0xA0, 0xB0, 0xC0
         if (m_config.enable_bios_hle) {
             uint32_t masked_pc = m_cpu.GetPC() & 0x1FFFFFFF;
-            if (masked_pc == 0x000000A0 || masked_pc == 0x000000B0 || masked_pc == 0x000000C0) {
+            if (masked_pc == 0x00000080 || masked_pc == 0x000000A0 || masked_pc == 0x000000B0 || masked_pc == 0x000000C0) {
                 m_bios.HandleBiosHook(m_cpu, m_ram.data(), m_ram.size());
             }
         }
