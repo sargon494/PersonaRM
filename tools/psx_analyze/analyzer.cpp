@@ -421,7 +421,9 @@ std::string RenderMarkdown(const std::vector<DiscReport>& reports) {
                 os << "| Retornos (`jr $ra`) | " << c.returns << " |\n";
                 os << "| Llamadas a BIOS (`jr` a 0xA0/0xB0/0xC0) | " << c.bios_calls << " |\n";
                 os << "| Saltos `jr` (sin BIOS) / sin resolver | " << c.indirect_jumps << " / " << c.unresolved_jumps << " |\n";
-                os << "| Llamadas `jalr` sin resolver | " << c.indirect_calls << " |\n";
+                os << "| Llamadas `jalr` (total) | " << c.indirect_calls << " |\n";
+                os << "| `jalr` con candidato por escritura constante (no seguido) | " << c.indirect_calls_assigned << " |\n";
+                os << "| `jalr` sin resolver | " << c.indirect_calls_unresolved << " |\n";
                 os << "| Tablas de salto resueltas / entradas leídas | " << c.resolved_jump_tables << " / "
                    << c.resolved_table_entries << " |\n";
                 os << "| Palabras reservadas alcanzadas como código | " << c.invalid_reached << " |\n";

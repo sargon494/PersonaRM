@@ -343,6 +343,35 @@ static void TestCfgGlobalPointerStored() {
     CHECK(r.pointers.assigned_in_image == 1 && r.pointers.null_value == 0);
     CHECK(r.pointer_samples.size() == 1 && r.pointer_samples[0].status == PointerStatus::AssignedInImage);
     CHECK(r.pointer_samples[0].candidates.size() == 1 && r.pointer_samples[0].candidates[0] == kBase + 0x40);
+    // The call has a candidate but is not followed, so it is counted as assigned, not unresolved.
+    CHECK(r.indirect_calls == 1);
+    CHECK(r.indirect_calls_assigned == 1 && r.indirect_calls_unresolved == 0);
+}
+
+static void TestCfgCallSplitCounters() {
+    // One jalr with a constant store (assigned) and one whose base is not constant (unresolved).
+    std::vector<uint8_t> code(0x200, 0);
+    const uint32_t words[] = {
+        0x3C028001u,   // 0 lui $2,0x8001
+        0x24420040u,   // 1 addiu $2,$2,0x40
+        0x3C038001u,   // 2 lui $3,0x8001
+        0xAC620100u,   // 3 sw $2,0x100($3)
+        0x3C048001u,   // 4 lui $4,0x8001
+        0x8C850100u,   // 5 lw $5,0x100($4)
+        0x00A0F809u,   // 6 jalr $31,$5               assigned
+        kNop,          // 7
+        0x8CA60000u,   // 8 lw $6,0($5)              base $5 comes from memory: not constant
+        0x00C0F809u,   // 9 jalr $31,$6               unresolved
+        kNop,          // 10
+        kJrRa, kNop,   // 11-12
+    };
+    for (size_t i = 0; i < sizeof(words) / sizeof(words[0]); ++i)
+        for (int b = 0; b < 4; ++b) code[i * 4 + b] = static_cast<uint8_t>(words[i] >> (8 * b));
+    CfgReport r = AnalyzeControlFlow(code.data(), code.size(), kBase, kBase);
+    CHECK(r.indirect_calls == 2);
+    CHECK(r.indirect_calls_assigned == 1);
+    CHECK(r.indirect_calls_unresolved == 1);
+    CHECK(r.indirect_calls_assigned + r.indirect_calls_unresolved == r.indirect_calls);
 }
 
 int main() {
@@ -357,6 +386,7 @@ int main() {
     TestCfgBiosCall();
     TestCfgGlobalPointers();
     TestCfgGlobalPointerStored();
+    TestCfgCallSplitCounters();
     TestCfgUnresolvedJumpCounter();
     TestDescribeInsn();
     TestCfgUnresolvedContextLimit();
