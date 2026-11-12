@@ -77,7 +77,10 @@ must be recorded with evidence in `tests/diff/accepted_divergences.md` (VALIDATI
 header (`v` must be 1), a missing string `ev`, a missing non-negative integer `seq`, or non-increasing `seq`.
 Empty lines are skipped.
 
-## 7. Where the engine must be wired (not done in this change)
+## 7. Where the engine is wired
+
+Done: `--trace-out`, header at boot, `call` (HLE vector dispatch), `vsync` + `ckpt` (`vsync_N`) per frame,
+`irq` at the exception vector, `end` at shutdown. Still open: `load_file`, `cd_read`, `mmio`.
 
 `ITraceSink` (in `trace.h`) is the only interface the runtime needs; a null pointer means tracing off.
 `TraceWriter` implements it. Planned call sites (owned by other work in progress, hence not edited here):
