@@ -27,6 +27,8 @@ set(CORE_SOURCES
     recomp/cfg.cpp
     core/save_manager.cpp
     core/save_manager.h
+    trace/trace.cpp
+    trace/trace.h
 )
 
 set(INPUT_SOURCES

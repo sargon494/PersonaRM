@@ -53,10 +53,32 @@ void CpuContext::RaiseException(uint32_t exc_code) {
     m_next_pc = m_regs.pc + 4;
 }
 
+void CpuContext::SetIrqLine(bool asserted) {
+    // psx-spx "Interrupt Control": CAUSE bit 10 mirrors (I_STAT AND I_MASK) != 0; it is not a latch.
+    m_regs.cp0_cause = asserted ? (m_regs.cp0_cause | 0x400u) : (m_regs.cp0_cause & ~0x400u);
+}
+
 void CpuContext::Step() {
     if (!m_read_memory) {
         m_regs.pc += 4;
         m_cycles++;
+        return;
+    }
+
+    // psx-spx "COP0 - Exception Handling": Int (ExcCode 00h) is taken at an instruction boundary
+    // when SR.IEc is set and a CAUSE.IP bit (8-15) is enabled by SR.IM. EPC = the opcode not yet
+    // executed, or its branch (BD) when it sits in a delay slot.
+    // shortcut: the GTE-command quirk (an interrupted COP2 command still executes) is not
+    // modelled; harmless while the HLE returns to EPC, matters once a real kernel handler runs.
+    if ((m_regs.cp0_status & 1u) && (m_regs.cp0_status & m_regs.cp0_cause & 0xFF00u)) {
+        if (m_load_delay_reg != 0) { // the in-flight load still completes
+            SetGPR(m_load_delay_reg, m_load_delay_val);
+            m_load_delay_reg = 0;
+        }
+        m_current_pc = m_regs.pc;
+        m_in_delay_slot = m_prev_was_branch;
+        m_prev_was_branch = false;
+        RaiseException(0x00);
         return;
     }
 
@@ -322,7 +344,7 @@ void CpuContext::ExecuteInstruction(uint32_t opcode) {
                 m_load_delay_val = val;
             } else if (rs == 0x04) { // MTC0 rt, rd
                 if (rd == 12) m_regs.cp0_status = rt_val;
-                else if (rd == 13) m_regs.cp0_cause = rt_val;
+                else if (rd == 13) m_regs.cp0_cause = (m_regs.cp0_cause & ~0x300u) | (rt_val & 0x300u); // only IP0-1 are R/W
                 else if (rd == 14) m_regs.cp0_epc = rt_val;
             } else if (funct == 0x10 && (opcode & 0x02000000) != 0) { // RFE (Restore From Exception)
                 m_regs.cp0_status = (m_regs.cp0_status & ~0x0F) | ((m_regs.cp0_status >> 2) & 0x0F);
