@@ -89,6 +89,10 @@ public:
     bool ReadFile(const std::string& file_name, std::vector<uint8_t>& out_data);
     bool FileExists(const std::string& file_name) const;
 
+    /// Reads one raw 2352-byte sector (sync+header+subheader+data) at `lba`.
+    /// 2048-byte ISO images get a synthesized Mode2/Form1 header around the data.
+    bool ReadRawSector(uint32_t lba, uint8_t* out2352);
+
     // Game Boot Identification (Parses SYSTEM.CNF)
     std::string DetectBootExecutable();
 
