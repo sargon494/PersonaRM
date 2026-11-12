@@ -48,6 +48,12 @@ target_compile_features(unit_test_cpu_conformance PRIVATE cxx_std_17)
 add_test(NAME unit_test_cpu_conformance COMMAND unit_test_cpu_conformance)
 set_tests_properties(unit_test_cpu_conformance PROPERTIES LABELS "unit" TIMEOUT 120)
 
+add_executable(unit_test_gpu test_gpu.cpp)
+target_link_libraries(unit_test_gpu PRIVATE personarm_core)
+target_compile_features(unit_test_gpu PRIVATE cxx_std_17)
+add_test(NAME unit_test_gpu COMMAND unit_test_gpu)
+set_tests_properties(unit_test_gpu PROPERTIES LABELS "unit" TIMEOUT 120)
+
 add_executable(unit_test_trace test_trace.cpp)
 target_link_libraries(unit_test_trace PRIVATE personarm_core)
 target_compile_features(unit_test_trace PRIVATE cxx_std_17)
