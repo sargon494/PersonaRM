@@ -42,12 +42,23 @@ struct PointerSite {
     uint32_t value = 0;     // the word at that slot in the image (0 when not readable)
     PointerStatus status = PointerStatus::Unrecognised;
     std::vector<uint32_t> candidates;   // in-image addresses stored into the slot by constant stores
+    bool followable = false;            // exactly one distinct constant stored, in image, no unknown store
 };
 
 /// Local diagnostic: the instructions leading up to an unresolved indirect transfer.
 struct SiteContext {
     uint32_t site = 0;                      // address of the unresolved jr/jalr
     std::vector<std::string> window;        // the preceding words, then the site, as text
+};
+
+struct CfgOptions {
+    /// Treat the single constant stored into a function-pointer slot as a function entry.
+    /// Off by default: a constant store does not prove the value is a valid function.
+    bool follow_assigned_pointers = false;
+    /// Resolve a `lw` from a constant address to the constant kept there (the image word, or the one
+    /// constant stored to it), so a function pointer reached through a structure pointer in a
+    /// global can be located. Off by default: the value in memory may change at run time.
+    bool second_level_bases = false;
 };
 
 struct CfgReport {
@@ -63,6 +74,8 @@ struct CfgReport {
     uint32_t indirect_calls = 0;        // all jalr reached
     uint32_t indirect_calls_assigned = 0;   // jalr whose slot has in-image constant stores (candidates known, not followed)
     uint32_t indirect_calls_unresolved = 0; // the rest: indirect_calls - indirect_calls_assigned
+    uint32_t indirect_calls_followed = 0;   // assigned jalr whose candidate was followed (option enabled)
+    uint32_t followed_candidates = 0;       // distinct candidate functions added by following pointers
     uint32_t syscalls = 0;
     uint32_t invalid_reached = 0;       // reserved encodings reached as code
     uint32_t out_of_range_targets = 0;  // branch/call/fall-through targets outside the image
@@ -80,6 +93,7 @@ struct CfgReport {
 };
 
 /// `code` is the payload as loaded at `load_address`; `entry` is the initial PC.
-CfgReport AnalyzeControlFlow(const uint8_t* code, size_t size, uint32_t load_address, uint32_t entry);
+CfgReport AnalyzeControlFlow(const uint8_t* code, size_t size, uint32_t load_address, uint32_t entry,
+                             const CfgOptions& options = CfgOptions{});
 
 } // namespace personarm::recomp

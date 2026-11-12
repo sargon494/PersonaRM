@@ -374,6 +374,129 @@ static void TestCfgCallSplitCounters() {
     CHECK(r.indirect_calls_assigned + r.indirect_calls_unresolved == r.indirect_calls);
 }
 
+static std::vector<uint8_t> MakeSlotImage(bool second_value) {
+    std::vector<uint8_t> code(0x200, 0);
+    std::vector<uint32_t> w = {
+        0x3C028001u,   // 0 lui $2,0x8001
+        0x24420040u,   // 1 addiu $2,$2,0x40          -> 0x80010040
+        0x3C038001u,   // 2 lui $3,0x8001
+        0xAC620100u,   // 3 sw $2,0x100($3)           -> slot 0x80010100
+    };
+    if (second_value) {
+        w.push_back(0x24420010u);   // addiu $2,$2,0x10  -> 0x80010050
+        w.push_back(0xAC620100u);   // sw $2,0x100($3)
+    }
+    const uint32_t tail[] = {
+        0x3C048001u,   // lui $4,0x8001
+        0x8C850100u,   // lw $5,0x100($4)
+        0x00A0F809u,   // jalr $31,$5
+        kNop,
+        kJrRa, kNop,
+    };
+    w.insert(w.end(), tail, tail + 6);
+    for (size_t i = 0; i < w.size(); ++i)
+        for (int b = 0; b < 4; ++b) code[i * 4 + b] = static_cast<uint8_t>(w[i] >> (8 * b));
+    // Two candidate functions: jr $ra at 0x...40 and 0x...50.
+    const size_t f1 = 0x40, f2 = 0x50;
+    for (int b = 0; b < 4; ++b) {
+        code[f1 + b] = static_cast<uint8_t>(kJrRa >> (8 * b));
+        code[f2 + b] = static_cast<uint8_t>(kJrRa >> (8 * b));
+    }
+    return code;
+}
+
+static void TestCfgFollowAssignedPointers() {
+    const std::vector<uint8_t> one = MakeSlotImage(false);
+    CfgOptions off;
+    CfgOptions on;
+    on.follow_assigned_pointers = true;
+
+    // Default: the candidate is reported but not followed.
+    CfgReport a = AnalyzeControlFlow(one.data(), one.size(), kBase, kBase);
+    CHECK(a.indirect_calls_assigned == 1 && a.indirect_calls_followed == 0 && a.followed_candidates == 0);
+    CfgReport a2 = AnalyzeControlFlow(one.data(), one.size(), kBase, kBase, off);
+    CHECK(a2.reachable_words == a.reachable_words && a2.functions == a.functions);
+
+    // Enabled: the single constant-stored candidate becomes a function, its code is reached.
+    CfgReport b = AnalyzeControlFlow(one.data(), one.size(), kBase, kBase, on);
+    CHECK(b.indirect_calls_assigned == 1 && b.indirect_calls_followed == 1 && b.followed_candidates == 1);
+    CHECK(b.functions == a.functions + 1);
+    CHECK(b.reachable_words == a.reachable_words + 2);   // jr $ra + delay slot
+    CHECK(b.indirect_calls == a.indirect_calls);
+
+    // Two different constants stored to the slot: ambiguous, so not followed even when enabled.
+    const std::vector<uint8_t> two = MakeSlotImage(true);
+    CfgReport c = AnalyzeControlFlow(two.data(), two.size(), kBase, kBase, on);
+    CHECK(c.indirect_calls_assigned == 1 && c.indirect_calls_followed == 0 && c.followed_candidates == 0);
+    CfgReport c0 = AnalyzeControlFlow(two.data(), two.size(), kBase, kBase);
+    CHECK(c.reachable_words == c0.reachable_words && c.functions == c0.functions);
+}
+
+// A function pointer reached through a structure pointer kept in a global:
+//   G (0x80010100) <- P (0x80010180) by a constant store; P+8 <- F (0x80010120) by a constant store;
+//   lw $5,G ; lw $7,8($5) ; jalr $7
+static std::vector<uint8_t> MakeSecondLevelImage(bool second_pointer_store) {
+    std::vector<uint8_t> code(0x200, 0);
+    std::vector<uint32_t> w = {
+        0x3C028001u,   //  0 lui $2,0x8001
+        0x24420180u,   //  1 addiu $2,$2,0x180         P = 0x80010180
+        0x3C038001u,   //  2 lui $3,0x8001
+        0xAC620100u,   //  3 sw $2,0x100($3)           G <- P
+        0x3C068001u,   //  4 lui $6,0x8001
+        0x24C60120u,   //  5 addiu $6,$6,0x120         F = 0x80010120
+        0xAC460008u,   //  6 sw $6,8($2)               P+8 <- F
+    };
+    if (second_pointer_store) {
+        w.push_back(0x24420020u);   // addiu $2,$2,0x20     P2 = 0x801001A0
+        w.push_back(0xAC620100u);   // sw $2,0x100($3)      G <- P2 (two different values)
+    }
+    const uint32_t tail[] = {
+        0x3C048001u,   // lui $4,0x8001
+        0x8C850100u,   // lw $5,0x100($4)              $5 = G (a structure pointer)
+        0x8CA70008u,   // lw $7,8($5)                  slot = [G] + 8
+        0x00E0F809u,   // jalr $31,$7
+        kNop,
+        kJrRa, kNop,
+    };
+    w.insert(w.end(), tail, tail + 7);
+    for (size_t i = 0; i < w.size(); ++i)
+        for (int b = 0; b < 4; ++b) code[i * 4 + b] = static_cast<uint8_t>(w[i] >> (8 * b));
+    for (int b = 0; b < 4; ++b) code[0x120 + b] = static_cast<uint8_t>(kJrRa >> (8 * b));
+    return code;
+}
+
+static void TestCfgSecondLevelBase() {
+    const std::vector<uint8_t> img = MakeSecondLevelImage(false);
+
+    // Default: the base is not a constant, so the slot cannot be located.
+    CfgReport a = AnalyzeControlFlow(img.data(), img.size(), kBase, kBase);
+    CHECK(a.pointers.unrecognised == 1 && a.pointers.assigned_in_image == 0);
+    CHECK(a.indirect_calls_unresolved == 1);
+
+    // Option on: the structure pointer is recovered from its constant store, the slot is found.
+    CfgOptions o;
+    o.second_level_bases = true;
+    CfgReport b = AnalyzeControlFlow(img.data(), img.size(), kBase, kBase, o);
+    CHECK(b.pointers.unrecognised == 0 && b.pointers.assigned_in_image == 1);
+    CHECK(b.pointer_samples.size() == 1 && b.pointer_samples[0].address == kBase + 0x188);
+    CHECK(b.pointer_samples[0].candidates.size() == 1 && b.pointer_samples[0].candidates[0] == kBase + 0x120);
+    CHECK(b.reachable_words == a.reachable_words);          // classification only; nothing followed
+    CHECK(b.indirect_calls_assigned == 1 && b.indirect_calls_unresolved == 0);
+
+    // Together with pointer following, the target function is reached.
+    o.follow_assigned_pointers = true;
+    CfgReport c = AnalyzeControlFlow(img.data(), img.size(), kBase, kBase, o);
+    CHECK(c.indirect_calls_followed == 1 && c.followed_candidates == 1);
+    CHECK(c.reachable_words == a.reachable_words + 2);
+
+    // The global is written with two different constants: the structure is ambiguous.
+    const std::vector<uint8_t> amb = MakeSecondLevelImage(true);
+    CfgOptions o2;
+    o2.second_level_bases = true;
+    CfgReport d = AnalyzeControlFlow(amb.data(), amb.size(), kBase, kBase, o2);
+    CHECK(d.pointers.unrecognised == 1 && d.pointers.assigned_in_image == 0);
+}
+
 int main() {
     TestDecode();
     TestCfgCallsAndDelaySlots();
@@ -387,6 +510,8 @@ int main() {
     TestCfgGlobalPointers();
     TestCfgGlobalPointerStored();
     TestCfgCallSplitCounters();
+    TestCfgFollowAssignedPointers();
+    TestCfgSecondLevelBase();
     TestCfgUnresolvedJumpCounter();
     TestDescribeInsn();
     TestCfgUnresolvedContextLimit();
