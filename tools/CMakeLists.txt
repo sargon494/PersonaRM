@@ -2,7 +2,7 @@
 # tools/ — offline developer tools (not part of the game runtime)
 # ───────────────────────────────────────────────────────────────────────
 
-add_library(psx_analyzer STATIC psx_analyze/analyzer.cpp psx_analyze/analyzer.h)
+add_library(psx_analyzer STATIC psx_analyze/analyzer.cpp psx_analyze/analyzer.h psx_analyze/asset_tools.cpp psx_analyze/asset_tools.h)
 target_include_directories(psx_analyzer PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/psx_analyze)
 target_link_libraries(psx_analyzer PUBLIC personarm_core)
 target_compile_features(psx_analyzer PUBLIC cxx_std_17)

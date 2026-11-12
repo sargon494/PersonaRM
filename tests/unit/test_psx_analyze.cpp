@@ -11,6 +11,8 @@
 #include <vector>
 
 #include "analyzer.h"
+#include "asset_tools.h"
+#include <algorithm>
 #include "core/hash.h"
 
 using namespace personarm;
@@ -291,7 +293,84 @@ static void TestDiscs() {
     if (!std::getenv("PSX_ANALYZE_KEEP")) fs::remove_all(dir);   // keep the synthetic images to try the CLI
 }
 
+// Tiny encoder: runs of >=3 equal bytes become repeat codes, everything else literals.
+static std::vector<uint8_t> RleEncode(const std::vector<uint8_t>& in) {
+    std::vector<uint8_t> out, lit;
+    auto flush = [&] {
+        for (size_t i = 0; i < lit.size(); i += 128) {
+            const size_t n = std::min<size_t>(128, lit.size() - i);
+            out.push_back(static_cast<uint8_t>(n - 1));
+            out.insert(out.end(), lit.begin() + i, lit.begin() + i + n);
+        }
+        lit.clear();
+    };
+    for (size_t i = 0; i < in.size();) {
+        size_t run = 1;
+        while (i + run < in.size() && in[i + run] == in[i] && run < 130) ++run;
+        if (run >= 3) { flush(); out.push_back(static_cast<uint8_t>(0x80 | (run - 3))); out.push_back(in[i]); i += run; }
+        else { lit.push_back(in[i++]); }
+    }
+    flush();
+    return out;
+}
+
+static void TestAssetTools() {
+    // FILEPOS: 3 entries plus a 3-byte tail that must be ignored.
+    std::vector<uint8_t> fp;
+    AppendWords(fp, {23u, 2048u, 100u, 4672u, 0u, 0u});
+    fp.insert(fp.end(), {1, 2, 3});
+    auto e = ParseFilepos(fp.data(), fp.size());
+    CHECK(e.size() == 3);
+    CHECK(e[0].lba == 23 && e[0].size == 2048 && e[1].lba == 100 && e[1].size == 4672);
+    CHECK(e[2].lba == 0 && e[2].size == 0);
+
+    // Chunks: odd-sized chunk (aligned to 4), zero padding to 0x800, second sector, trailing zeros.
+    std::vector<uint8_t> ck(0x1000, 0);
+    PutU32(ck, 0, 1); PutU32(ck, 4, 10);         // next at 12
+    PutU32(ck, 12, 2); PutU32(ck, 16, 8);        // next at 20, then padding
+    PutU32(ck, 0x800, 3); PutU32(ck, 0x804, 16); // next at 0x810, then zeros
+    std::vector<Chunk> ch; std::string err;
+    CHECK(WalkChunks(ck.data(), ck.size(), ch, err));
+    CHECK(ch.size() == 3);
+    CHECK(ch[0].type == 1 && ch[0].offset == 0 && ch[0].size == 10);
+    CHECK(ch[1].type == 2 && ch[1].offset == 12);
+    CHECK(ch[2].type == 3 && ch[2].offset == 0x800 && ch[2].size == 16);
+    ch.clear();
+    PutU32(ck, 0x804, 0x5000);                   // size past the end
+    CHECK(!WalkChunks(ck.data(), ck.size(), ch, err));
+
+    // RLE round trip.
+    std::vector<uint8_t> src;
+    for (int i = 0; i < 300; ++i) src.push_back(static_cast<uint8_t>(i * 7));
+    src.insert(src.end(), 200, 0xAA);
+    src.insert(src.end(), {1, 1, 2, 3, 3, 3, 3});
+    const auto enc = RleEncode(src);
+    std::vector<uint8_t> dec;
+    CHECK(RleDecode(enc.data(), enc.size(), dec) && dec == src);
+    const uint8_t cut[] = {0x05, 1, 2};          // literal run longer than the input
+    dec.clear();
+    CHECK(!RleDecode(cut, sizeof cut, dec));
+
+    // Hazards. 0x8C880000 lw t0,0(a0); 0x01084821 addu t1,t0,t0; 0x00844821 addu t1,a0,a0;
+    // 0x88880000 lwl t0; 0x90880000 lbu t0; 0xAC880000 sw t0,0(a0).
+    std::vector<uint8_t> hz;
+    AppendWords(hz, {0x03E00008u, 0u,                    // 0x00 jr ra ; nop
+                     0x8C880000u, 0x01084821u,           // 0x08 hazard (lw -> addu reads t0)
+                     0x8C880000u, 0x00844821u,           // 0x10 no hazard (does not read t0)
+                     0x88880000u, 0x01084821u,           // 0x18 lwl exempt
+                     0x8C880000u, 0u,                    // 0x20 nop in the slot
+                     0x90880000u, 0xAC880000u,           // 0x28 hazard (store reads rt)
+                     0x8C800000u, 0x00000021u});         // 0x30 load into $zero is harmless
+    auto h = ScanHazards(hz.data(), hz.size(), 0x80010000u, false, 0);
+    CHECK(h.size() == 2 && h[0].addr == 0x80010008u && h[1].addr == 0x80010028u);
+    h = ScanHazards(hz.data(), hz.size(), 0x80010000u, true, 0x80010000u);   // returns at once: 0 reachable
+    CHECK(h.empty());
+    h = ScanHazards(hz.data(), hz.size(), 0x80010000u, true, 0x80010008u);   // falls through into the hazard
+    CHECK(h.size() == 2 && h[0].addr == 0x80010008u);
+}
+
 int main() {
+    TestAssetTools();
     TestScanners();
     TestDiscs();
     std::cout << "psx_analyze tests passed (" << g_checks << " checks)\n";
