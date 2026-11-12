@@ -55,6 +55,12 @@ void Engine::Reset() {
 }
 
 void Engine::Shutdown() {
+    if (m_trace) {
+        m_trace->OnEnd("quit", static_cast<uint32_t>(m_frame_counter));
+        SetTraceSink(nullptr);
+    }
+    m_trace_writer.reset();
+    m_trace_file.reset();
     m_state = EngineState::Stopped;
     PRM_LOG_INFO("ENGINE", "PersonaRM Core Engine shutdown.");
 }
@@ -76,6 +82,10 @@ void Engine::SetupMemoryBus() {
             this->WriteBus(addr, val, size);
         }
     );
+    // The HLE kernel's default IRQ handlers read/acknowledge I_STAT like the BIOS code does.
+    m_bios.SetIoHooks(
+        [this](uint32_t addr, uint32_t size) { return this->ReadBus(addr, size); },
+        [this](uint32_t addr, uint32_t val, uint32_t size) { this->WriteBus(addr, val, size); });
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -301,6 +311,7 @@ bool Engine::BootFromDisc(const std::string& disc_path) {
 
     {
         Persona2DiscInfo disc = DiscReader::IdentifyPersona2(boot_exe_name);
+        m_trace_disc = disc.recognized ? disc.product_id : std::string();
         if (disc.recognized) {
             PRM_LOG_INFO("ENGINE", "Recognized Persona 2 EP disc " + disc.product_id + " (" + disc.region + ", " +
                                    disc.edition + ", disc " + (disc.disc_number ? std::to_string(disc.disc_number) : std::string("?")) + " of 2)");
@@ -318,6 +329,23 @@ bool Engine::BootFromDisc(const std::string& disc_path) {
 bool Engine::BootExecutable(const uint8_t* exe_buffer, size_t exe_size) {
     Reset();
     SetupMemoryBus();
+    if (m_config.enable_bios_hle) m_bios.InstallKernel(m_ram.data(), m_ram.size());
+
+    if (!m_trace_path.empty()) {
+        if (m_trace) m_trace->OnEnd("quit", static_cast<uint32_t>(m_frame_counter));
+        SetTraceSink(nullptr);
+        m_trace_writer.reset();
+        m_trace_file = std::make_unique<std::ofstream>(m_trace_path, std::ios::binary | std::ios::trunc);
+        if (*m_trace_file) {
+            trace::TraceHeader header;
+            header.src = "prm";
+            header.disc = m_trace_disc;
+            m_trace_writer = std::make_unique<trace::TraceWriter>(*m_trace_file, header);
+            SetTraceSink(m_trace_writer.get());
+        } else {
+            PRM_LOG_ERROR("ENGINE", "Cannot open trace output " + m_trace_path);
+        }
+    }
 
     PsxExeInfo info{};
     if (!ExeLoader::LoadExe(exe_buffer, exe_size, m_cpu, m_ram, info)) {
@@ -348,18 +376,26 @@ void Engine::RunFrame() {
         static_cast<uint64_t>(PS1_CYCLES_PER_FRAME_NTSC * effective_multiplier);
 
     while (m_cpu.GetCycleCount() < target_cycles && m_state == EngineState::Running) {
-        // Fast BIOS HLE hook check: intercept at the exception vector 0x80 and at 0xA0, 0xB0, 0xC0
+        // HLE: intercept the exception vector, the A0/B0/C0 call vectors and the kernel stubs before the
+        // CPU fetches them. One HLE step can land on another HLE address (a stub returning to the
+        // kernel trampoline), so loop until guest code is next.
         if (m_config.enable_bios_hle) {
-            uint32_t masked_pc = m_cpu.GetPC() & 0x1FFFFFFF;
-            if (masked_pc == 0x00000080 && ((m_cpu.GetRegisters().cp0_cause >> 2) & 0x1Fu) == 0) {
-                // shortcut: no kernel IRQ chain yet, so every enabled pending IRQ is acknowledged
-                // and dropped here (else Int would re-fire forever); upgrade with SVC-031.
-                m_i_stat &= ~m_i_mask;
-                UpdateIrqLine();
+            for (int guard = 0; Ps1BiosHle::IsHleAddress(m_cpu.GetPC() & 0x1FFFFFFF); ++guard) {
+                if (guard == 4096) {
+                    PRM_LOG_ERROR("ENGINE", "HLE kernel did not return to guest code");
+                    m_state = EngineState::Stopped;
+                    break;
+                }
+                if (m_trace && (m_cpu.GetPC() & 0x1FFFFFFF) == 0x80 &&
+                    ((m_cpu.GetRegisters().cp0_cause >> 2) & 0x1Fu) == 0) {
+                    const uint32_t pend = m_i_stat & m_i_mask;
+                    const char* src = (pend & 1u) ? "vblank" : (pend & 4u) ? "cd" : (pend & 8u) ? "dma"
+                                    : (pend & 0x70u) ? "timer" : "other";
+                    m_trace->OnIrq(src, m_cpu.GetRegisters().cp0_epc);
+                }
+                if (!m_bios.HandleBiosHook(m_cpu, m_ram.data(), m_ram.size())) break;
             }
-            if (masked_pc == 0x00000080 || masked_pc == 0x000000A0 || masked_pc == 0x000000B0 || masked_pc == 0x000000C0) {
-                m_bios.HandleBiosHook(m_cpu, m_ram.data(), m_ram.size());
-            }
+            if (m_state != EngineState::Running) break;
         }
 
         m_cpu.Step();
@@ -373,6 +409,18 @@ void Engine::RunFrame() {
     // upgrade with a scanline-based scheduler.
     RaiseIrq(0);
     m_frame_counter++;
+
+    if (m_trace) {
+        // TRACE_FORMAT.md section 3: `vsync`, then the checkpoint taken at it.
+        const uint32_t frame = static_cast<uint32_t>(m_frame_counter);
+        m_trace->OnVsync(frame, std::string(), 0);
+        const CpuRegisters& regs = m_cpu.GetRegisters();
+        const auto& vram = m_gpu.GetVram();
+        m_trace->OnCheckpoint("vsync_" + std::to_string(frame), regs.pc, trace::HashGpr(regs),
+                              trace::HashMaskedRam(m_ram.data(), m_ram.size(), trace::DefaultRamMasks()),
+                              trace::HashBytes(m_scratchpad.data(), m_scratchpad.size()),
+                              trace::HashBytes(reinterpret_cast<const uint8_t*>(vram.data()), vram.size() * 2));
+    }
 }
 
 void Engine::TickTimers(uint32_t cycles) {

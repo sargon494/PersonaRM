@@ -469,8 +469,9 @@ static uint32_t Ram32(personarm::Engine& e, uint32_t a) {
     return r[a] | (r[a + 1] << 8) | (r[a + 2] << 16) | (uint32_t(r[a + 3]) << 24);
 }
 
-// Waits for I_STAT != 0, stores it at 0x100, acknowledges exactly those bits, then
-// stores I_STAT again (0x104) and two reads of Timer2 MODE (0x108, 0x10C).
+// Scratch words at 0x7F00+ (kernel RAM the HLE kernel leaves unused; 0x100/0x200 hold its tables).
+// Waits for I_STAT != 0, stores it at 0x7F00, acknowledges exactly those bits, then
+// stores I_STAT again (0x7F04) and two reads of Timer2 MODE (0x7F08, 0x7F0C).
 static std::vector<uint32_t> WaitIrqProgram(bool with_timer2) {
     std::vector<uint32_t> p = {I(0x0F, 0, kAt, 0x1F80)}; // lui at,0x1F80
     if (with_timer2) {
@@ -480,9 +481,9 @@ static std::vector<uint32_t> WaitIrqProgram(bool with_timer2) {
     uint32_t wait = uint32_t(p.size());
     p.insert(p.end(), {I(0x23, kAt, kT0, 0x1070), kNop});
     p.push_back(I(0x04, kT0, 0, uint32_t(int32_t(wait) - int32_t(p.size() + 1)))); // beq t0,r0,wait
-    p.insert(p.end(), {kNop, I(0x2B, 0, kT0, 0x100), R(0x27, kT0, 0, kT1), I(0x2B, kAt, kT1, 0x1070),
+    p.insert(p.end(), {kNop, I(0x2B, 0, kT0, 0x7F00), R(0x27, kT0, 0, kT1), I(0x2B, kAt, kT1, 0x1070),
                        I(0x23, kAt, kT2, 0x1070), I(0x23, kAt, kT3, 0x1124), I(0x23, kAt, kT4, 0x1124),
-                       I(0x2B, 0, kT2, 0x104), I(0x2B, 0, kT3, 0x108), I(0x2B, 0, kT4, 0x10C)});
+                       I(0x2B, 0, kT2, 0x7F04), I(0x2B, 0, kT3, 0x7F08), I(0x2B, 0, kT4, 0x7F0C)});
     p.insert(p.end(), {J(0x80010000 + uint32_t(p.size()) * 4), kNop});
     return p;
 }
@@ -491,18 +492,18 @@ static void TestIrqController() {
     {
         auto& e = BootProgram(WaitIrqProgram(false));
         e.RunFrame();
-        CHECK_EQ("VBlank not before frame end", Ram32(e, 0x100), 0);
+        CHECK_EQ("VBlank not before frame end", Ram32(e, 0x7F00), 0);
         e.RunFrame();
-        CHECK_EQ("VBlank IRQ0 in I_STAT", Ram32(e, 0x100), 0x001);
-        CHECK_EQ("I_STAT ack", Ram32(e, 0x104), 0);
+        CHECK_EQ("VBlank IRQ0 in I_STAT", Ram32(e, 0x7F00), 0x001);
+        CHECK_EQ("I_STAT ack", Ram32(e, 0x7F04), 0);
     }
     {
         auto& e = BootProgram(WaitIrqProgram(true));
         e.RunFrame();
-        CHECK_EQ("Timer2 target IRQ6", Ram32(e, 0x100), 0x040);
-        CHECK_EQ("Timer2 I_STAT ack", Ram32(e, 0x104), 0);
-        CHECK_EQ("Timer2 MODE reached target", Ram32(e, 0x108), 0xC58);
-        CHECK_EQ("Timer2 MODE read clears bit 11", Ram32(e, 0x10C), 0x458);
+        CHECK_EQ("Timer2 target IRQ6", Ram32(e, 0x7F00), 0x040);
+        CHECK_EQ("Timer2 I_STAT ack", Ram32(e, 0x7F04), 0);
+        CHECK_EQ("Timer2 MODE reached target", Ram32(e, 0x7F08), 0xC58);
+        CHECK_EQ("Timer2 MODE read clears bit 11", Ram32(e, 0x7F0C), 0x458);
     }
     // End to end: I_MASK=1, SR=401h; VBlank is taken at the HLE vector, acknowledged,
     // and the program keeps running (no interrupt livelock).
@@ -510,7 +511,7 @@ static void TestIrqController() {
         const uint32_t loop = 0x80010014;
         auto& e = BootProgram({I(0x0F, 0, kAt, 0x1F80), I(0x09, 0, kT0, 1), I(0x2B, kAt, kT0, 0x1074),
                                I(0x09, 0, kT0, 0x401), COP(0, kMtc0, kT0, 12),
-                               I(0x23, 0, kT1, 0x200), kNop, I(0x09, kT1, kT1, 1), I(0x2B, 0, kT1, 0x200),
+                               I(0x23, 0, kT1, 0x7F10), kNop, I(0x09, kT1, kT1, 1), I(0x2B, 0, kT1, 0x7F10),
                                J(loop), kNop});
         e.RunFrame();
         e.RunFrame();
@@ -518,7 +519,7 @@ static void TestIrqController() {
         const auto& r = e.GetCpu().GetRegisters();
         CHECK_EQ("VBlank delivered: EPC in loop", r.cp0_epc >= loop && r.cp0_epc < loop + 0x18, 1);
         CHECK_EQ("VBlank delivered: SR restored", r.cp0_status, 0x401);
-        CHECK_EQ("VBlank delivered: program runs", Ram32(e, 0x200) > 1000, 1);
+        CHECK_EQ("VBlank delivered: program runs", Ram32(e, 0x7F10) > 1000, 1);
     }
 }
 
