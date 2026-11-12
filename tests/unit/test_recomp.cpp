@@ -432,6 +432,71 @@ static void TestCfgFollowAssignedPointers() {
     CHECK(c.reachable_words == c0.reachable_words && c.functions == c0.functions);
 }
 
+// A function pointer reached through a structure pointer kept in a global:
+//   G (0x80010100) <- P (0x80010180) by a constant store; P+8 <- F (0x80010120) by a constant store;
+//   lw $5,G ; lw $7,8($5) ; jalr $7
+static std::vector<uint8_t> MakeSecondLevelImage(bool second_pointer_store) {
+    std::vector<uint8_t> code(0x200, 0);
+    std::vector<uint32_t> w = {
+        0x3C028001u,   //  0 lui $2,0x8001
+        0x24420180u,   //  1 addiu $2,$2,0x180         P = 0x80010180
+        0x3C038001u,   //  2 lui $3,0x8001
+        0xAC620100u,   //  3 sw $2,0x100($3)           G <- P
+        0x3C068001u,   //  4 lui $6,0x8001
+        0x24C60120u,   //  5 addiu $6,$6,0x120         F = 0x80010120
+        0xAC460008u,   //  6 sw $6,8($2)               P+8 <- F
+    };
+    if (second_pointer_store) {
+        w.push_back(0x24420020u);   // addiu $2,$2,0x20     P2 = 0x801001A0
+        w.push_back(0xAC620100u);   // sw $2,0x100($3)      G <- P2 (two different values)
+    }
+    const uint32_t tail[] = {
+        0x3C048001u,   // lui $4,0x8001
+        0x8C850100u,   // lw $5,0x100($4)              $5 = G (a structure pointer)
+        0x8CA70008u,   // lw $7,8($5)                  slot = [G] + 8
+        0x00E0F809u,   // jalr $31,$7
+        kNop,
+        kJrRa, kNop,
+    };
+    w.insert(w.end(), tail, tail + 7);
+    for (size_t i = 0; i < w.size(); ++i)
+        for (int b = 0; b < 4; ++b) code[i * 4 + b] = static_cast<uint8_t>(w[i] >> (8 * b));
+    for (int b = 0; b < 4; ++b) code[0x120 + b] = static_cast<uint8_t>(kJrRa >> (8 * b));
+    return code;
+}
+
+static void TestCfgSecondLevelBase() {
+    const std::vector<uint8_t> img = MakeSecondLevelImage(false);
+
+    // Default: the base is not a constant, so the slot cannot be located.
+    CfgReport a = AnalyzeControlFlow(img.data(), img.size(), kBase, kBase);
+    CHECK(a.pointers.unrecognised == 1 && a.pointers.assigned_in_image == 0);
+    CHECK(a.indirect_calls_unresolved == 1);
+
+    // Option on: the structure pointer is recovered from its constant store, the slot is found.
+    CfgOptions o;
+    o.second_level_bases = true;
+    CfgReport b = AnalyzeControlFlow(img.data(), img.size(), kBase, kBase, o);
+    CHECK(b.pointers.unrecognised == 0 && b.pointers.assigned_in_image == 1);
+    CHECK(b.pointer_samples.size() == 1 && b.pointer_samples[0].address == kBase + 0x188);
+    CHECK(b.pointer_samples[0].candidates.size() == 1 && b.pointer_samples[0].candidates[0] == kBase + 0x120);
+    CHECK(b.reachable_words == a.reachable_words);          // classification only; nothing followed
+    CHECK(b.indirect_calls_assigned == 1 && b.indirect_calls_unresolved == 0);
+
+    // Together with pointer following, the target function is reached.
+    o.follow_assigned_pointers = true;
+    CfgReport c = AnalyzeControlFlow(img.data(), img.size(), kBase, kBase, o);
+    CHECK(c.indirect_calls_followed == 1 && c.followed_candidates == 1);
+    CHECK(c.reachable_words == a.reachable_words + 2);
+
+    // The global is written with two different constants: the structure is ambiguous.
+    const std::vector<uint8_t> amb = MakeSecondLevelImage(true);
+    CfgOptions o2;
+    o2.second_level_bases = true;
+    CfgReport d = AnalyzeControlFlow(amb.data(), amb.size(), kBase, kBase, o2);
+    CHECK(d.pointers.unrecognised == 1 && d.pointers.assigned_in_image == 0);
+}
+
 int main() {
     TestDecode();
     TestCfgCallsAndDelaySlots();
@@ -446,6 +511,7 @@ int main() {
     TestCfgGlobalPointerStored();
     TestCfgCallSplitCounters();
     TestCfgFollowAssignedPointers();
+    TestCfgSecondLevelBase();
     TestCfgUnresolvedJumpCounter();
     TestDescribeInsn();
     TestCfgUnresolvedContextLimit();

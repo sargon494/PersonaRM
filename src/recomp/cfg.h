@@ -55,6 +55,10 @@ struct CfgOptions {
     /// Treat the single constant stored into a function-pointer slot as a function entry.
     /// Off by default: a constant store does not prove the value is a valid function.
     bool follow_assigned_pointers = false;
+    /// Resolve a `lw` from a constant address to the constant kept there (the image word, or the one
+    /// constant stored to it), so a function pointer reached through a structure pointer in a
+    /// global can be located. Off by default: the value in memory may change at run time.
+    bool second_level_bases = false;
 };
 
 struct CfgReport {

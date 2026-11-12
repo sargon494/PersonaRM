@@ -320,6 +320,7 @@ bool AnalyzeDisc(const std::string& image_path, const AnalyzeOptions& options,
                                                                   rep.exe.load_address, rep.exe.entry);
                         recomp::CfgOptions follow;
                         follow.follow_assigned_pointers = true;
+                        follow.second_level_bases = true;
                         out.boot_cfg_follow = recomp::AnalyzeControlFlow(data.data() + 0x800, payload,
                                                                          rep.exe.load_address, rep.exe.entry, follow);
                         out.has_cfg = true;
@@ -435,13 +436,14 @@ std::string RenderMarkdown(const std::vector<DiscReport>& reports) {
                 os << "| Llamadas al sistema (syscall/break) | " << c.syscalls << " |\n\n";
                 {
                     const auto& f = d.boot_cfg_follow;
-                    os << "Seguimiento de candidatos de `jalr` (experimental; una escritura constante no prueba que el valor sea una función válida):\n\n";
+                    os << "Seguimiento de candidatos de `jalr` y bases de segundo nivel (experimental; una escritura constante no prueba que el valor sea una función válida, y el contenido de memoria puede cambiar en ejecución):\n\n";
                     os << "| Medida | Sin seguir | Siguiendo |\n|---|---:|---:|\n";
                     os << "| Palabras alcanzadas | " << c.reachable_words << " | " << f.reachable_words << " ("
                        << f.coverage_permille / 10 << "." << f.coverage_permille % 10 << " %) |\n";
                     os << "| Funciones | " << c.functions << " | " << f.functions << " |\n";
                     os << "| `jalr` seguidos / funciones añadidas | 0 / 0 | " << f.indirect_calls_followed << " / "
                        << f.followed_candidates << " |\n";
+                    os << "| `jalr` con base no constante | " << c.pointers.unrecognised << " | " << f.pointers.unrecognised << " |\n";
                     os << "| `jalr` total / sin resolver | " << c.indirect_calls << " / " << c.indirect_calls_unresolved
                        << " | " << f.indirect_calls << " / " << f.indirect_calls_unresolved << " |\n\n";
                 }

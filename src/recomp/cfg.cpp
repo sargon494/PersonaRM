@@ -6,6 +6,7 @@
 #include <array>
 #include <cstdio>
 #include <cstring>
+#include <functional>
 #include <map>
 #include <set>
 
@@ -44,8 +45,12 @@ struct Val {
 
 using RegFile = std::array<Val, 32>;
 
+// Optional view of memory: the constant known to be held at an address, when there is one.
+using MemReader = std::function<bool(uint32_t addr, uint32_t& value)>;
+
 // Apply one instruction to the register file. Anything not modelled makes its destination unknown.
-void Apply(RegFile& R, uint32_t w) {
+// With a MemReader, `lw` from a constant address yields the constant kept there.
+void Apply(RegFile& R, uint32_t w, const MemReader* mem = nullptr) {
     const uint32_t op = w >> 26;
     const uint32_t rs = (w >> 21) & 31, rt = (w >> 16) & 31, rd = (w >> 11) & 31, sa = (w >> 6) & 31;
     const uint32_t funct = w & 63;
@@ -105,8 +110,15 @@ void Apply(RegFile& R, uint32_t w) {
         case 0x10: case 0x12:                                  // COP0/COP2: mfc/cfc write rt
             if (rs == 0 || rs == 2) set(rt, unknown);
             return;
-        case 0x20: case 0x21: case 0x22: case 0x23: case 0x24: case 0x25: case 0x26:
-            set(rt, unknown);                                  // loads
+        case 0x23:                                             // lw
+            if (mem && R[rs].k && !R[rs].var) {
+                uint32_t v = 0;
+                if ((*mem)(R[rs].v + simm, v)) { set(rt, Val{true, false, 0, v}); return; }
+            }
+            set(rt, unknown);
+            return;
+        case 0x20: case 0x21: case 0x22: case 0x24: case 0x25: case 0x26:
+            set(rt, unknown);                                  // other loads
             return;
         default:
             return;                                            // branches, stores, j, cop loads
@@ -143,12 +155,13 @@ Region RegionBefore(const uint8_t* code, size_t size, uint32_t load, uint32_t si
     return reg;
 }
 
-RegFile StateBefore(const uint8_t* code, size_t size, uint32_t load, uint32_t site) {
+RegFile StateBefore(const uint8_t* code, size_t size, uint32_t load, uint32_t site,
+                    const MemReader* mem = nullptr) {
     auto word_at = [&](uint32_t a) { return LoadU32(code + (a - load)); };
     RegFile R{};
     R[0] = Val{true, false, 0, 0};
     const Region reg = RegionBefore(code, size, load, site);
-    for (uint32_t a = reg.start; a < site; a += 4) Apply(R, word_at(a));
+    for (uint32_t a = reg.start; a < site; a += 4) Apply(R, word_at(a), mem);
     return R;
 }
 
@@ -276,7 +289,7 @@ StoreTable CollectStores(const uint8_t* code, size_t size, uint32_t load) {
 // Classifies the function pointer that a `jalr` on `reg` calls through, when it was loaded by
 // `lw off(base)` from a constant base (WP-14, step 3). Only counts and a few samples are kept.
 PointerSite ClassifyPointer(const uint8_t* code, size_t size, uint32_t load, uint32_t site, uint32_t reg,
-                     const StoreTable& stores, CfgReport& r) {
+                     const StoreTable& stores, const MemReader* mem, CfgReport& r) {
     auto word_at = [&](uint32_t a) { return LoadU32(code + (a - load)); };
     auto in_image = [&](uint32_t a) {
         return a >= load && static_cast<uint64_t>(a) + 4 <= static_cast<uint64_t>(load) + size && ((a - load) & 3u) == 0;
@@ -296,7 +309,7 @@ PointerSite ClassifyPointer(const uint8_t* code, size_t size, uint32_t load, uin
         ++r.pointers.unrecognised;
     } else {
         const uint32_t lw = word_at(writer);
-        const Val base = StateBefore(code, size, load, writer)[(lw >> 21) & 31];
+        const Val base = StateBefore(code, size, load, writer, mem)[(lw >> 21) & 31];
         if (!(base.k && !base.var)) {
             ps.status = PointerStatus::Unrecognised;
             ++r.pointers.unrecognised;
@@ -358,6 +371,27 @@ CfgReport AnalyzeControlFlow(const uint8_t* code, size_t size, uint32_t load, ui
     auto index_of = [&](uint32_t a) { return static_cast<size_t>((a - load) / 4); };
 
     const StoreTable stores = CollectStores(code, size, load);
+
+    // What a `lw` from a constant address yields: the constant stored there, or the image word when
+    // nothing else writes it. Ambiguous or unknown contents give no value.
+    const MemReader reader = [&](uint32_t addr, uint32_t& v) {
+        if (!in_image(addr)) return false;
+        const uint32_t img = word_at(addr);
+        const auto it = stores.find(addr);
+        if (it == stores.end()) {
+            if (img == 0) return false;
+            v = img;
+            return true;
+        }
+        if (it->second.unknown) return false;
+        const std::set<uint32_t> distinct(it->second.values.begin(), it->second.values.end());
+        if (distinct.size() != 1) return false;
+        const uint32_t sv = *distinct.begin();
+        if (sv == 0 || (img != 0 && img != sv)) return false;
+        v = sv;
+        return true;
+    };
+    const MemReader* mem = options.second_level_bases ? &reader : nullptr;
 
     std::vector<bool> visited(words, false);
     std::set<uint32_t> functions;
@@ -489,7 +523,7 @@ CfgReport AnalyzeControlFlow(const uint8_t* code, size_t size, uint32_t load, ui
                     ++r.indirect_calls;
                     Record(r.indirect_sites, pc);
                     {
-                        const PointerSite ps = ClassifyPointer(code, size, load, pc, in.rs, stores, r);
+                        const PointerSite ps = ClassifyPointer(code, size, load, pc, in.rs, stores, mem, r);
                         if (options.follow_assigned_pointers && ps.followable) {
                             ++r.indirect_calls_followed;
                             const uint32_t target = ps.candidates[0];
