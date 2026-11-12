@@ -81,8 +81,55 @@ public:
     void SetVram(const std::vector<uint16_t>& vram) { m_vram = vram; }
 
 private:
+    // One rasterizer vertex: VRAM-space position (drawing offset applied), 24-bit color, texcoord.
+    struct Vertex {
+        int32_t x = 0, y = 0;
+        int32_t r = 0, g = 0, b = 0;
+        int32_t u = 0, v = 0;
+    };
+    // Per-primitive render flags decoded from the GP0 command byte.
+    struct DrawFlags {
+        bool textured = false;
+        bool raw = false;      // raw texture (no modulation)
+        bool semi = false;     // semi-transparency requested
+        bool dither = false;   // E1.9 and (gouraud or modulated texture)
+        uint16_t clut = 0;     // CLUT attribute (X/16 in bits 0-5, Y in bits 6-14)
+    };
+
     void ExecuteGP0Command();
     void ExecuteGP1Command(uint32_t word);
+    static uint32_t Gp0CommandWords(uint8_t cmd);
+
+    void DrawPolygon(uint8_t cmd);
+    void DrawLineCommand(uint8_t cmd);
+    void DrawRectangle(uint8_t cmd);
+    void DrawTriangle(const Vertex& a, const Vertex& b, const Vertex& c, bool gouraud, const DrawFlags& f);
+    void DrawLine(const Vertex& a, const Vertex& b, bool gouraud, bool semi);
+    void PlotPixel(int32_t x, int32_t y, int32_t r, int32_t g, int32_t b,
+                   int32_t u, int32_t v, const DrawFlags& f);
+    uint16_t FetchTexel(int32_t u, int32_t v, uint16_t clut) const;
+    Vertex ParseVertex(uint32_t xy_word, uint32_t color_word) const;
+    void UpdateStatDrawBits();
+
+    // E1h draw mode (bits 0-13), E2h texture window (bits 0-19), E6h mask settings
+    uint32_t m_texpage = 0;
+    uint32_t m_texwindow = 0;
+    bool m_mask_set = false;
+    bool m_mask_check = false;
+
+    // Polyline (GP0 48h-4Fh / 58h-5Fh) streaming state
+    bool m_in_polyline = false;
+    bool m_polyline_gouraud = false;
+    bool m_polyline_semi = false;
+    Vertex m_polyline_last;
+    uint32_t m_polyline_pending_color = 0;
+    bool m_polyline_have_color = false;
+
+    // VRAM to CPU (C0h) transfer state
+    uint32_t m_read_x = 0, m_read_y = 0, m_read_w = 0, m_read_h = 0;
+    uint32_t m_read_cur_x = 0, m_read_cur_y = 0;
+    uint32_t m_read_words_left = 0;
+    uint32_t m_gpuread_latch = 0;
 
     // 1 MB VRAM (1024x512 16-bit pixels in RGB 1:5:5:5)
     std::vector<uint16_t> m_vram;
