@@ -1,11 +1,62 @@
 #include "loader/ps1_bios_hle.h"
 #include "loader/disc_reader.h"
 #include "core/logger.h"
+#include "trace/trace.h"
 #include <iostream>
 #include <cstring>
 #include <algorithm>
+#include <sstream>
 
 namespace personarm {
+
+// ───────────────────────────────────────────────────────────────────────────
+// Kernel layout in guest RAM. The game reads/patches these, so they live in emulated RAM.
+// psx-spx "BIOS Memory Map" (from memory, verify): table of tables at 100h, A table at 200h,
+// C table at 674h, B table at 874h; kernel control blocks (ExCB, PCB, TCB, EvCB) at A000E000h+.
+// Everything below 10000h is masked out of trace ram_hash (TRACE_FORMAT.md section 2).
+// The libapi kernel patchers write into B-table+594h..+898h (E08h..110Bh, GHIDRA GH-007),
+// so nothing of ours lives there.
+// ───────────────────────────────────────────────────────────────────────────
+namespace {
+constexpr uint32_t kATable = 0x200, kATableN = 0xB5;
+constexpr uint32_t kCTable = 0x674, kCTableN = 0x1E;
+constexpr uint32_t kBTable = 0x874, kBTableN = 0x5E;
+// HLE entry points: table entry N of vector V holds kStubV + 4*N; the PC is intercepted there.
+constexpr uint32_t kStubA = 0xC000, kStubB = 0xC400, kStubC = 0xC600;
+constexpr uint32_t kKernelRet = 0xC700;   // ra of every guest function the kernel calls
+constexpr uint32_t kRcntHandler = 0xC710; // +4*n: kernel's default RCnt n IRQ handler (3 = VBlank)
+constexpr uint32_t kHleEnd = 0xC780;      // [C000h, C780h) is intercepted
+constexpr uint32_t kWaitSpin = 0xC780;    // guest code: j WaitEvent stub (blocked WaitEvent)
+constexpr uint32_t kRcntElems = 0xC800;   // 4 SysEnqIntRP elements x 10h for the RCnt handlers
+constexpr uint32_t kKernelStackTop = 0xDFF0;
+constexpr uint32_t kEvCB = 0xE000, kEvCBN = 16, kEvCBSize = 0x1C;
+constexpr uint32_t kExCB = 0xE1C0;        // 4 priorities x 8: +0 chain head
+constexpr uint32_t kPCB = 0xE1E0;         // +0 pointer to the current TCB
+constexpr uint32_t kHookPtr = 0xE1E4;     // jmp_buf run after the chain (HookEntryInt)
+constexpr uint32_t kRcntAck = 0xE1E8;     // 4 words: ChangeClearRCnt flags
+constexpr uint32_t kPadAck = 0xE1F8;      // ChangeClearPad flag
+constexpr uint32_t kDefaultHook = 0xE200; // jmp_buf 30h (ResetEntryInt)
+constexpr uint32_t kTCB = 0xE240, kTCBSize = 0xC0;
+constexpr uint32_t kIStat = 0x1F801070, kIMask = 0x1F801074, kGp0 = 0x1F801810;
+
+constexpr uint32_t Kseg0(uint32_t a) { return 0x80000000u | a; }
+
+uint32_t Rd(const uint8_t* ram, size_t size, uint32_t addr) {
+    uint32_t p = addr & 0x1FFFFF;
+    if (!ram || p + 4 > size) return 0;
+    return ram[p] | (ram[p + 1] << 8) | (ram[p + 2] << 16) | (uint32_t(ram[p + 3]) << 24);
+}
+void Wr(uint8_t* ram, size_t size, uint32_t addr, uint32_t v) {
+    uint32_t p = addr & 0x1FFFFF;
+    if (!ram || p + 4 > size) return;
+    for (int i = 0; i < 4; ++i) ram[p + i] = uint8_t(v >> (8 * i));
+}
+std::string Hex(uint32_t v) { std::ostringstream o; o << std::hex << v; return o.str(); }
+
+// psx-spx "BIOS Event Functions": EvCB +00h class, +04h status, +08h spec, +0Ch mode, +10h func.
+constexpr uint32_t kEvFree = 0, kEvDisabled = 0x1000, kEvBusy = 0x2000, kEvReady = 0x4000;
+constexpr uint32_t kEvModeCallback = 0x1000, kEvModeReady = 0x2000;
+} // namespace
 
 Ps1BiosHle& Ps1BiosHle::Instance() {
     static Ps1BiosHle instance;
@@ -21,7 +72,48 @@ void Ps1BiosHle::Initialize() {
 void Ps1BiosHle::Reset() {
     m_intercept_count = 0;
     m_open_files.clear();
-    m_next_fd = 1;
+    m_next_fd = 2; // shortcut: fd 0/1 are assumed to be the TTY (stdin/stdout) as after InstallDevices
+    m_frames.clear();
+    m_irq_frame_base = 0;
+    m_in_irq = false;
+    m_irq_bits = 0;
+}
+
+bool Ps1BiosHle::IsHleAddress(uint32_t p) {
+    return p == 0x80 || p == 0xA0 || p == 0xB0 || p == 0xC0 || (p >= kStubA && p < kHleEnd);
+}
+
+void Ps1BiosHle::InstallKernel(uint8_t* ram, size_t n) {
+    // Table of tables (psx-spx "BIOS Memory Map", from memory): ExCB, PCB, TCB, EvCB pointer/size pairs.
+    Wr(ram, n, 0x100, 0xA0000000u | kExCB); Wr(ram, n, 0x104, 4 * 8);
+    Wr(ram, n, 0x108, 0xA0000000u | kPCB);  Wr(ram, n, 0x10C, 4);
+    Wr(ram, n, 0x110, 0xA0000000u | kTCB);  Wr(ram, n, 0x114, kTCBSize);
+    Wr(ram, n, 0x120, 0xA0000000u | kEvCB); Wr(ram, n, 0x124, kEvCBN * kEvCBSize);
+    for (uint32_t i = 0; i < kATableN; ++i) Wr(ram, n, kATable + 4 * i, Kseg0(kStubA + 4 * i));
+    for (uint32_t i = 0; i < kBTableN; ++i) Wr(ram, n, kBTable + 4 * i, Kseg0(kStubB + 4 * i));
+    for (uint32_t i = 0; i < kCTableN; ++i) Wr(ram, n, kCTable + 4 * i, Kseg0(kStubC + 4 * i));
+    Wr(ram, n, kPCB, 0xA0000000u | kTCB);
+    // Default exit hook (ResetEntryInt): longjmp target = ReturnFromException on the kernel stack.
+    Wr(ram, n, kDefaultHook + 0x00, Kseg0(kStubB + 4 * 0x17));
+    Wr(ram, n, kDefaultHook + 0x04, Kseg0(kKernelStackTop));
+    Wr(ram, n, kHookPtr, Kseg0(kDefaultHook));
+    // shortcut (from memory): the BIOS boots with auto-acknowledge on for all four RCnt IRQs.
+    for (uint32_t i = 0; i < 4; ++i) Wr(ram, n, kRcntAck + 4 * i, 1);
+    Wr(ram, n, kPadAck, 1);
+    // C(00h) EnqueueTimerAndVblankIrqs: priority 1 chain = VBlank, Timer2, Timer1, Timer0 (SVC-031).
+    // Element layout (psx-spx "SysEnqIntRP", from memory): +0 next, +4 func2, +8 func1, +C 0.
+    const uint32_t order[4] = {3, 2, 1, 0};
+    for (uint32_t i = 0; i < 4; ++i) {
+        uint32_t e = kRcntElems + 0x10 * i;
+        Wr(ram, n, e + 0, i < 3 ? Kseg0(e + 0x10) : 0);
+        Wr(ram, n, e + 8, Kseg0(kRcntHandler + 4 * order[i]));
+    }
+    Wr(ram, n, kExCB + 8 * 1, Kseg0(kRcntElems));
+    // Blocked WaitEvent spins here with interrupts as the caller left them: j WaitEvent stub; nop.
+    Wr(ram, n, kWaitSpin, (0x02u << 26) | (((kStubB + 4 * 0x0A) >> 2) & 0x03FFFFFF));
+    Wr(ram, n, kWaitSpin + 4, 0);
+    m_frames.clear();
+    m_in_irq = false;
 }
 
 bool Ps1BiosHle::HandleBiosHook(CpuContext& cpu, MemoryManager& memory) {
@@ -33,32 +125,59 @@ bool Ps1BiosHle::HandleBiosHook(CpuContext& cpu, uint8_t* ram, size_t ram_size) 
     uint32_t pc = cpu.GetPC();
     uint32_t masked_pc = pc & 0x1FFFFFFF;
 
-    if (masked_pc == 0xA0) {
-        // Vector A: function code passed in register $t1 ($9)
+    if (masked_pc == 0xA0 || masked_pc == 0xB0 || masked_pc == 0xC0) {
+        // Function code in $t1; the call goes through the RAM table so library patches take effect.
+        BiosVector vec = static_cast<BiosVector>(masked_pc);
         uint32_t func = cpu.GetGPR(9);
-        return ExecuteCall(BiosVector::VectorA, func, cpu, ram, ram_size);
-    } else if (masked_pc == 0xB0) {
-        // Vector B: function code passed in register $t1 ($9)
-        uint32_t func = cpu.GetGPR(9);
-        return ExecuteCall(BiosVector::VectorB, func, cpu, ram, ram_size);
-    } else if (masked_pc == 0xC0) {
-        // Vector C: function code passed in register $t1 ($9)
-        uint32_t func = cpu.GetGPR(9);
-        return ExecuteCall(BiosVector::VectorC, func, cpu, ram, ram_size);
-    } else if (masked_pc == 0x80) {
-        // Exception vector with no BIOS in RAM: resume and pop SR (rfe).
+        if (m_trace) {
+            m_trace->OnBiosCall(masked_pc, func, {cpu.GetGPR(4), cpu.GetGPR(5), cpu.GetGPR(6), cpu.GetGPR(7)},
+                                cpu.GetGPR(31));
+        }
+        uint32_t table = masked_pc == 0xA0 ? kATable : masked_pc == 0xB0 ? kBTable : kCTable;
+        uint32_t count = masked_pc == 0xA0 ? kATableN : masked_pc == 0xB0 ? kBTableN : kCTableN;
+        uint32_t stub = masked_pc == 0xA0 ? kStubA : masked_pc == 0xB0 ? kStubB : kStubC;
+        uint32_t entry = func < count ? Rd(ram, ram_size, table + 4 * func) : 0;
+        if (entry != 0 && (entry & 0x1FFFFFFF) != stub + 4 * func) {
+            cpu.SetPC(entry); // patched entry: run the guest replacement, it returns to $ra itself
+            return true;
+        }
+        return ExecuteCall(vec, func, cpu, ram, ram_size);
+    }
+    if (masked_pc >= kStubA && masked_pc < kStubA + 4 * kATableN)
+        return ExecuteCall(BiosVector::VectorA, (masked_pc - kStubA) / 4, cpu, ram, ram_size);
+    if (masked_pc >= kStubB && masked_pc < kStubB + 4 * kBTableN)
+        return ExecuteCall(BiosVector::VectorB, (masked_pc - kStubB) / 4, cpu, ram, ram_size);
+    if (masked_pc >= kStubC && masked_pc < kStubC + 4 * kCTableN)
+        return ExecuteCall(BiosVector::VectorC, (masked_pc - kStubC) / 4, cpu, ram, ram_size);
+    if (masked_pc == kKernelRet) {
+        if (m_frames.empty()) {
+            PRM_LOG_ERROR("HLE", "kernel return trampoline reached with no pending kernel call");
+            return false;
+        }
+        Resume(cpu, ram, ram_size);
+        return true;
+    }
+    if (masked_pc >= kRcntHandler && masked_pc < kRcntHandler + 16) {
+        RcntIrq((masked_pc - kRcntHandler) / 4, cpu, ram, ram_size);
+        return true;
+    }
+    if (masked_pc >= kStubA && masked_pc < kHleEnd) {
+        // Unused stub slot: behave like an unknown function and return.
+        cpu.SetGPR(2, 0);
+        cpu.SetPC(cpu.GetGPR(31));
+        return true;
+    }
+
+    if (masked_pc == 0x80) {
         CpuRegisters regs = cpu.GetRegisters();
         const uint32_t exc = (regs.cp0_cause >> 2) & 0x1Fu;
-        regs.pc = regs.cp0_epc + 4;
         if (exc == 0) {
-            // Int. The real kernel saves the registers to the TCB, walks the SysEnqIntRP priority
-            // chain (VBlank/timer handlers DeliverEvent RCnt classes and auto-ack per
-            // ChangeClearRCnt), runs the HookEntryInt hook, then ReturnFromException to EPC.
-            // shortcut: no chain, events or hook; Engine::RunFrame acknowledges the enabled I_STAT
-            // bits before calling us and we only resume the interrupted opcode (EPC, not EPC+4).
-            // Upgrade with the HLE IRQ chain (SVC-031) so libetc VSync()/callbacks advance.
-            regs.pc = regs.cp0_epc;
-        } else if (exc == 8) {
+            EnterInterrupt(cpu, ram, ram_size);
+            return true;
+        }
+        // Exception vector with no BIOS in RAM: resume after the opcode and pop SR (rfe).
+        regs.pc = regs.cp0_epc + 4;
+        if (exc == 8) {
             // psx-spx "BIOS Misc Functions" (from memory): SYS(01h) EnterCriticalSection clears SR
             // bits 2 and 10 of the mode RFE restores (IEp, IM2) and returns 1 if interrupts were
             // enabled, else 0; SYS(02h) ExitCriticalSection sets them. Other SYS numbers: no-op.
@@ -82,68 +201,330 @@ bool Ps1BiosHle::HandleBiosHook(CpuContext& cpu, uint8_t* ram, size_t ram_size) 
     return false;
 }
 
+// ── Interrupt chain ─────────────────────────────────────────────────────────
+// psx-spx "BIOS Interrupt/Exception Handling" (SVC-031): the kernel saves the registers to the
+// current TCB, walks the SysEnqIntRP chains by priority 0..3 calling func1 of each element (and
+// func2 with a0 = func1's result when that is nonzero; from memory), then longjmps (r2=1) to the
+// HookEntryInt jmp_buf, which ends in ReturnFromException. A handler may call ReturnFromException
+// itself to skip the rest. Guest functions run on the CPU and return through kKernelRet.
+
+void Ps1BiosHle::EnterInterrupt(CpuContext& cpu, uint8_t* ram, size_t n) {
+    if (m_in_irq) PRM_LOG_ERROR("HLE", "nested interrupt while the kernel IRQ chain is running");
+    CpuRegisters regs = cpu.GetRegisters();
+    // TCB layout (psx-spx "BIOS Thread Functions"): +08h r0..r31, +88h EPC, +8Ch HI, +90h LO, +94h SR, +98h CAUSE.
+    for (uint32_t i = 0; i < 32; ++i) Wr(ram, n, kTCB + 8 + 4 * i, i == 0 ? 0 : regs.gpr[i]);
+    Wr(ram, n, kTCB + 0x88, regs.cp0_epc);
+    Wr(ram, n, kTCB + 0x8C, regs.hi);
+    Wr(ram, n, kTCB + 0x90, regs.lo);
+    Wr(ram, n, kTCB + 0x94, regs.cp0_status);
+    Wr(ram, n, kTCB + 0x98, regs.cp0_cause);
+    m_in_irq = true;
+    m_irq_bits = (m_io_read ? m_io_read(kIStat, 4) & m_io_read(kIMask, 4) : 0);
+    m_irq_frame_base = m_frames.size();
+    cpu.SetGPR(29, Kseg0(kKernelStackTop));
+    Frame walk;
+    walk.irq_walk = true;
+    m_frames.push_back(walk);
+    Resume(cpu, ram, n);
+}
+
+void Ps1BiosHle::CallGuest(CpuContext& cpu, uint32_t func, uint32_t a0) {
+    cpu.SetGPR(4, a0);
+    cpu.SetGPR(31, Kseg0(kKernelRet));
+    cpu.SetPC(func);
+}
+
+void Ps1BiosHle::Resume(CpuContext& cpu, uint8_t* ram, size_t n) {
+    while (!m_frames.empty()) {
+        Frame& f = m_frames.back();
+        if (!f.irq_walk) {
+            if (f.idx < f.funcs.size()) {
+                CallGuest(cpu, f.funcs[f.idx++], 0);
+                return;
+            }
+            uint32_t ret_pc = f.ret_pc, ret_v0 = f.ret_v0;
+            m_frames.pop_back();
+            cpu.SetGPR(2, ret_v0);
+            cpu.SetPC(ret_pc); // kKernelRet when the caller was itself kernel-called: resumes below
+            return;
+        }
+        if (f.stage == 1) {
+            uint32_t v0 = cpu.GetGPR(2);
+            f.stage = 0;
+            if (v0 != 0 && f.func2 != 0) {
+                f.stage = 2;
+                CallGuest(cpu, f.func2, v0);
+                return;
+            }
+        } else if (f.stage == 2) {
+            f.stage = 0;
+        }
+        for (;;) {
+            uint32_t e = f.next;
+            while (e == 0 && f.prio < 3) e = Rd(ram, n, kExCB + 8 * uint32_t(++f.prio));
+            if (e == 0) break;
+            if (++f.visited > 256) {
+                PRM_LOG_ERROR("HLE", "interrupt chain loop detected; skipping the rest");
+                break;
+            }
+            f.next = Rd(ram, n, e); // read before the call: a handler may dequeue itself
+            f.func2 = Rd(ram, n, e + 4);
+            uint32_t func1 = Rd(ram, n, e + 8);
+            if (func1 != 0) {
+                f.stage = 1;
+                CallGuest(cpu, func1, 0);
+                return;
+            }
+        }
+        m_frames.pop_back();
+        RunExitHook(cpu, ram, n);
+        return;
+    }
+}
+
+void Ps1BiosHle::RunExitHook(CpuContext& cpu, uint8_t* ram, size_t n) {
+    uint32_t hook = Rd(ram, n, kHookPtr);
+    if (hook == 0) { // kernel tables not installed (bare unit-test RAM)
+        ReturnFromException(cpu, ram, n);
+        return;
+    }
+    // longjmp(hook, 1); jmp_buf (psx-spx "setjmp"): ra, sp, fp, s0..s7, gp.
+    cpu.SetGPR(31, Rd(ram, n, hook));
+    cpu.SetGPR(29, Rd(ram, n, hook + 4));
+    cpu.SetGPR(30, Rd(ram, n, hook + 8));
+    for (uint32_t i = 0; i < 8; ++i) cpu.SetGPR(16 + i, Rd(ram, n, hook + 0x0C + 4 * i));
+    cpu.SetGPR(28, Rd(ram, n, hook + 0x2C));
+    cpu.SetGPR(2, 1);
+    cpu.SetPC(cpu.GetGPR(31));
+}
+
+void Ps1BiosHle::ReturnFromException(CpuContext& cpu, uint8_t* ram, size_t n) {
+    CpuRegisters regs = cpu.GetRegisters();
+    for (uint32_t i = 1; i < 32; ++i) regs.gpr[i] = Rd(ram, n, kTCB + 8 + 4 * i);
+    regs.cp0_epc = Rd(ram, n, kTCB + 0x88);
+    regs.hi = Rd(ram, n, kTCB + 0x8C);
+    regs.lo = Rd(ram, n, kTCB + 0x90);
+    uint32_t sr = Rd(ram, n, kTCB + 0x94);
+    regs.cp0_status = (sr & ~0x0Fu) | ((sr >> 2) & 0x0Fu); // rfe
+    regs.pc = regs.cp0_epc;
+    if (m_in_irq) {
+        m_frames.resize(std::min(m_frames.size(), m_irq_frame_base));
+        m_in_irq = false;
+        // shortcut: real hardware re-enters forever if no handler acknowledged its IRQ; we drop the
+        // sources that were pending at entry and are still unacknowledged so a game without a handler
+        // for an enabled source keeps running. Remove once all used sources have handlers.
+        if (m_io_read && m_io_write) {
+            uint32_t left = m_io_read(kIStat, 4) & m_irq_bits;
+            if (left) m_io_write(kIStat, ~left, 4);
+        }
+    }
+    cpu.SetRegisters(regs);
+}
+
+void Ps1BiosHle::RcntIrq(uint32_t t, CpuContext& cpu, uint8_t* ram, size_t n) {
+    // Kernel default priority-1 handler for RCnt t (3 = VBlank, IRQ0; 0-2 = IRQ4-6): on a pending
+    // enabled IRQ deliver event class F200000t spec 0002h (EvSpINT) and acknowledge it when
+    // ChangeClearRCnt(t,1) (psx-spx "BIOS Event Functions"/"Interrupt Control"; handler details from memory).
+    std::vector<uint32_t> callbacks;
+    uint32_t bit = 1u << (t == 3 ? 0 : 4 + t);
+    if (m_io_read && (m_io_read(kIStat, 4) & m_io_read(kIMask, 4) & bit)) {
+        DeliverEvent(0xF2000000u + t, 0x0002, ram, n, callbacks);
+        if (Rd(ram, n, kRcntAck + 4 * t) && m_io_write) m_io_write(kIStat, ~bit, 4);
+    }
+    cpu.SetGPR(2, 0);
+    FinishCall(cpu, callbacks);
+}
+
+void Ps1BiosHle::FinishCall(CpuContext& cpu, std::vector<uint32_t>& callbacks) {
+    uint32_t ra = cpu.GetGPR(31);
+    if (callbacks.empty()) {
+        if (ra != 0) cpu.SetPC(ra);
+        return;
+    }
+    Frame f;
+    f.funcs = std::move(callbacks);
+    f.ret_pc = ra;
+    f.ret_v0 = cpu.GetGPR(2);
+    m_frames.push_back(std::move(f));
+    CallGuest(cpu, m_frames.back().funcs[m_frames.back().idx++], 0);
+}
+
+// ── Events (psx-spx "BIOS Event Functions", SVC-030) ────────────────────────
+
+uint32_t Ps1BiosHle::DeliverEvent(uint32_t cls, uint32_t spec, uint8_t* ram, size_t n,
+                                  std::vector<uint32_t>& callbacks) {
+    for (uint32_t i = 0; i < kEvCBN; ++i) {
+        uint32_t e = kEvCB + i * kEvCBSize;
+        if (Rd(ram, n, e + 4) != kEvBusy || Rd(ram, n, e) != cls || Rd(ram, n, e + 8) != spec) continue;
+        uint32_t mode = Rd(ram, n, e + 0x0C);
+        if (mode == kEvModeReady) {
+            Wr(ram, n, e + 4, kEvReady);
+        } else if (mode == kEvModeCallback && Rd(ram, n, e + 0x10) != 0) {
+            callbacks.push_back(Rd(ram, n, e + 0x10)); // stays busy
+        }
+    }
+    return 0;
+}
+
+uint32_t Ps1BiosHle::EventCall(uint32_t fn, CpuContext& cpu, uint8_t* ram, size_t n, bool& blocked) {
+    uint32_t a0 = cpu.GetGPR(4);
+    if (fn == 0x08) { // OpenEvent(class, spec, mode, func) -> F10000xxh, or -1 when the table is full
+        for (uint32_t i = 0; i < kEvCBN; ++i) {
+            uint32_t e = kEvCB + i * kEvCBSize;
+            if (Rd(ram, n, e + 4) != kEvFree) continue;
+            Wr(ram, n, e, a0);
+            Wr(ram, n, e + 4, kEvDisabled);
+            Wr(ram, n, e + 8, cpu.GetGPR(5));
+            Wr(ram, n, e + 0x0C, cpu.GetGPR(6));
+            Wr(ram, n, e + 0x10, cpu.GetGPR(7));
+            return 0xF1000000u | i;
+        }
+        return 0xFFFFFFFFu;
+    }
+    uint32_t idx = a0 & 0xFFFF;
+    if ((a0 & 0xFFFF0000u) != 0xF1000000u || idx >= kEvCBN || !ram) return 0;
+    uint32_t e = kEvCB + idx * kEvCBSize;
+    uint32_t st = Rd(ram, n, e + 4);
+    switch (fn) {
+        case 0x09: Wr(ram, n, e + 4, kEvFree); return 1;                       // CloseEvent
+        case 0x0C: if (st != kEvFree) Wr(ram, n, e + 4, kEvBusy); return 1;    // EnableEvent
+        case 0x0D: if (st != kEvFree) Wr(ram, n, e + 4, kEvDisabled); return 1; // DisableEvent
+        case 0x0B:                                                              // TestEvent
+        case 0x0A:                                                              // WaitEvent
+            if (st == kEvReady) { Wr(ram, n, e + 4, kEvBusy); return 1; }
+            // WaitEvent on a busy event blocks until a DeliverEvent makes it ready (forever for
+            // callback-mode events, as on hardware); disabled/free returns 0.
+            if (fn == 0x0A && st == kEvBusy) blocked = true;
+            return 0;
+    }
+    return 0;
+}
+
+void Ps1BiosHle::LogUnimplemented(BiosVector vec, uint32_t fn) {
+    uint32_t key = (static_cast<uint32_t>(vec) << 8) | fn;
+    if (m_logged_unimpl.insert(key).second) {
+        const char v = vec == BiosVector::VectorA ? 'A' : vec == BiosVector::VectorB ? 'B' : 'C';
+        PRM_LOG_WARN("BIOS", std::string("unimplemented ") + v + "(" + Hex(fn) + "h) -> v0=0 (logged once)");
+    }
+}
+
 bool Ps1BiosHle::ExecuteCall(BiosVector vec, uint32_t func_code, CpuContext& cpu, MemoryManager& memory) {
     (void)memory;
     return ExecuteCall(vec, func_code, cpu, nullptr, 0);
 }
 
+// Function numbers per psx-spx "BIOS Function Summary". Implemented: what Persona 2 EP calls
+// (FUNCTION_CATALOG "Stubs BIOS": 7 A0, 26 B0, 3 C0 + B(56h)/B(57h)) for events, interrupts,
+// tables, heap and files, plus the existing memcpy/memset/puts. Memory card (A70/AB/AC,
+// B4A-50, B42/43) is logged as unimplemented.
 bool Ps1BiosHle::ExecuteCall(BiosVector vec, uint32_t func_code, CpuContext& cpu, uint8_t* ram, size_t ram_size) {
     m_intercept_count++;
+    std::vector<uint32_t> callbacks;
+    bool ret = true;
 
     if (vec == BiosVector::VectorA) {
         switch (func_code) {
-            case 0x00: // FileOpen (a0=filename, a1=access_mode) -> return fd in $v0
-                HandleFileOpen(cpu, ram, ram_size);
+            case 0x00: HandleFileOpen(cpu, ram, ram_size); break;   // open(name, mode)
+            case 0x01: HandleFileSeek(cpu); break;                  // lseek(fd, off, whence)
+            case 0x02: HandleFileRead(cpu, ram, ram_size); break;   // read(fd, dst, len)
+            case 0x03: HandleFileWrite(cpu, ram, ram_size); break;  // write(fd, src, len)
+            case 0x04: HandleFileClose(cpu); break;                 // close(fd)
+            case 0x2A: HandleMemCopy(cpu, ram, ram_size); break;
+            case 0x2B: HandleMemSet(cpu, ram, ram_size); break;
+            case 0x39: HandleHeapInit(cpu); break;                  // InitHeap(addr, size)
+            case 0x44: cpu.SetGPR(2, 0); break;                     // FlushCache: no I-cache modelled
+            case 0x49:                                              // GPU_cw(gp0cmd)
+                if (m_io_write) m_io_write(kGp0, cpu.GetGPR(4), 4);
+                cpu.SetGPR(2, 0);
                 break;
-            case 0x02: // FileRead (a0=fd, a1=dst_buf, a2=count) -> return bytes read in $v0
-                HandleFileRead(cpu, ram, ram_size);
-                break;
-            case 0x04: // FileClose (a0=fd) -> return 0
-                HandleFileClose(cpu);
-                break;
-            case 0x2A: // memcpy (a0=dst, a1=src, a2=count)
-                HandleMemCopy(cpu, ram, ram_size);
-                break;
-            case 0x2B: // memset (a0=dst, a1=val, a2=count)
-                HandleMemSet(cpu, ram, ram_size);
-                break;
-            default:
-                PRM_LOG_DEBUG("BIOS", "Unhandled Vector A call: 0x" + std::to_string(func_code));
-                cpu.SetGPR(2, 0); // $v0 = 0
-                break;
+            case 0x72: cpu.SetGPR(2, 0); break;                     // _96_remove: no BIOS CD driver to remove
+            default: LogUnimplemented(vec, func_code); cpu.SetGPR(2, 0); break;
         }
     } else if (vec == BiosVector::VectorB) {
         switch (func_code) {
-            case 0x3F: // puts (a0=str_ptr)
-                HandleStdPuts(cpu, ram, ram_size);
+            case 0x07: // DeliverEvent(class, spec)
+                cpu.SetGPR(2, DeliverEvent(cpu.GetGPR(4), cpu.GetGPR(5), ram, ram_size, callbacks));
                 break;
-            case 0x12: // InitHeap (a0=heap_addr, a1=size)
-                HandleHeapInit(cpu);
+            case 0x08: case 0x09: case 0x0A: case 0x0B: case 0x0C: case 0x0D: {
+                bool blocked = false;
+                uint32_t v0 = EventCall(func_code, cpu, ram, ram_size, blocked);
+                if (blocked) { // re-enter WaitEvent from guest code so time passes and IRQs fire
+                    cpu.SetPC(Kseg0(kWaitSpin));
+                    ret = false;
+                } else {
+                    cpu.SetGPR(2, v0);
+                }
                 break;
-            default:
-                PRM_LOG_DEBUG("BIOS", "Unhandled Vector B call: 0x" + std::to_string(func_code));
+            }
+            case 0x12: HandlePadInit(cpu); break; // InitPAD(buf1, siz1, buf2, siz2) (InitPAD2)
+            case 0x13: cpu.SetGPR(2, 1); break;   // StartPAD: shortcut, libpad drives SIO0 directly
+            case 0x17: ReturnFromException(cpu, ram, ram_size); ret = false; break;
+            case 0x18: Wr(ram, ram_size, kHookPtr, Kseg0(kDefaultHook)); cpu.SetGPR(2, 0); break; // ResetEntryInt
+            case 0x19: Wr(ram, ram_size, kHookPtr, cpu.GetGPR(4)); cpu.SetGPR(2, 0); break;       // HookEntryInt(jmp_buf)
+            case 0x20: { // UnDeliverEvent(class, spec): ready -> busy for matching ready-mode events
+                for (uint32_t i = 0; i < kEvCBN; ++i) {
+                    uint32_t e = kEvCB + i * kEvCBSize;
+                    if (Rd(ram, ram_size, e + 4) == kEvReady && Rd(ram, ram_size, e + 0x0C) == kEvModeReady &&
+                        Rd(ram, ram_size, e) == cpu.GetGPR(4) && Rd(ram, ram_size, e + 8) == cpu.GetGPR(5))
+                        Wr(ram, ram_size, e + 4, kEvBusy);
+                }
                 cpu.SetGPR(2, 0);
                 break;
+            }
+            case 0x32: HandleFileOpen(cpu, ram, ram_size); break;
+            case 0x33: HandleFileSeek(cpu); break;
+            case 0x34: HandleFileRead(cpu, ram, ram_size); break;
+            case 0x35: HandleFileWrite(cpu, ram, ram_size); break;
+            case 0x36: HandleFileClose(cpu); break;
+            case 0x3F: HandleStdPuts(cpu, ram, ram_size); break;
+            case 0x56: cpu.SetGPR(2, kCTable); break; // GetC0Table
+            case 0x57: cpu.SetGPR(2, kBTable); break; // GetB0Table
+            case 0x5B: // ChangeClearPad(flag)
+                Wr(ram, ram_size, kPadAck, cpu.GetGPR(4));
+                cpu.SetGPR(2, 0);
+                break;
+            default: LogUnimplemented(vec, func_code); cpu.SetGPR(2, 0); break;
         }
     } else if (vec == BiosVector::VectorC) {
+        uint32_t a0 = cpu.GetGPR(4), a1 = cpu.GetGPR(5);
         switch (func_code) {
-            case 0x12: // InitPAD (a0=buf1, a1=len1, a2=buf2, a3=len2)
-                HandlePadInit(cpu);
-                break;
-            default:
-                PRM_LOG_DEBUG("BIOS", "Unhandled Vector C call: 0x" + std::to_string(func_code));
+            case 0x02: { // SysEnqIntRP(priority, struc): insert at the head of the chain
+                uint32_t head = kExCB + 8 * (a0 & 3);
+                Wr(ram, ram_size, a1, Rd(ram, ram_size, head));
+                Wr(ram, ram_size, head, a1);
                 cpu.SetGPR(2, 0);
                 break;
+            }
+            case 0x03: { // SysDeqIntRP(priority, struc)
+                // Deviation: psx-spx documents a BIOS bug here (only the first element can be removed);
+                // we unlink any element, which is what callers intend.
+                uint32_t link = kExCB + 8 * (a0 & 3);
+                for (int guard = 0; guard < 256; ++guard) {
+                    uint32_t e = Rd(ram, ram_size, link);
+                    if (e == 0) break;
+                    if ((e & 0x1FFFFF) == (a1 & 0x1FFFFF)) { Wr(ram, ram_size, link, Rd(ram, ram_size, e)); break; }
+                    link = e;
+                }
+                cpu.SetGPR(2, 0);
+                break;
+            }
+            case 0x0A: { // ChangeClearRCnt(t, flag) -> old flag
+                uint32_t slot = kRcntAck + 4 * (a0 & 3);
+                cpu.SetGPR(2, Rd(ram, ram_size, slot));
+                Wr(ram, ram_size, slot, a1);
+                break;
+            }
+            case 0x12: cpu.SetGPR(2, 0); break; // InstallDevices(ttyflag): devices are host-side
+            default: LogUnimplemented(vec, func_code); cpu.SetGPR(2, 0); break;
         }
     }
 
-    // Emulate standard MIPS function return: JR $ra ($31)
-    uint32_t return_address = cpu.GetGPR(31);
-    if (return_address != 0) {
-        cpu.SetPC(return_address);
-    }
+    // Standard MIPS function return: JR $ra ($31), after any event callbacks ran.
+    if (ret) FinishCall(cpu, callbacks);
     return true;
 }
+
+// ── Files (SVC-020): fd -> host copy of the disc file with a read position ───
 
 void Ps1BiosHle::HandleFileOpen(CpuContext& cpu, const uint8_t* ram, size_t ram_size) {
     uint32_t name_ptr = cpu.GetGPR(4); // $a0
@@ -155,9 +536,6 @@ void Ps1BiosHle::HandleFileOpen(CpuContext& cpu, const uint8_t* ram, size_t ram_
             filename += static_cast<char>(ram[phys++]);
         }
     }
-
-    int fd = m_next_fd++;
-    PRM_LOG_INFO("BIOS", "FileOpen intercepted: '" + filename + "' -> returning fd=" + std::to_string(fd));
 
     if (m_disc_reader && !filename.empty()) {
         std::vector<uint8_t> file_bytes;
@@ -175,11 +553,30 @@ void Ps1BiosHle::HandleFileOpen(CpuContext& cpu, const uint8_t* ram, size_t ram_
         }
 
         if (m_disc_reader->ReadFile(lookup_name, file_bytes)) {
-            m_open_files[fd] = std::move(file_bytes);
+            int fd = m_next_fd++;
+            m_open_files[fd] = OpenFile{std::move(file_bytes), 0};
+            PRM_LOG_INFO("BIOS", "open('" + filename + "') -> fd=" + std::to_string(fd));
+            cpu.SetGPR(2, static_cast<uint32_t>(fd));
+            return;
         }
     }
 
-    cpu.SetGPR(2, static_cast<uint32_t>(fd));
+    // psx-spx "BIOS File Functions": open returns -1 when the file cannot be opened.
+    PRM_LOG_INFO("BIOS", "open('" + filename + "') failed -> -1");
+    cpu.SetGPR(2, 0xFFFFFFFFu);
+}
+
+void Ps1BiosHle::HandleFileSeek(CpuContext& cpu) {
+    // lseek(fd, offset, seektype): 0 = from start, 1 = from current (psx-spx); 2 = from end (from memory).
+    auto it = m_open_files.find(static_cast<int>(cpu.GetGPR(4)));
+    int64_t off = static_cast<int32_t>(cpu.GetGPR(5));
+    uint32_t whence = cpu.GetGPR(6);
+    if (it == m_open_files.end() || whence > 2) { cpu.SetGPR(2, 0xFFFFFFFFu); return; }
+    int64_t base = whence == 0 ? 0 : whence == 1 ? int64_t(it->second.pos) : int64_t(it->second.data.size());
+    int64_t pos = base + off;
+    if (pos < 0) { cpu.SetGPR(2, 0xFFFFFFFFu); return; }
+    it->second.pos = static_cast<size_t>(pos);
+    cpu.SetGPR(2, static_cast<uint32_t>(pos));
 }
 
 void Ps1BiosHle::HandleFileRead(CpuContext& cpu, uint8_t* ram, size_t ram_size) {
@@ -187,24 +584,31 @@ void Ps1BiosHle::HandleFileRead(CpuContext& cpu, uint8_t* ram, size_t ram_size) 
     uint32_t dst_ptr = cpu.GetGPR(5);           // $a1 = dst_buf
     uint32_t count = cpu.GetGPR(6);             // $a2 = count
 
-    uint32_t bytes_read = 0;
     auto it = m_open_files.find(fd);
-    if (it != m_open_files.end() && ram && count > 0) {
-        uint32_t phys = dst_ptr & 0x1FFFFFFF;
-        size_t available = it->second.size();
-        size_t to_copy = std::min(static_cast<size_t>(count), available);
-        if (phys + to_copy <= ram_size) {
-            std::memcpy(&ram[phys], it->second.data(), to_copy);
-            bytes_read = static_cast<uint32_t>(to_copy);
-        }
-    } else {
-        // Fallback: report requested count read
-        bytes_read = count;
+    if (it == m_open_files.end()) {
+        cpu.SetGPR(2, 0xFFFFFFFFu);
+        return;
     }
+    OpenFile& f = it->second;
+    size_t avail = f.pos < f.data.size() ? f.data.size() - f.pos : 0;
+    size_t to_copy = std::min(static_cast<size_t>(count), avail);
+    uint32_t phys = dst_ptr & 0x1FFFFFFF;
+    if (!ram || phys > ram_size) to_copy = 0;
+    else to_copy = std::min(to_copy, ram_size - phys);
+    if (to_copy) std::memcpy(&ram[phys], f.data.data() + f.pos, to_copy);
+    f.pos += to_copy;
+    cpu.SetGPR(2, static_cast<uint32_t>(to_copy)); // $v0 = bytes read
+    PRM_LOG_DEBUG("BIOS", "read fd=" + std::to_string(fd) + ", bytes=" + std::to_string(to_copy));
+}
 
-    cpu.SetGPR(2, bytes_read); // $v0 = bytes read
-    PRM_LOG_DEBUG("BIOS", "FileRead intercepted: fd=" + std::to_string(fd) +
-                          ", bytes=" + std::to_string(bytes_read));
+void Ps1BiosHle::HandleFileWrite(CpuContext& cpu, const uint8_t* ram, size_t ram_size) {
+    // Only the TTY (fd 0/1, printf through libc) is writable; files on CD are read-only.
+    uint32_t fd = cpu.GetGPR(4), src = cpu.GetGPR(5) & 0x1FFFFFFF, len = cpu.GetGPR(6);
+    if (fd > 1) { PRM_LOG_WARN("BIOS", "write to fd " + std::to_string(fd) + " unsupported -> -1"); cpu.SetGPR(2, 0xFFFFFFFFu); return; }
+    std::string text;
+    for (uint32_t i = 0; ram && i < len && src + i < ram_size && text.size() < 1024; ++i) text += char(ram[src + i]);
+    PRM_LOG_INFO("BIOS_TTY", text);
+    cpu.SetGPR(2, len);
 }
 
 void Ps1BiosHle::HandleFileClose(CpuContext& cpu) {
@@ -253,10 +657,12 @@ void Ps1BiosHle::HandleMemSet(CpuContext& cpu, uint8_t* ram, size_t ram_size) {
 }
 
 void Ps1BiosHle::HandleHeapInit(CpuContext& cpu) {
+    // A(39h) InitHeap(addr, size). shortcut: the game never calls the kernel malloc (A(33h) absent,
+    // FUNCTION_CATALOG), so the heap is only recorded, not built.
     uint32_t heap_base = cpu.GetGPR(4); // $a0
     uint32_t heap_size = cpu.GetGPR(5); // $a1
-    cpu.SetGPR(2, 1); // 1 = success
-    PRM_LOG_INFO("BIOS", "InitHeap intercepted: base=0x" + std::to_string(heap_base) +
+    cpu.SetGPR(2, 1);
+    PRM_LOG_INFO("BIOS", "InitHeap intercepted: base=0x" + Hex(heap_base) +
                          " size=" + std::to_string(heap_size) + " bytes");
 }
 
@@ -276,7 +682,9 @@ void Ps1BiosHle::HandleStdPuts(CpuContext& cpu, const uint8_t* ram, size_t ram_s
 }
 
 void Ps1BiosHle::HandlePadInit(CpuContext& cpu) {
-    cpu.SetGPR(2, 1); // 1 = initialized successfully
+    // B(12h) InitPAD(buf1, siz1, buf2, siz2). shortcut: buffers are not filled by a BIOS pad
+    // handler; the game's libpad drives SIO0 directly (FUNCTION_CATALOG "libpad").
+    cpu.SetGPR(2, 1);
     PRM_LOG_INFO("BIOS", "InitPAD intercepted -> controllers registered via InputManager");
 }
 

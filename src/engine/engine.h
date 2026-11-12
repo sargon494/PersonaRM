@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstdint>
+#include <fstream>
 #include <string>
 #include <memory>
 #include <vector>
@@ -14,6 +15,7 @@
 #include "loader/exe_loader.h"
 #include "core/memory_manager.h"
 #include "input/input_manager.h"
+#include "trace/trace.h"
 
 namespace personarm {
 
@@ -93,6 +95,12 @@ public:
 
     uint64_t GetFrameCount() const { return m_frame_counter; }
 
+    /// Execution trace (docs/TRACE_FORMAT.md). Null = off. The sink must outlive its use;
+    /// Shutdown() emits `end` and detaches it.
+    void SetTraceSink(trace::ITraceSink* sink) { m_trace = sink; m_bios.SetTraceSink(sink); }
+    /// Write a PRMTRACE file; it is (re)created with its header at the next boot.
+    void SetTraceOutput(const std::string& path) { m_trace_path = path; }
+
 private:
     Engine();
     ~Engine();
@@ -139,6 +147,12 @@ private:
     std::vector<uint8_t> m_joy_rx_fifo;
 
     uint64_t m_frame_counter = 0;
+
+    trace::ITraceSink* m_trace = nullptr;
+    std::string m_trace_path;  // --trace-out
+    std::string m_trace_disc;  // header "disc" (product id when recognized)
+    std::unique_ptr<std::ofstream> m_trace_file;
+    std::unique_ptr<trace::TraceWriter> m_trace_writer;
 };
 
 } // namespace personarm

@@ -315,17 +315,17 @@ int main() {
         personarm::MemoryManager mem;
         mem.Initialize(1024 * 1024);
 
-        // Test Vector A hook: FileOpen (func 0x00) -> returns fd=1 in $v0 ($2)
+        // Test Vector A hook: open (func 0x00) with no disc -> -1 in $v0 ($2)
         cpu.SetGPR(9, 0x00); // $t1 = func 0x00
         cpu.SetGPR(31, 0x80010050); // $ra
         cpu.SetPC(0x000000A0);
 
         bool handled = bios.HandleBiosHook(cpu, mem);
         assert(handled == true);
-        assert(cpu.GetGPR(2) == 1); // $v0 == 1
+        assert(cpu.GetGPR(2) == 0xFFFFFFFFu); // $v0 == -1
         assert(cpu.GetPC() == 0x80010050); // Returned to $ra
 
-        // Test Vector B hook: InitHeap (func 0x12) -> returns 1 in $v0
+        // Test Vector B hook: InitPAD (func 0x12) -> returns 1 in $v0
         cpu.SetGPR(9, 0x12);
         cpu.SetGPR(31, 0x80010060);
         cpu.SetPC(0x000000B0);
