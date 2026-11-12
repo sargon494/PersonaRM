@@ -328,6 +328,9 @@ bool AnalyzeDisc(const std::string& image_path, const AnalyzeOptions& options,
                         follow.second_level_bases = true;
                         out.boot_cfg_follow = recomp::AnalyzeControlFlow(data.data() + 0x800, payload,
                                                                          rep.exe.load_address, rep.exe.entry, follow);
+                        follow.heuristic_roots = true;
+                        out.boot_cfg_roots = recomp::AnalyzeControlFlow(data.data() + 0x800, payload,
+                                                                        rep.exe.load_address, rep.exe.entry, follow);
                         out.has_cfg = true;
                     }
                 }
@@ -423,8 +426,9 @@ std::string RenderMarkdown(const std::vector<DiscReport>& reports) {
                 const auto& c = d.boot_cfg;
                 os << "#### Control de flujo desde el punto de entrada (CFG)\n\n";
                 os << "| Medida | Valor |\n|---|---:|\n";
-                os << "| Palabras alcanzadas / total | " << c.reachable_words << " / " << c.text_words
+                os << "| Palabras alcanzadas / con contenido | " << c.reachable_words << " / " << (c.text_words - c.padding_words)
                    << " (" << c.coverage_permille / 10 << "." << c.coverage_permille % 10 << " %) |\n";
+                os << "| Relleno de ceros excluido (rachas de 64 o más palabras a cero: BSS o relleno, no código) | " << c.padding_words << " |\n";
                 os << "| Funciones (entrada + llamadas directas distintas) | " << c.functions << " |\n";
                 os << "| Llamadas directas / saltos directos / ramas condicionales | " << c.direct_calls << " / "
                    << c.direct_jumps << " / " << c.conditional_branches << " |\n";
@@ -441,16 +445,28 @@ std::string RenderMarkdown(const std::vector<DiscReport>& reports) {
                 os << "| Llamadas al sistema (syscall/break) | " << c.syscalls << " |\n\n";
                 {
                     const auto& f = d.boot_cfg_follow;
-                    os << "Seguimiento de candidatos de `jalr` y bases de segundo nivel (experimental; una escritura constante no prueba que el valor sea una función válida, y el contenido de memoria puede cambiar en ejecución):\n\n";
-                    os << "| Medida | Sin seguir | Siguiendo |\n|---|---:|---:|\n";
-                    os << "| Palabras alcanzadas | " << c.reachable_words << " | " << f.reachable_words << " ("
-                       << f.coverage_permille / 10 << "." << f.coverage_permille % 10 << " %) |\n";
-                    os << "| Funciones | " << c.functions << " | " << f.functions << " |\n";
+                    const auto& g = d.boot_cfg_roots;
+                    auto pct = [](const recomp::CfgReport& x) {
+                        return std::to_string(x.coverage_permille / 10) + "." + std::to_string(x.coverage_permille % 10) + " %";
+                    };
+                    os << "Análisis ampliado (experimental): seguimiento de candidatos de `jalr`, bases de segundo nivel y raíces heurísticas. "
+                          "Una escritura constante o un patrón de prólogo no prueban que haya una función válida, y el contenido de memoria puede cambiar en ejecución:\n\n";
+                    os << "| Medida | Por defecto | + punteros | + raíces heurísticas |\n|---|---:|---:|---:|\n";
+                    os << "| Palabras alcanzadas | " << c.reachable_words << " (" << pct(c) << ") | " << f.reachable_words << " ("
+                       << pct(f) << ") | " << g.reachable_words << " (" << pct(g) << ") |\n";
+                    os << "| Funciones | " << c.functions << " | " << f.functions << " | " << g.functions << " |\n";
                     os << "| `jalr` seguidos / funciones añadidas | 0 / 0 | " << f.indirect_calls_followed << " / "
-                       << f.followed_candidates << " |\n";
-                    os << "| `jalr` con base no constante | " << c.pointers.unrecognised << " | " << f.pointers.unrecognised << " |\n";
+                       << f.followed_candidates << " | " << g.indirect_calls_followed << " / " << g.followed_candidates << " |\n";
+                    os << "| Raíces heurísticas: prólogo con dirección como dato / destino de `jal` | 0 / 0 | 0 / 0 | "
+                       << g.heuristic_roots_data << " / " << g.heuristic_roots_jal << " |\n";
+                    os << "| `jalr` con base no constante | " << c.pointers.unrecognised << " | " << f.pointers.unrecognised
+                       << " | " << g.pointers.unrecognised << " |\n";
                     os << "| `jalr` total / sin resolver | " << c.indirect_calls << " / " << c.indirect_calls_unresolved
-                       << " | " << f.indirect_calls << " / " << f.indirect_calls_unresolved << " |\n\n";
+                       << " | " << f.indirect_calls << " / " << f.indirect_calls_unresolved << " | " << g.indirect_calls << " / "
+                       << g.indirect_calls_unresolved << " |\n";
+                    os << "| Palabras reservadas / destinos fuera de la imagen | " << c.invalid_reached << " / " << c.out_of_range_targets
+                       << " | " << f.invalid_reached << " / " << f.out_of_range_targets << " | " << g.invalid_reached << " / "
+                       << g.out_of_range_targets << " |\n\n";
                 }
                 if (!c.indirect_sites.empty()) {
                     os << "Primeros saltos indirectos sin resolver: ";

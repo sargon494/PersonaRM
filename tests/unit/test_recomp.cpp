@@ -497,6 +497,67 @@ static void TestCfgSecondLevelBase() {
     CHECK(d.pointers.unrecognised == 1 && d.pointers.assigned_in_image == 0);
 }
 
+// Long runs of zero words (BSS or padding inside the executable) are not code: execution that
+// falls into one stops there, and the words are excluded from the coverage denominator.
+static void TestCfgZeroPadding() {
+    // 4 instructions, then 200 zero words: previously the nops were walked to the end of the image.
+    std::vector<uint8_t> code = Bytes({kAddiuV0One, kAddiuV0One, kAddiuV0One, kAddiuV0One});
+    code.resize(204 * 4, 0);
+    CfgReport r = AnalyzeControlFlow(code.data(), code.size(), kBase, kBase);
+    CHECK(r.reachable_words == 4 && r.out_of_range_targets == 0);
+    CHECK(r.padding_words == 200 && r.coverage_permille == 1000);
+
+    // A short run of nops is ordinary alignment padding and is still code.
+    std::vector<uint8_t> shortrun = Bytes({kAddiuV0One});
+    shortrun.resize((1 + 63) * 4, 0);                   // 63 zero words: below the limit
+    const std::vector<uint8_t> tail = Bytes({kJrRa, kNop});
+    shortrun.insert(shortrun.end(), tail.begin(), tail.end());
+    CfgReport s = AnalyzeControlFlow(shortrun.data(), shortrun.size(), kBase, kBase);
+    CHECK(s.padding_words == 0 && s.reachable_words == 66 && s.coverage_permille == 1000);
+
+    // Exactly 64 zero words is padding.
+    std::vector<uint8_t> edge = Bytes({kAddiuV0One});
+    edge.resize((1 + 64) * 4, 0);
+    edge.insert(edge.end(), tail.begin(), tail.end());
+    CfgReport e = AnalyzeControlFlow(edge.data(), edge.size(), kBase, kBase);
+    CHECK(e.padding_words == 64 && e.reachable_words == 1);
+    CHECK(e.coverage_permille == 1000 * 1 / 3);         // 1 of 3 content words (the jr and its slot are unreached)
+}
+
+// Heuristic roots (off by default): unreached function prologues that are referenced by an
+// address stored as data, or are the target of a `jal` found anywhere in the image.
+static std::vector<uint8_t> MakeRootImage() {
+    // main: jr $ra ; nop                                   (0x00..0x04)
+    // data word at 0x10 holds the address of F1 (0x80010080)
+    // F1 (0x80): addiu sp,sp,-8 ; jr $ra ; nop           referenced as data
+    // F2 (0xA0): addiu sp,sp,-16 ; jr $ra ; nop          target of a jal sitting in unreached bytes
+    // jal F2 at 0x20 (unreached)
+    // F3 (0xC0): addiu sp,sp,-8 ; jr $ra ; nop           not referenced by anything
+    std::vector<uint8_t> code(0x100, 0);
+    auto put = [&](size_t off, uint32_t w) { for (int b = 0; b < 4; ++b) code[off + b] = static_cast<uint8_t>(w >> (8 * b)); };
+    put(0x00, kJrRa); put(0x04, kNop);
+    put(0x10, kBase + 0x80);
+    put(0x20, Jal(kBase + 0xA0));
+    put(0x80, 0x27BDFFF8u); put(0x84, kJrRa); put(0x88, kNop);
+    put(0xA0, 0x27BDFFF0u); put(0xA4, kJrRa); put(0xA8, kNop);
+    put(0xC0, 0x27BDFFF8u); put(0xC4, kJrRa); put(0xC8, kNop);
+    return code;
+}
+
+static void TestCfgHeuristicRoots() {
+    const std::vector<uint8_t> img = MakeRootImage();
+    CfgReport a = AnalyzeControlFlow(img.data(), img.size(), kBase, kBase);
+    CHECK(a.heuristic_roots_data == 0 && a.heuristic_roots_jal == 0 && a.functions == 1);
+
+    CfgOptions o;
+    o.heuristic_roots = true;
+    CfgReport b = AnalyzeControlFlow(img.data(), img.size(), kBase, kBase, o);
+    CHECK(b.heuristic_roots_data == 1);                 // F1
+    CHECK(b.heuristic_roots_jal == 1);                  // F2
+    CHECK(b.functions == a.functions + 2);              // F3 has no reference and stays out
+    CHECK(b.reachable_words == a.reachable_words + 6);  // F1 and F2: 3 words each
+}
+
 int main() {
     TestDecode();
     TestCfgCallsAndDelaySlots();
@@ -512,6 +573,8 @@ int main() {
     TestCfgCallSplitCounters();
     TestCfgFollowAssignedPointers();
     TestCfgSecondLevelBase();
+    TestCfgZeroPadding();
+    TestCfgHeuristicRoots();
     TestCfgUnresolvedJumpCounter();
     TestDescribeInsn();
     TestCfgUnresolvedContextLimit();

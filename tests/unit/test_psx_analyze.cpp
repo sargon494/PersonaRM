@@ -278,6 +278,10 @@ static void TestDiscs() {
     CHECK(cfgr.boot_cfg_follow.reachable_words >= cfgr.boot_cfg.reachable_words);
     CHECK(cfgr.boot_cfg_follow.functions >= cfgr.boot_cfg.functions);
     CHECK(cfgr.boot_cfg_follow.indirect_calls == cfgr.boot_cfg.indirect_calls);
+    CHECK(cfgr.boot_cfg_roots.reachable_words >= cfgr.boot_cfg_follow.reachable_words);
+    CHECK(cfgr.boot_cfg_roots.padding_words == cfgr.boot_cfg.padding_words);
+    CHECK(RenderMarkdown({cfgr}).find("raíces heurísticas") != std::string::npos);
+    CHECK(RenderMarkdown({cfgr}).find("Relleno de ceros") != std::string::npos);
     CHECK(RenderMarkdown({cfgr}).find("Control de flujo") != std::string::npos);
     CHECK(!r.has_cfg);
 

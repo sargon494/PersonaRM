@@ -100,6 +100,7 @@ struct DiscReport {
     bool has_cfg = false;
     recomp::CfgReport boot_cfg;
     recomp::CfgReport boot_cfg_follow;   // same analysis with the experimental pointer-following option
+    recomp::CfgReport boot_cfg_roots;    // ... plus the heuristic function roots
     std::map<std::string, uint32_t> sdk_hints;
     std::string extract_error;   // set when --extract-boot could not write the file
 };

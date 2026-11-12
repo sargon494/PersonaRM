@@ -393,6 +393,21 @@ CfgReport AnalyzeControlFlow(const uint8_t* code, size_t size, uint32_t load, ui
     };
     const MemReader* mem = options.second_level_bases ? &reader : nullptr;
 
+    // Runs of zero words are BSS or padding, not code. A `nop` sled that long would otherwise be
+    // "reached" by falling through into it and inflate the coverage.
+    constexpr size_t kZeroRunWords = 64;
+    std::vector<bool> padding(words, false);
+    for (size_t i = 0; i < words;) {
+        if (word_at(load + static_cast<uint32_t>(i * 4)) != 0) { ++i; continue; }
+        size_t j = i;
+        while (j < words && word_at(load + static_cast<uint32_t>(j * 4)) == 0) ++j;
+        if (j - i >= kZeroRunWords) {
+            for (size_t k = i; k < j; ++k) padding[k] = true;
+            r.padding_words += static_cast<uint32_t>(j - i);
+        }
+        i = j;
+    }
+
     std::vector<bool> visited(words, false);
     std::set<uint32_t> functions;
     std::vector<uint32_t> work;
@@ -414,6 +429,7 @@ CfgReport AnalyzeControlFlow(const uint8_t* code, size_t size, uint32_t load, ui
         Record(r.out_of_range_sites, entry);
     }
 
+    const auto drain = [&]() {
     while (!work.empty()) {
         uint32_t pc = work.back();
         work.pop_back();
@@ -425,6 +441,7 @@ CfgReport AnalyzeControlFlow(const uint8_t* code, size_t size, uint32_t load, ui
                 Record(r.out_of_range_sites, pc);
                 break;
             }
+            if (padding[index_of(pc)]) break;   // zero-filled region: not code
             if (visited[index_of(pc)]) break;   // already explored from another path
             visited[index_of(pc)] = true;
             ++r.reachable_words;
@@ -450,7 +467,7 @@ CfgReport AnalyzeControlFlow(const uint8_t* code, size_t size, uint32_t load, ui
             }
             if (!visited[index_of(ds)]) {
                 visited[index_of(ds)] = true;
-                ++r.reachable_words;
+                if (!padding[index_of(ds)]) ++r.reachable_words;
                 if (Decode(word_at(ds), ds).kind == InsnKind::Invalid) {
                     ++r.invalid_reached;
                     Record(r.invalid_sites, ds);
@@ -545,13 +562,41 @@ CfgReport AnalyzeControlFlow(const uint8_t* code, size_t size, uint32_t load, ui
         }
     }
 
+    };
+    drain();
+
+    if (options.heuristic_roots) {
+        std::set<uint32_t> data_refs, jal_targets;
+        std::vector<uint32_t> prologues;
+        for (size_t i = 0; i < words; ++i) {
+            const uint32_t a = load + static_cast<uint32_t>(i * 4);
+            const uint32_t w = word_at(a);
+            if ((w & 0xFFFF8000u) == 0x27BD8000u) prologues.push_back(a);       // addiu $sp,$sp,-N
+            if ((w >> 26) == 3) {                                               // jal
+                const uint32_t t = ((a + 4) & 0xF0000000u) | ((w & 0x03FFFFFFu) << 2);
+                if (in_image(t)) jal_targets.insert(t);
+            }
+            if (in_image(w)) data_refs.insert(w);
+        }
+        for (uint32_t a : prologues) {
+            if (visited[index_of(a)] || padding[index_of(a)]) continue;
+            if (data_refs.count(a)) ++r.heuristic_roots_data;
+            else if (jal_targets.count(a)) ++r.heuristic_roots_jal;
+            else continue;
+            functions.insert(a);
+            work.push_back(a);
+        }
+        drain();
+    }
+
     r.indirect_calls_assigned = r.pointers.assigned_in_image;
     r.indirect_calls_unresolved = r.indirect_calls - r.indirect_calls_assigned;
 
     r.function_entries.assign(functions.begin(), functions.end());
     r.functions = static_cast<uint32_t>(functions.size());
-    if (words > 0) {
-        r.coverage_permille = static_cast<uint32_t>(static_cast<uint64_t>(r.reachable_words) * 1000 / words);
+    const size_t content = words - r.padding_words;
+    if (content > 0) {
+        r.coverage_permille = static_cast<uint32_t>(static_cast<uint64_t>(r.reachable_words) * 1000 / content);
     }
     return r;
 }

@@ -59,12 +59,17 @@ struct CfgOptions {
     /// constant stored to it), so a function pointer reached through a structure pointer in a
     /// global can be located. Off by default: the value in memory may change at run time.
     bool second_level_bases = false;
+    /// Add as function entries the unreached prologues (`addiu $sp,$sp,-N`) whose address is stored
+    /// as a data word, or that are the target of a `jal` found anywhere in the image. Off by
+    /// default: a prologue pattern does not prove that a function starts there.
+    bool heuristic_roots = false;
 };
 
 struct CfgReport {
     uint32_t text_words = 0;
     uint32_t reachable_words = 0;       // distinct words reached, delay slots included
-    uint32_t coverage_permille = 0;     // reachable_words * 1000 / text_words
+    uint32_t padding_words = 0;         // words in runs of >= 64 zero words (BSS/padding): never treated as code
+    uint32_t coverage_permille = 0;     // reachable_words * 1000 / (text_words - padding_words)
     uint32_t functions = 0;             // entry point + distinct in-image call targets
     uint32_t direct_calls = 0;
     uint32_t direct_jumps = 0;
@@ -75,6 +80,8 @@ struct CfgReport {
     uint32_t indirect_calls_assigned = 0;   // jalr whose slot has in-image constant stores (candidates known, not followed)
     uint32_t indirect_calls_unresolved = 0; // the rest: indirect_calls - indirect_calls_assigned
     uint32_t indirect_calls_followed = 0;   // assigned jalr whose candidate was followed (option enabled)
+    uint32_t heuristic_roots_data = 0;      // unreached prologues added because their address is a data word
+    uint32_t heuristic_roots_jal = 0;       // unreached prologues added as the target of a `jal` elsewhere
     uint32_t followed_candidates = 0;       // distinct candidate functions added by following pointers
     uint32_t syscalls = 0;
     uint32_t invalid_reached = 0;       // reserved encodings reached as code
