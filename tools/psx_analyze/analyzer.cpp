@@ -318,6 +318,10 @@ bool AnalyzeDisc(const std::string& image_path, const AnalyzeOptions& options,
                         const size_t payload = std::min<size_t>(rep.exe.payload_size, data.size() - 0x800);
                         out.boot_cfg = recomp::AnalyzeControlFlow(data.data() + 0x800, payload,
                                                                   rep.exe.load_address, rep.exe.entry);
+                        recomp::CfgOptions follow;
+                        follow.follow_assigned_pointers = true;
+                        out.boot_cfg_follow = recomp::AnalyzeControlFlow(data.data() + 0x800, payload,
+                                                                         rep.exe.load_address, rep.exe.entry, follow);
                         out.has_cfg = true;
                     }
                 }
@@ -429,6 +433,18 @@ std::string RenderMarkdown(const std::vector<DiscReport>& reports) {
                 os << "| Palabras reservadas alcanzadas como código | " << c.invalid_reached << " |\n";
                 os << "| Destinos fuera de la imagen | " << c.out_of_range_targets << " |\n";
                 os << "| Llamadas al sistema (syscall/break) | " << c.syscalls << " |\n\n";
+                {
+                    const auto& f = d.boot_cfg_follow;
+                    os << "Seguimiento de candidatos de `jalr` (experimental; una escritura constante no prueba que el valor sea una función válida):\n\n";
+                    os << "| Medida | Sin seguir | Siguiendo |\n|---|---:|---:|\n";
+                    os << "| Palabras alcanzadas | " << c.reachable_words << " | " << f.reachable_words << " ("
+                       << f.coverage_permille / 10 << "." << f.coverage_permille % 10 << " %) |\n";
+                    os << "| Funciones | " << c.functions << " | " << f.functions << " |\n";
+                    os << "| `jalr` seguidos / funciones añadidas | 0 / 0 | " << f.indirect_calls_followed << " / "
+                       << f.followed_candidates << " |\n";
+                    os << "| `jalr` total / sin resolver | " << c.indirect_calls << " / " << c.indirect_calls_unresolved
+                       << " | " << f.indirect_calls << " / " << f.indirect_calls_unresolved << " |\n\n";
+                }
                 if (!c.indirect_sites.empty()) {
                     os << "Primeros saltos indirectos sin resolver: ";
                     for (size_t i = 0; i < c.indirect_sites.size() && i < 10; ++i) os << (i ? ", " : "") << Hex(c.indirect_sites[i]);

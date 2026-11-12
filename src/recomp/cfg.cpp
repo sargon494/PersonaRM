@@ -275,7 +275,7 @@ StoreTable CollectStores(const uint8_t* code, size_t size, uint32_t load) {
 
 // Classifies the function pointer that a `jalr` on `reg` calls through, when it was loaded by
 // `lw off(base)` from a constant base (WP-14, step 3). Only counts and a few samples are kept.
-void ClassifyPointer(const uint8_t* code, size_t size, uint32_t load, uint32_t site, uint32_t reg,
+PointerSite ClassifyPointer(const uint8_t* code, size_t size, uint32_t load, uint32_t site, uint32_t reg,
                      const StoreTable& stores, CfgReport& r) {
     auto word_at = [&](uint32_t a) { return LoadU32(code + (a - load)); };
     auto in_image = [&](uint32_t a) {
@@ -316,6 +316,10 @@ void ClassifyPointer(const uint8_t* code, size_t size, uint32_t load, uint32_t s
                         }
                     }
                     if (!ps.candidates.empty()) {
+                        if (it != stores.end() && !it->second.unknown) {
+                            std::set<uint32_t> distinct(it->second.values.begin(), it->second.values.end());
+                            ps.followable = distinct.size() == 1 && in_image(*distinct.begin());
+                        }
                         ps.status = PointerStatus::AssignedInImage;
                         ++r.pointers.assigned_in_image;
                     } else {
@@ -335,11 +339,13 @@ void ClassifyPointer(const uint8_t* code, size_t size, uint32_t load, uint32_t s
     size_t same = 0;
     for (const auto& q : r.pointer_samples) same += q.status == ps.status;
     if (r.pointer_samples.size() < kPointerSamples && same < kSamplesPerStatus) r.pointer_samples.push_back(ps);
+    return ps;
 }
 
 } // namespace
 
-CfgReport AnalyzeControlFlow(const uint8_t* code, size_t size, uint32_t load, uint32_t entry) {
+CfgReport AnalyzeControlFlow(const uint8_t* code, size_t size, uint32_t load, uint32_t entry,
+                             const CfgOptions& options) {
     CfgReport r;
     const size_t words = size / 4;
     r.text_words = static_cast<uint32_t>(words);
@@ -482,7 +488,15 @@ CfgReport AnalyzeControlFlow(const uint8_t* code, size_t size, uint32_t load, ui
                 case InsnKind::IndirectCall:
                     ++r.indirect_calls;
                     Record(r.indirect_sites, pc);
-                    ClassifyPointer(code, size, load, pc, in.rs, stores, r);
+                    {
+                        const PointerSite ps = ClassifyPointer(code, size, load, pc, in.rs, stores, r);
+                        if (options.follow_assigned_pointers && ps.followable) {
+                            ++r.indirect_calls_followed;
+                            const uint32_t target = ps.candidates[0];
+                            if (functions.insert(target).second) ++r.followed_candidates;
+                            work.push_back(target);
+                        }
+                    }
                     CaptureContext(code, size, load, pc, r);
                     pc = after;
                     break;

@@ -275,6 +275,9 @@ static void TestDiscs() {
     CHECK(cfgr.boot_cfg.bios_calls >= 1 && cfgr.boot_cfg.indirect_jumps == 0 && cfgr.boot_cfg.indirect_sites.empty());
     CHECK(cfgr.boot_cfg.reachable_words > 0);
     CHECK(cfgr.boot_cfg.invalid_reached == 0);
+    CHECK(cfgr.boot_cfg_follow.reachable_words >= cfgr.boot_cfg.reachable_words);
+    CHECK(cfgr.boot_cfg_follow.functions >= cfgr.boot_cfg.functions);
+    CHECK(cfgr.boot_cfg_follow.indirect_calls == cfgr.boot_cfg.indirect_calls);
     CHECK(RenderMarkdown({cfgr}).find("Control de flujo") != std::string::npos);
     CHECK(!r.has_cfg);
 

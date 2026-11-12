@@ -374,6 +374,64 @@ static void TestCfgCallSplitCounters() {
     CHECK(r.indirect_calls_assigned + r.indirect_calls_unresolved == r.indirect_calls);
 }
 
+static std::vector<uint8_t> MakeSlotImage(bool second_value) {
+    std::vector<uint8_t> code(0x200, 0);
+    std::vector<uint32_t> w = {
+        0x3C028001u,   // 0 lui $2,0x8001
+        0x24420040u,   // 1 addiu $2,$2,0x40          -> 0x80010040
+        0x3C038001u,   // 2 lui $3,0x8001
+        0xAC620100u,   // 3 sw $2,0x100($3)           -> slot 0x80010100
+    };
+    if (second_value) {
+        w.push_back(0x24420010u);   // addiu $2,$2,0x10  -> 0x80010050
+        w.push_back(0xAC620100u);   // sw $2,0x100($3)
+    }
+    const uint32_t tail[] = {
+        0x3C048001u,   // lui $4,0x8001
+        0x8C850100u,   // lw $5,0x100($4)
+        0x00A0F809u,   // jalr $31,$5
+        kNop,
+        kJrRa, kNop,
+    };
+    w.insert(w.end(), tail, tail + 6);
+    for (size_t i = 0; i < w.size(); ++i)
+        for (int b = 0; b < 4; ++b) code[i * 4 + b] = static_cast<uint8_t>(w[i] >> (8 * b));
+    // Two candidate functions: jr $ra at 0x...40 and 0x...50.
+    const size_t f1 = 0x40, f2 = 0x50;
+    for (int b = 0; b < 4; ++b) {
+        code[f1 + b] = static_cast<uint8_t>(kJrRa >> (8 * b));
+        code[f2 + b] = static_cast<uint8_t>(kJrRa >> (8 * b));
+    }
+    return code;
+}
+
+static void TestCfgFollowAssignedPointers() {
+    const std::vector<uint8_t> one = MakeSlotImage(false);
+    CfgOptions off;
+    CfgOptions on;
+    on.follow_assigned_pointers = true;
+
+    // Default: the candidate is reported but not followed.
+    CfgReport a = AnalyzeControlFlow(one.data(), one.size(), kBase, kBase);
+    CHECK(a.indirect_calls_assigned == 1 && a.indirect_calls_followed == 0 && a.followed_candidates == 0);
+    CfgReport a2 = AnalyzeControlFlow(one.data(), one.size(), kBase, kBase, off);
+    CHECK(a2.reachable_words == a.reachable_words && a2.functions == a.functions);
+
+    // Enabled: the single constant-stored candidate becomes a function, its code is reached.
+    CfgReport b = AnalyzeControlFlow(one.data(), one.size(), kBase, kBase, on);
+    CHECK(b.indirect_calls_assigned == 1 && b.indirect_calls_followed == 1 && b.followed_candidates == 1);
+    CHECK(b.functions == a.functions + 1);
+    CHECK(b.reachable_words == a.reachable_words + 2);   // jr $ra + delay slot
+    CHECK(b.indirect_calls == a.indirect_calls);
+
+    // Two different constants stored to the slot: ambiguous, so not followed even when enabled.
+    const std::vector<uint8_t> two = MakeSlotImage(true);
+    CfgReport c = AnalyzeControlFlow(two.data(), two.size(), kBase, kBase, on);
+    CHECK(c.indirect_calls_assigned == 1 && c.indirect_calls_followed == 0 && c.followed_candidates == 0);
+    CfgReport c0 = AnalyzeControlFlow(two.data(), two.size(), kBase, kBase);
+    CHECK(c.reachable_words == c0.reachable_words && c.functions == c0.functions);
+}
+
 int main() {
     TestDecode();
     TestCfgCallsAndDelaySlots();
@@ -387,6 +445,7 @@ int main() {
     TestCfgGlobalPointers();
     TestCfgGlobalPointerStored();
     TestCfgCallSplitCounters();
+    TestCfgFollowAssignedPointers();
     TestCfgUnresolvedJumpCounter();
     TestDescribeInsn();
     TestCfgUnresolvedContextLimit();

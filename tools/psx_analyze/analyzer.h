@@ -99,6 +99,7 @@ struct DiscReport {
     bool has_boot = false;
     bool has_cfg = false;
     recomp::CfgReport boot_cfg;
+    recomp::CfgReport boot_cfg_follow;   // same analysis with the experimental pointer-following option
     std::map<std::string, uint32_t> sdk_hints;
 };
 
