@@ -91,8 +91,11 @@ void Engine::WireDevices() {
     m_dma->SetIrqCallback([this] { RaiseIrq(3); });
     m_dma->SetPort(hw::Dma::kGpu, {[this] { return m_gpu.ReadGP0(); }, [this](uint32_t w) { m_gpu.WriteGP0(w); }});
     m_dma->SetPort(hw::Dma::kCdrom, {[this] { return m_cdrom->DmaRead32(); }, nullptr});
-    // shortcut: SPU->RAM DMA (sound RAM readback) reads open bus; add when SpuEmulator exposes a FIFO read.
-    m_dma->SetPort(hw::Dma::kSpu, {nullptr, [this](uint32_t w) {
+    m_dma->SetPort(hw::Dma::kSpu, {[this] {
+        uint8_t b[4];
+        m_spu.DmaRead(b, 4);
+        return b[0] | (b[1] << 8) | (b[2] << 16) | (uint32_t(b[3]) << 24);
+    }, [this](uint32_t w) {
         const uint8_t b[4] = {uint8_t(w), uint8_t(w >> 8), uint8_t(w >> 16), uint8_t(w >> 24)};
         m_spu.DmaWrite(b, 4);
     }});
@@ -104,7 +107,6 @@ void Engine::WireDevices() {
                                        [this] { return m_mdec->DataOutRequest(); }});
     m_xa.Reset();
     m_xa_resampler.Reset();
-    m_xa_audio.clear();
     m_cdrom->SetXaCallback([this](const uint8_t* raw) { OnXaSector(raw); });
 }
 
@@ -115,18 +117,18 @@ void Engine::OnXaSector(const uint8_t* raw) {
     const int ch = fmt.stereo ? 2 : 1;
     m_xa_out.clear();
     m_xa_resampler.Process(m_xa_pcm.data(), m_xa_pcm.size() / ch, ch, fmt.rate, m_xa_out);
-    const bool on = m_spu.Read16(0x1F801DAA) & 1;
-    const int32_t vl = on ? static_cast<int16_t>(m_spu.Read16(0x1F801DB0)) : 0;
-    const int32_t vr = on ? static_cast<int16_t>(m_spu.Read16(0x1F801DB2)) : 0;
-    for (size_t i = 0; i < m_xa_out.size(); i += ch) {
-        m_xa_audio.push_back(static_cast<int16_t>(m_xa_out[i] * vl / 0x8000));
-        m_xa_audio.push_back(static_cast<int16_t>(m_xa_out[i + ch - 1] * vr / 0x8000));
+    if (ch == 1) {  // mono: same sample on both sides
+        m_xa_pcm.clear();
+        for (int16_t v : m_xa_out) m_xa_pcm.insert(m_xa_pcm.end(), {v, v});
+        m_xa_out.swap(m_xa_pcm);
     }
+    m_spu.PushCdAudio(m_xa_out.data(), m_xa_out.size() / 2);  // volume/enable applied in the SPU mix
 }
 
 void Engine::TickDevices(uint32_t cycles) {
     TickTimers(cycles);
     TickJoy(cycles);
+    m_spu.Tick(cycles);
     m_cdrom->Tick(cycles);
     m_mdec->Tick(cycles);
     m_dma->Tick(cycles);
@@ -648,7 +650,7 @@ bool Engine::ParsePadScript(std::istream& in, std::vector<PadPress>& out, size_t
 }
 
 uint16_t Engine::PadButtons() const {
-    uint16_t held = ScriptedButtons();
+    uint16_t held = ScriptedButtons() | m_pad_buttons;
     static const std::pair<VirtualAction, uint16_t> kMap[] = {
         {VirtualAction::MoveUp, 1u << 4}, {VirtualAction::MoveRight, 1u << 5}, {VirtualAction::MoveDown, 1u << 6},
         {VirtualAction::MoveLeft, 1u << 7}, {VirtualAction::CameraRotateLeft, 1u << 10},

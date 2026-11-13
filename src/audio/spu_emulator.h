@@ -4,6 +4,7 @@
 #include <vector>
 #include <array>
 #include <string>
+#include <deque>
 
 namespace personarm {
 
@@ -15,6 +16,7 @@ constexpr uint32_t SPU_RAM_SIZE    = 512 * 1024;
 constexpr uint32_t SPU_NUM_VOICES  = 24;
 constexpr uint32_t SPU_SAMPLE_RATE = 44100;
 constexpr uint32_t SPU_REG_BASE    = 0x1F801C00; // registers 0x1F801C00..0x1F801DFF
+constexpr uint32_t SPU_CYCLES_PER_SAMPLE = 768;  // 33868800 Hz CPU clock / 44100 Hz
 
 // 512-entry interpolation kernel (see shortcut note in spu_emulator.cpp)
 const std::array<int16_t, 512>& SpuGaussTable();
@@ -54,6 +56,8 @@ public:
     void UploadToRam(uint32_t destination, const uint8_t* data, size_t size);
     // DMA4 style write at the current transfer address (advances it)
     void DmaWrite(const uint8_t* data, size_t size);
+    // DMA4 style read (SPU RAM -> main RAM) at the current transfer address (advances it)
+    void DmaRead(uint8_t* out, size_t size);
 
     // Hardware register file (physical address 0x1F801C00.. or offset 0..0x1FF)
     void Write16(uint32_t addr, uint16_t value);
@@ -71,11 +75,22 @@ public:
     // Mixes num_frames of 44.1 kHz stereo (interleaved L,R) into out_stereo_pcm (resized).
     void GenerateSamples(std::vector<int16_t>& out_stereo_pcm, size_t num_frames);
 
+    // Emulated time: one output frame per SPU_CYCLES_PER_SAMPLE CPU cycles, appended to an internal
+    // buffer that TakeAudio moves out (interleaved L,R, 44.1 kHz).
+    void Tick(uint32_t cpu_cycles);
+    void TakeAudio(std::vector<int16_t>& out);
+
+    // CD audio input (XA-ADPCM / CD-DA already at 44.1 kHz, interleaved L,R). Consumed one frame per
+    // output sample, scaled by the CD volume registers when SPUCNT bit 0 is set; silence on underrun.
+    void PushCdAudio(const int16_t* stereo, size_t frames);
+    size_t CdAudioQueued() const { return m_cd_fifo.size() / 2; }
+
     const SpuVoice& GetVoice(uint32_t index) const { return m_voices[index < SPU_NUM_VOICES ? index : 0]; }
     uint32_t GetActiveVoiceMask() const;
     uint32_t GetEndx() const { return m_endx; }
 
 private:
+    void MixFrame(int16_t& out_l, int16_t& out_r);
     void DecodeBlock(SpuVoice& v);
     void PushSample(SpuVoice& v);
     void StepEnvelope(SpuVoice& v);
@@ -97,6 +112,9 @@ private:
     uint32_t m_rev_cur = 0;       // reverb cursor (byte address)
     bool m_rev_phase = false;
     int32_t m_rev_out_l = 0, m_rev_out_r = 0;
+    uint32_t m_cycle_acc = 0;          // CPU cycles not yet turned into a sample
+    std::vector<int16_t> m_out;        // Tick() output awaiting TakeAudio
+    std::deque<int16_t> m_cd_fifo;     // CD audio input, interleaved L,R
 };
 
 } // namespace personarm

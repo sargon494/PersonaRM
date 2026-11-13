@@ -2,6 +2,7 @@
 #include "audio/spu_emulator.h"
 #include <cstdio>
 #include <cstdlib>
+#include <cmath>
 #include <vector>
 
 using namespace personarm;
@@ -177,8 +178,51 @@ static void TestRegsAndReverb() {
     }
 }
 
+static void TestTimedOutputAndCd() {
+    { // pacing: N cycles -> floor(N/768) frames, remainder carried across calls
+        SpuEmulator s; std::vector<int16_t> o;
+        s.Tick(767); s.TakeAudio(o); CHECK(o.empty());
+        s.Tick(1); s.TakeAudio(o); CHECK(o.size() == 2);
+        for (int i = 0; i < 60; ++i) s.Tick(564480); // one second of NTSC frames
+        s.TakeAudio(o); CHECK(o.size() == 2 * 44100);
+        s.TakeAudio(o); CHECK(o.empty());
+    }
+    { // CD audio: scaled by CD volume when SPUCNT bit 0 set; independent of SPU mute; FIFO consumed
+        SpuEmulator s; std::vector<int16_t> o;
+        const int16_t cd[8] = { 16000, -16000, 16000, -16000, 16000, -16000, 16000, -16000 };
+        s.Write16(0x1F801DB0, 0x4000); s.Write16(0x1F801DB2, 0x7FFF); // CD vol L 0.5, R ~1.0
+        s.Write16(0x1F801DAA, 0x0001);                                // CD on, SPU off+muted
+        s.SetMasterVolume(0x3FFF, 0x3FFF);                            // main ~1.0
+        s.PushCdAudio(cd, 4); CHECK(s.CdAudioQueued() == 4);
+        s.GenerateSamples(o, 5);
+        CHECK(std::abs(o[0] - 8000) <= 2 && std::abs(o[1] + 16000) <= 2);
+        CHECK(o[8] == 0 && o[9] == 0 && s.CdAudioQueued() == 0); // underrun -> silence
+        s.Write16(0x1F801DAA, 0xC000);                              // CD audio disabled: consumed, not heard
+        s.PushCdAudio(cd, 2); s.GenerateSamples(o, 2);
+        CHECK(o[0] == 0 && o[3] == 0 && s.CdAudioQueued() == 0);
+        s.Write16(0x1F801DAA, 0x0001); s.Write16(0x1F801DB0, 0); s.Write16(0x1F801DB2, 0);
+        s.PushCdAudio(cd, 1); s.GenerateSamples(o, 1); CHECK(o[0] == 0 && o[1] == 0); // volume 0
+        s.SetMasterVolume(0x2000, 0x2000); s.Write16(0x1F801DB0, 0x7FFF);
+        s.PushCdAudio(cd, 1); s.GenerateSamples(o, 1); CHECK(std::abs(o[0] - 8000) <= 2); // main vol applies
+    }
+    { // SPU RAM -> DMA read at the transfer address, wrapping at 512 KiB
+        SpuEmulator s; const uint8_t d[4] = { 1, 2, 3, 4 };
+        s.UploadToRam(0x7FFFE, d, 2); s.UploadToRam(0, d + 2, 2);
+        s.Write16(0x1F801DA6, 0x7FFFE >> 3); // 8-byte units: 0x7FFF8
+        uint8_t r[8] = {}; s.DmaRead(r, 8);
+        CHECK(r[6] == 1 && r[7] == 2 && s.Read16(0x1F801DA6) == 0);
+        uint8_t r2[2]; s.DmaRead(r2, 2); CHECK(r2[0] == 3 && r2[1] == 4);
+    }
+    { // SPUSTAT: mode bits mirror SPUCNT, DMA write/read request bits follow the transfer mode
+        SpuEmulator s;
+        s.Write16(0x1F801DAA, 0xC020); CHECK(s.Read16(0x1F801DAE) == 0x01A0); // DMA write: 5,7,8
+        s.Write16(0x1F801DAA, 0xC030); CHECK(s.Read16(0x1F801DAE) == 0x02B0); // DMA read: 4,5,7,9
+        s.Write16(0x1F801DAA, 0xC001); CHECK(s.Read16(0x1F801DAE) == 0x0001);
+    }
+}
+
 int main() {
-    TestAdpcm(); TestLoopAndPitch(); TestAdsr(); TestGaussAndMix(); TestRegsAndReverb();
+    TestAdpcm(); TestLoopAndPitch(); TestAdsr(); TestGaussAndMix(); TestRegsAndReverb(); TestTimedOutputAndCd();
     std::printf(g_fail ? "SPU tests FAILED (%d)\n" : "SPU tests passed\n", g_fail);
     return g_fail ? 1 : 0;
 }

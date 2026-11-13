@@ -90,11 +90,9 @@ public:
     hw::Dma& GetDma() { return *m_dma; }
     hw::Mdec& GetMdec() { return *m_mdec; }
 
-    /// CD XA-ADPCM audio decoded since the last call: 44.1 kHz stereo (L,R interleaved), scaled by
-    /// SPUCNT bit 0 (CD audio enable) and the SPU CD volume (1F801DB0h/B2h). Moves the data out.
-    // shortcut: kept apart from the SPU voice mix (SpuEmulator::GenerateSamples is not clocked by the
-    // engine yet); mix it in there once the SPU runs on emulated time.
-    std::vector<int16_t> TakeXaAudio() { return std::move(m_xa_audio); }
+    /// SPU output (voices + CD/XA audio + reverb) produced since the last call: 44.1 kHz stereo,
+    /// L,R interleaved, one frame per 768 emulated CPU cycles. Replaces `out`'s contents.
+    void TakeAudio(std::vector<int16_t>& out) { m_spu.TakeAudio(out); }
 
     /// Physical bus access as the CPU sees it (tests, tooling).
     uint32_t Read(uint32_t address, uint32_t size) { return ReadBus(address, size); }
@@ -119,6 +117,9 @@ public:
     /// --input-script: one "<frame> <button> [<hold>]" per line, '#' comments. False (and the 1-based
     /// line in bad_line) on the first bad line.
     static bool ParsePadScript(std::istream& in, std::vector<PadPress>& out, size_t& bad_line);
+    /// Live pad state (host input), same bit layout as PadPress::mask; merged with the script and
+    /// InputManager on every pad read until changed.
+    void SetPadButtons(uint16_t mask) { m_pad_buttons = mask; }
     /// Buttons held by the script at the current frame (bit set = pressed).
     uint16_t ScriptedButtons() const;
 
@@ -207,7 +208,7 @@ private:
     std::unique_ptr<hw::Mdec> m_mdec;
     XaAdpcmDecoder m_xa;
     XaResampler m_xa_resampler;
-    std::vector<int16_t> m_xa_pcm, m_xa_out, m_xa_audio;
+    std::vector<int16_t> m_xa_pcm, m_xa_out;
     void OnXaSector(const uint8_t* raw2352);
     StepHook m_step_hook;
     std::function<void(uint32_t)> m_kon_hook;
@@ -230,6 +231,7 @@ private:
     bool m_joy_ack_low = false, m_joy_irq = false;
     uint32_t m_joy_ack_timer = 0;  // cycles until /ACK (0 = none pending)
     std::vector<PadPress> m_pad_script;
+    uint16_t m_pad_buttons = 0;
 
     uint64_t m_frame_counter = 0;
 
