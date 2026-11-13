@@ -62,7 +62,7 @@
                     desarrollo activo. Reconstruye el hardware de PlayStation 1 que necesita el juego.
                     Todavía no se puede jugar, pero el ejecutable real del juego ya reproduce su intro, muestra la
                     pantalla de título y, en una partida nueva, llega al movimiento libre del personaje y al
-                    menú principal, en una ventana SDL3 opcional.
+                    menú principal, en una ventana SDL3 opcional, con música y efectos de sonido.
                 </p>
                 <div class="actions">
                     <a class="btn btn-primary" href="#start">Empezar</a>
@@ -156,10 +156,11 @@
             <p class="intro reveal">PersonaRM está en desarrollo activo y todavía no se puede jugar. El plan:
                 lograr una CPU demostrablemente correcta, terminar el núcleo de la máquina, arrancar el juego y después compilar su código por
                 adelantado.</p>
-            <p class="intro reveal"><strong>Fase actual: paso 3 de 6, primer arranque.</strong> La CPU y el núcleo de la máquina
-                están terminados. El disco 1 reproduce su intro con sonido, muestra la pantalla de título y, en una partida nueva, llega al movimiento
+            <p class="intro reveal"><strong>Fase actual: paso 4 de 6, recompilación estática (recién empezada).</strong> La CPU y el núcleo de la máquina
+                están terminados. El paso 3, primer arranque, sigue en curso para avanzar más en el juego. El disco 1 reproduce su intro con sonido, muestra la pantalla de título y, en una partida nueva, llega al movimiento
                 libre y al menú principal. El arranque coincide con el emulador de referencia PCSX-Redux hasta las primeras
-                cargas de overlays. Siguiente: audio SPU, avanzar más en el juego y luego la recompilación estática.</p>
+                cargas de overlays. Ya suenan la música y los efectos de sonido, con la SPU en tiempo emulado. El primer
+                recompilador traduce funciones MIPS a C++, pero todavía no ejecuta el juego. Siguiente: overlays y una comparación con el arranque real.</p>
             <div class="status-table reveal" role="table" aria-label="Estado de los subsistemas">
                 <div class="row head" role="row"><span role="columnheader">Subsistema</span><span
                         role="columnheader">Estado</span></div>
@@ -173,8 +174,10 @@
                         class="tag ok">Suite de conformidad superada</span></div>
                 <div class="row" role="row"><span role="cell">GTE y rasterizador de GPU</span><span role="cell"
                         class="tag ok">Implementado</span></div>
-                <div class="row" role="row"><span role="cell">Vídeo MDEC, audio XA y SPU</span><span role="cell"
+                <div class="row" role="row"><span role="cell">Vídeo MDEC y audio XA</span><span role="cell"
                         class="tag progress">Integrado, temporización aproximada</span></div>
+                <div class="row" role="row"><span role="cell">Audio SPU</span><span role="cell"
+                        class="tag progress">Música y efectos suenan; interpolación aproximada</span></div>
                 <div class="row" role="row"><span role="cell">BIOS HLE y eventos del kernel</span><span role="cell"
                         class="tag ok">Implementado</span></div>
                 <div class="row" role="row"><span role="cell">Interrupciones, VBlank y temporizadores</span><span role="cell"
@@ -184,9 +187,9 @@
                 <div class="row" role="row"><span role="cell">Arranque del juego real</span><span role="cell"
                         class="tag progress">Movimiento libre y menú principal</span></div>
                 <div class="row" role="row"><span role="cell">Recompilador estático</span><span role="cell"
-                        class="tag prototype">Sin empezar</span></div>
+                        class="tag progress">v0: generación de C++ por función, G2 sintético superado; todavía no ejecuta el juego</span></div>
                 <div class="row" role="row"><span role="cell">Ventana, entrada y audio (SDL3)</span><span role="cell"
-                        class="tag progress">Funciona; falta el audio SPU</span></div>
+                        class="tag progress">Funciona; mezcla completa de SPU y CD/XA en la ventana</span></div>
             </div>
         </section>
 
