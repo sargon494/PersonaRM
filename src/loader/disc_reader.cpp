@@ -6,6 +6,12 @@
 #include <sstream>
 #include <filesystem>
 
+namespace {
+// memcpy: image fields are not 4-byte aligned (unaligned uint32_t* reads are UB).
+uint32_t LoadLE32(const uint8_t* p) { uint32_t v; std::memcpy(&v, p, 4); return v; }
+}
+
+
 namespace personarm {
 
 namespace fs = std::filesystem;
@@ -213,8 +219,8 @@ bool DiscReader::ParseIso9660Volume() {
     // Offset 156 + 2: Location of extent (LBA) in Little-Endian (4 bytes)
     // Offset 156 + 10: Data length in Little-Endian (4 bytes)
     const uint8_t* root_record = sector.data() + 156;
-    uint32_t root_lba = *reinterpret_cast<const uint32_t*>(root_record + 2);
-    uint32_t root_len = *reinterpret_cast<const uint32_t*>(root_record + 10);
+    uint32_t root_lba = LoadLE32(root_record + 2);
+    uint32_t root_len = LoadLE32(root_record + 10);
 
     ReadDirectorySectors(root_lba, root_len, "");
     return !m_file_table.empty();
@@ -242,8 +248,8 @@ void DiscReader::ReadDirectorySectors(uint32_t lba, uint32_t length_bytes, const
                 break;
             }
 
-            uint32_t file_lba = *reinterpret_cast<const uint32_t*>(&buffer[pos + 2]);
-            uint32_t file_size = *reinterpret_cast<const uint32_t*>(&buffer[pos + 10]);
+            uint32_t file_lba = LoadLE32(&buffer[pos + 2]);
+            uint32_t file_size = LoadLE32(&buffer[pos + 10]);
             uint8_t flags = buffer[pos + 25];
             uint8_t name_len = buffer[pos + 32];
 
@@ -464,11 +470,11 @@ ExecutableInfo DiscReader::ParseExecutable(const uint8_t* data, size_t size) {
     if (std::memcmp(data, "PS-X EXE", 8) == 0 && size >= 2048) {
         info.valid = true;
         info.format = "PS-X EXE";
-        info.entry_point = *reinterpret_cast<const uint32_t*>(data + 0x10);
-        info.gp_value = *reinterpret_cast<const uint32_t*>(data + 0x14);
+        info.entry_point = LoadLE32(data + 0x10);
+        info.gp_value = LoadLE32(data + 0x14);
 
-        uint32_t load_address = *reinterpret_cast<const uint32_t*>(data + 0x18);
-        uint32_t data_size = *reinterpret_cast<const uint32_t*>(data + 0x1C);
+        uint32_t load_address = LoadLE32(data + 0x18);
+        uint32_t data_size = LoadLE32(data + 0x1C);
 
         ExecutableSegment seg;
         seg.virtual_address = load_address;
@@ -484,9 +490,9 @@ ExecutableInfo DiscReader::ParseExecutable(const uint8_t* data, size_t size) {
     if (data[0] == 0x7F && data[1] == 'E' && data[2] == 'L' && data[3] == 'F' && size >= 52) {
         info.valid = true;
         info.format = "ELF";
-        info.entry_point = *reinterpret_cast<const uint32_t*>(data + 0x18);
+        info.entry_point = LoadLE32(data + 0x18);
 
-        uint32_t ph_offset = *reinterpret_cast<const uint32_t*>(data + 0x1C);
+        uint32_t ph_offset = LoadLE32(data + 0x1C);
         uint16_t ph_entry_size = *reinterpret_cast<const uint16_t*>(data + 0x2A);
         uint16_t ph_count = *reinterpret_cast<const uint16_t*>(data + 0x2C);
 
@@ -495,14 +501,14 @@ ExecutableInfo DiscReader::ParseExecutable(const uint8_t* data, size_t size) {
                 const uint8_t* ph = data + ph_offset + (i * ph_entry_size);
                 if (ph + 32 > data + size) break;
 
-                uint32_t type = *reinterpret_cast<const uint32_t*>(ph + 0);
+                uint32_t type = LoadLE32(ph + 0);
                 if (type == 1) { // PT_LOAD segment
                     ExecutableSegment seg;
-                    seg.file_offset = *reinterpret_cast<const uint32_t*>(ph + 4);
-                    seg.virtual_address = *reinterpret_cast<const uint32_t*>(ph + 8);
-                    seg.file_size = *reinterpret_cast<const uint32_t*>(ph + 16);
-                    seg.mem_size = *reinterpret_cast<const uint32_t*>(ph + 20);
-                    seg.flags = *reinterpret_cast<const uint32_t*>(ph + 24);
+                    seg.file_offset = LoadLE32(ph + 4);
+                    seg.virtual_address = LoadLE32(ph + 8);
+                    seg.file_size = LoadLE32(ph + 16);
+                    seg.mem_size = LoadLE32(ph + 20);
+                    seg.flags = LoadLE32(ph + 24);
                     info.segments.push_back(seg);
                 }
             }

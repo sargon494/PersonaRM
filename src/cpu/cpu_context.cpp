@@ -260,7 +260,7 @@ void CpuContext::ExecuteInstruction(uint32_t opcode) {
             }
 
             if (condition) {
-                ScheduleBranch(m_regs.pc + (simm << 2));
+                ScheduleBranch(m_regs.pc + (static_cast<uint32_t>(simm) << 2));
             }
             break;
         }
@@ -276,25 +276,25 @@ void CpuContext::ExecuteInstruction(uint32_t opcode) {
 
         case 0x04: // BEQ (Branch on Equal)
             if (rs_val == rt_val) {
-                ScheduleBranch(m_regs.pc + (simm << 2));
+                ScheduleBranch(m_regs.pc + (static_cast<uint32_t>(simm) << 2));
             }
             break;
 
         case 0x05: // BNE (Branch on Not Equal)
             if (rs_val != rt_val) {
-                ScheduleBranch(m_regs.pc + (simm << 2));
+                ScheduleBranch(m_regs.pc + (static_cast<uint32_t>(simm) << 2));
             }
             break;
 
         case 0x06: // BLEZ (Branch on Less Than or Equal to Zero)
             if (static_cast<int32_t>(rs_val) <= 0) {
-                ScheduleBranch(m_regs.pc + (simm << 2));
+                ScheduleBranch(m_regs.pc + (static_cast<uint32_t>(simm) << 2));
             }
             break;
 
         case 0x07: // BGTZ (Branch on Greater Than Zero)
             if (static_cast<int32_t>(rs_val) > 0) {
-                ScheduleBranch(m_regs.pc + (simm << 2));
+                ScheduleBranch(m_regs.pc + (static_cast<uint32_t>(simm) << 2));
             }
             break;
 
