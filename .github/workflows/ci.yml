@@ -132,6 +132,29 @@ jobs:
           path: build/Release/
           retention-days: 7
 
+  # ASan + UBSan: catches out-of-bounds VRAM/RAM/FIFO indexing and UB in the emulator core.
+  unit-tests-sanitizers:
+    name: Unit Tests - Linux (ASan + UBSan)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure CMake
+        run: >
+          cmake -B build-san -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTS=ON
+          -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer"
+          -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+
+      - name: Build
+        run: cmake --build build-san -j 4
+
+      - name: Run unit tests
+        env:
+          ASAN_OPTIONS: detect_leaks=1:abort_on_error=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: ctest --test-dir build-san --output-on-failure
+
   # ───────────────────────────────────────────────────────────────────────
   # Integration Tests
   # ───────────────────────────────────────────────────────────────────────
