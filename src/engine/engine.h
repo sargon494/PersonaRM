@@ -19,6 +19,8 @@
 #include "trace/trace.h"
 #include "hw/cdrom.h"
 #include "hw/dma.h"
+#include "hw/mdec.h"
+#include "audio/xa_adpcm.h"
 
 namespace personarm {
 
@@ -86,6 +88,13 @@ public:
     Ps1BiosHle& GetBios() { return m_bios; }
     hw::CdRom& GetCdRom() { return *m_cdrom; }
     hw::Dma& GetDma() { return *m_dma; }
+    hw::Mdec& GetMdec() { return *m_mdec; }
+
+    /// CD XA-ADPCM audio decoded since the last call: 44.1 kHz stereo (L,R interleaved), scaled by
+    /// SPUCNT bit 0 (CD audio enable) and the SPU CD volume (1F801DB0h/B2h). Moves the data out.
+    // shortcut: kept apart from the SPU voice mix (SpuEmulator::GenerateSamples is not clocked by the
+    // engine yet); mix it in there once the SPU runs on emulated time.
+    std::vector<int16_t> TakeXaAudio() { return std::move(m_xa_audio); }
 
     /// Physical bus access as the CPU sees it (tests, tooling).
     uint32_t Read(uint32_t address, uint32_t size) { return ReadBus(address, size); }
@@ -128,6 +137,8 @@ public:
     void GetCurrentFrame(std::vector<uint32_t>& out_rgba, uint32_t& out_w, uint32_t& out_h);
 
     uint64_t GetFrameCount() const { return m_frame_counter; }
+    /// Emulated time in CPU cycles: instructions plus memory stall cycles.
+    uint64_t GetCycles() const { return m_cpu.GetCycleCount() + m_stall_cycles; }
 
     /// Execution trace (docs/TRACE_FORMAT.md). Null = off. The sink must outlive its use;
     /// Shutdown() emits `end` and detaches it.
@@ -168,7 +179,13 @@ private:
         uint32_t ReadWord(uint32_t a) override;
         void WriteWord(uint32_t a, uint32_t v) override;
     };
-    uint64_t m_timer_cycles = 0; // CPU cycle count the timers were last advanced to
+    uint64_t m_timer_cycles = 0; // GetCycles() value the timers were last advanced to
+    // CpuContext counts 1 cycle per instruction; main-RAM data loads stall the R3000 (no D-cache).
+    // Without this, libetc VSync()'s spin timeout (n<<15 loop passes) expires before the next
+    // VBlank and prints "VSync: timeout" during FMVs. Instruction fetches are taken as I-cache hits.
+    // unverified: 4 extra cycles per RAM load is an emulator-folklore figure, not measured.
+    static constexpr uint32_t kRamLoadStallCycles = 4;
+    uint64_t m_stall_cycles = 0;
 
     EngineState m_state = EngineState::Uninitialized;
     EngineBootConfig m_config;
@@ -184,6 +201,11 @@ private:
     std::unique_ptr<RamDma> m_dma_mem;
     std::unique_ptr<hw::CdRom> m_cdrom;
     std::unique_ptr<hw::Dma> m_dma;
+    std::unique_ptr<hw::Mdec> m_mdec;
+    XaAdpcmDecoder m_xa;
+    XaResampler m_xa_resampler;
+    std::vector<int16_t> m_xa_pcm, m_xa_out, m_xa_audio;
+    void OnXaSector(const uint8_t* raw2352);
     StepHook m_step_hook;
     std::function<void(uint32_t)> m_kon_hook;
     uint32_t m_boot_sp = 0x801FFFF0; // SYSTEM.CNF STACK (BIOS default) when the EXE header has none

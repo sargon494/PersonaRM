@@ -62,6 +62,11 @@ void Dma::TryStart(int ch) {
     if (!(m_dpcr & (8u << (ch * 4)))) return;
     c.chcr &= ~0x10000000u;
     c.running = true;
+    if (sync == 1 && c.port.request) {
+        c.paced = true;
+        c.pending = 0;
+        return;
+    }
     c.pending = Transfer(ch) * kCyclesPerWord + 1;
 }
 
@@ -108,6 +113,16 @@ uint32_t Dma::Transfer(int ch) {
         if (bs == 0) bs = 0x10000;  // unverified: zero block size means 0x10000
         n = bs * ba;
     }
+    addr = MoveWords(ch, addr, n);
+    if (sync == 1) {  // MADR advances and the block count reaches 0
+        c.madr = addr;
+        c.bcr &= 0xFFFF;
+    }
+    return n;
+}
+
+uint32_t Dma::MoveWords(int ch, uint32_t addr, uint32_t n) {
+    Chan& c = m_ch[ch];
     const bool to_device = (c.chcr & 1) != 0;
     const uint32_t step = (c.chcr & 2) ? static_cast<uint32_t>(-4) : 4u;
     for (uint32_t i = 0; i < n; ++i, addr = (addr + step) & kAddrMask) {
@@ -118,11 +133,7 @@ uint32_t Dma::Transfer(int ch) {
             m_mem.WriteWord(addr, c.port.read ? c.port.read() : 0xFFFFFFFFu);  // unverified: open bus value
         }
     }
-    if (sync == 1) {  // MADR advances and the block count reaches 0
-        c.madr = addr;
-        c.bcr &= 0xFFFF;
-    }
-    return n;
+    return addr;
 }
 
 void Dma::Complete(int ch) {
@@ -147,6 +158,19 @@ void Dma::Tick(uint32_t cycles) {
     for (int ch = 0; ch < kNumChannels; ++ch) {
         Chan& c = m_ch[ch];
         if (!c.running) continue;
+        if (c.paced) {
+            // One block per DRQ; MADR advances and the block count (BCR 31-16) counts down.
+            uint32_t bs = c.bcr & 0xFFFF;
+            if (bs == 0) bs = 0x10000;
+            while ((c.bcr >> 16) && c.port.request()) {
+                c.madr = MoveWords(ch, c.madr & kAddrMask, bs);
+                c.bcr -= 0x10000;
+            }
+            if (c.bcr >> 16) continue;
+            c.paced = false;
+            c.pending = 1;  // completes on the next Tick
+            continue;
+        }
         c.pending = c.pending > cycles ? c.pending - cycles : 0;
         if (c.pending == 0) Complete(ch);
     }

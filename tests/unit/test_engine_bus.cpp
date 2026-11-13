@@ -140,6 +140,27 @@ static void TestTimer1Hblank(Engine& e) {
     CHECK(v >= 262 && v <= 264);  // 263 lines per frame, not sysclk (libetc VSync() needs this)
 }
 
+// MDEC on the bus with DMA1 (out) started before DMA0 (in), as PsyQ does; RAM loads stall.
+static void TestMdecDmaAndRamStall(Engine& e) {
+    e.Write(0x1F801824, 0xE0000000, 4);  // reset, enable DREQ0/DREQ1
+    CHECK(e.Read(0x1F801824, 4) == 0x80040000);
+    for (int i = 0; i < 6; ++i) e.Write(0x80120000 + 4 * i, 0xFE000400, 4);  // DC 0, end of block
+    e.Write(0x1F8010F0, 0x000000BB, 4);   // DPCR: DMA0, DMA1
+    e.Write(0x1F801090, 0x00130000, 4);   // DMA1 -> 0x130000, 6 blocks of 32 words (one macroblock)
+    e.Write(0x1F801094, 0x00060020, 4);
+    e.Write(0x1F801098, 0x01000200, 4);
+    e.Write(0x1F801820, 0x30000006, 4);   // 24-bit unsigned decode, 6 words
+    e.Write(0x1F801080, 0x00120000, 4);
+    e.Write(0x1F801084, 0x00010006, 4);
+    e.Write(0x1F801088, 0x01000201, 4);
+    for (int i = 0; i < 10; ++i) { e.GetMdec().Tick(500); e.GetDma().Tick(500); }
+    CHECK(!e.GetDma().Busy(0) && !e.GetDma().Busy(1));
+    CHECK(e.Read(0x80130000, 4) == 0x80808080 && e.Read(0x80130000 + 4 * 191, 4) == 0x80808080);
+    const uint64_t c = e.GetCycles();
+    e.Read(0x80001000, 4);
+    CHECK(e.GetCycles() == c + 4);
+}
+
 static void TestSystemCnfStack() {
     using personarm::ParseSystemCnfStack;
     CHECK(ParseSystemCnfStack("BOOT = cdrom:\\SLPS_027.85;1\r\nTCB = 4\r\nEVENT = 10\r\nSTACK = 801FFF00\r\n", 1) == 0x801FFF00);
@@ -209,6 +230,7 @@ int main() {
     TestCdRom(e);
     TestSpu(e);
     TestTimer1Hblank(e);
+    TestMdecDmaAndRamStall(e);
     TestSystemCnfStack();
     TestPadScript(e);
     TestSio0AckAndNoCard(e);

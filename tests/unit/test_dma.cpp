@@ -2,6 +2,7 @@
 #undef NDEBUG
 #include <cstdio>
 #include <cstdlib>
+#include <deque>
 #include <vector>
 
 #include "hw/dma.h"
@@ -85,6 +86,36 @@ static void TestBurstNeedsTriggerAndDpcr() {
     CHECK(reads == 4 && ram.at(0) == 1 && ram.at(12) == 4);
 }
 
+// MDEC-style DRQ pacing: DMA1 (out) is started before DMA0 (in) and must wait for data.
+static void TestRequestPacedOutBeforeIn() {
+    Ram ram;
+    Dma dma(ram);
+    std::deque<uint32_t> fifo;
+    bool in_open = true;
+    dma.SetPort(Dma::kMdecIn, {nullptr, [&](uint32_t v) { fifo.push_back(v * 10); }, [&] { return in_open; }});
+    dma.SetPort(Dma::kMdecOut, {[&] { uint32_t v = fifo.front(); fifo.pop_front(); return v; }, nullptr,
+                                [&] { return fifo.size() >= 4; }});
+    for (uint32_t i = 0; i < 8; ++i) ram.at(0x1000 + 4 * i) = i + 1;
+    dma.Write32(0x70, 0x000000BB);  // enable DMA0 and DMA1
+    dma.Write32(Reg(1, 0), 0x2000);
+    dma.Write32(Reg(1, 4), 0x00020004);  // 2 blocks of 4 words
+    dma.Write32(Reg(1, 8), 0x01000200);  // MDEC -> RAM, slice mode
+    dma.Tick(100);
+    CHECK(dma.Busy(Dma::kMdecOut) && ram.at(0x2000) == 0);  // no data yet: nothing moved
+    in_open = false;
+    dma.Write32(Reg(0, 0), 0x1000);
+    dma.Write32(Reg(0, 4), 0x00020004);
+    dma.Write32(Reg(0, 8), 0x01000201);  // RAM -> MDEC
+    dma.Tick(1);
+    CHECK(fifo.empty() && dma.Busy(Dma::kMdecIn));  // DRQ low: waits
+    in_open = true;
+    dma.Tick(1);  // DMA0 moves both blocks, then DMA1 drains them
+    dma.Tick(1);
+    CHECK(!dma.Busy(Dma::kMdecIn) && !dma.Busy(Dma::kMdecOut));
+    for (uint32_t i = 0; i < 8; ++i) CHECK(ram.at(0x2000 + 4 * i) == (i + 1) * 10);
+    CHECK(dma.Read32(Reg(1, 0)) == 0x2020 && (dma.Read32(Reg(1, 4)) >> 16) == 0);
+}
+
 static void TestDicr() {
     Ram ram;
     Dma dma(ram);
@@ -133,6 +164,7 @@ int main() {
     TestBlockToDevice();
     TestBurstNeedsTriggerAndDpcr();
     TestDicr();
+    TestRequestPacedOutBeforeIn();
     std::printf("test_dma: OK\n");
     return 0;
 }

@@ -72,6 +72,7 @@ static void PrintUsage(const char* prog) {
               << "                     --dump-ram <file>      2 MB RAM image at stop\n"
               << "                     --dump-vram <png>      1024x512 VRAM at stop\n"
               << "                     --dump-frames <dir> --every N   display area PNG every N frames\n"
+              << "                     --dump-audio <wav>     CD XA audio, 16-bit stereo 44.1 kHz\n"
               << "                     --press <btn>@<frame>[+<n>]     hold a pad button n frames (default 5)\n"
               << "                     --watch-pc <hex>       log the first 20 hits of a PC (repeatable)\n"
               << "  --config           Open interactive settings menu\n"
@@ -792,7 +793,7 @@ struct BootMilestones { uint32_t main, scene_loop, load_file, cd_read_start, sce
 
 struct BootOptions {
     uint64_t max_frames = 600;
-    std::string dump_ram, dump_vram, dump_frames;
+    std::string dump_ram, dump_vram, dump_frames, dump_audio;
     uint64_t every = 60;
     bool stop_at_first_load = false;
     std::vector<personarm::Engine::PadPress> presses;
@@ -833,6 +834,20 @@ static void DisplayToRgba(const personarm::Ps1Gpu& gpu, std::vector<uint32_t>& o
     }
 }
 
+// 16-bit stereo 44.1 kHz PCM WAV (RIFF, little-endian host assumed).
+static bool WriteWav(const std::string& path, const std::vector<int16_t>& pcm) {
+    std::ofstream f(path, std::ios::binary);
+    auto u32 = [&](uint32_t v) { f.write(reinterpret_cast<const char*>(&v), 4); };
+    auto u16 = [&](uint16_t v) { f.write(reinterpret_cast<const char*>(&v), 2); };
+    const uint32_t bytes = static_cast<uint32_t>(pcm.size() * 2);
+    f.write("RIFF", 4); u32(36 + bytes); f.write("WAVEfmt ", 8);
+    u32(16); u16(1); u16(2); u32(44100); u32(44100 * 4); u16(4); u16(16);
+    f.write("data", 4); u32(bytes);
+    f.write(reinterpret_cast<const char*>(pcm.data()), bytes);
+    if (!f) std::cerr << "[BOOT] cannot write " << path << "\n";
+    return static_cast<bool>(f);
+}
+
 static int RunBootHarness(const std::string& disc_path, const BootOptions& opt) {
     using personarm::Engine;
     auto& engine = Engine::Instance();
@@ -853,7 +868,7 @@ static int RunBootHarness(const std::string& disc_path, const BootOptions& opt) 
     auto hex = [](uint32_t v) { char b[16]; std::snprintf(b, sizeof b, "0x%08X", v); return std::string(b); };
     auto stamp = [&]() {
         return "[BOOT f=" + std::to_string(engine.GetFrameCount()) + " cyc=" +
-               std::to_string(engine.GetCpu().GetCycleCount()) + "] ";
+               std::to_string(engine.GetCycles()) + "] ";
     };
     std::cout << stamp() << "disc " << (disc.recognized ? disc.product_id : std::string("unknown"))
               << " entry pc=" << hex(engine.GetCpu().GetPC()) << " sp=" << hex(engine.GetCpu().GetGPR(29)) << "\n";
@@ -914,8 +929,15 @@ static int RunBootHarness(const std::string& disc_path, const BootOptions& opt) 
     std::set<uint32_t> disp_starts;
     std::vector<uint32_t> frame;
     uint32_t fw = 0, fh = 0;
+    std::vector<int16_t> audio;
+    bool seen_xa = false;
     while (engine.GetFrameCount() < opt.max_frames && engine.GetState() == personarm::EngineState::Running) {
         engine.RunFrame();
+        {
+            const std::vector<int16_t> xa = engine.TakeXaAudio();
+            if (!xa.empty() && !seen_xa) seen_xa = true, std::cout << stamp() << "first XA audio sector\n";
+            if (!opt.dump_audio.empty()) audio.insert(audio.end(), xa.begin(), xa.end());
+        }
         auto& gpu = engine.GetGpu();
         if (!seen_poly && gpu.GetPolygonCount()) {
             seen_poly = true;
@@ -972,6 +994,7 @@ static int RunBootHarness(const std::string& disc_path, const BootOptions& opt) 
         std::ofstream f(opt.dump_ram, std::ios::binary);
         f.write(reinterpret_cast<const char*>(engine.GetRam().data()), static_cast<std::streamsize>(engine.GetRam().size()));
     }
+    if (!opt.dump_audio.empty()) WriteWav(opt.dump_audio, audio);  // keep it out of the repo
     if (!opt.dump_vram.empty()) { // whole 1024x512 VRAM as 15-bit colour (keep it out of the repo)
         const auto& vram = engine.GetGpu().GetVram();
         std::vector<uint32_t> rgba(vram.size());
@@ -1036,6 +1059,7 @@ int main(int argc, char* argv[]) {
                     if (std::strcmp(argv[k], "--dump-ram") == 0) opt.dump_ram = argv[k + 1];
                     if (std::strcmp(argv[k], "--dump-vram") == 0) opt.dump_vram = argv[k + 1];
                     if (std::strcmp(argv[k], "--dump-frames") == 0) opt.dump_frames = argv[k + 1];
+                    if (std::strcmp(argv[k], "--dump-audio") == 0) opt.dump_audio = argv[k + 1];
                     if (std::strcmp(argv[k], "--watch-pc") == 0) opt.watch_pcs.push_back(std::strtoul(argv[k + 1], nullptr, 16));
                     if (std::strcmp(argv[k], "--trace-out") == 0)
                         personarm::Engine::Instance().SetTraceOutput(argv[k + 1]);
@@ -1053,7 +1077,7 @@ int main(int argc, char* argv[]) {
             }
             if (std::strcmp(argv[i], "--stop-at-first-load") == 0) continue; // read by --boot
             if (std::strcmp(argv[i], "--max-frames") == 0 || std::strcmp(argv[i], "--dump-ram") == 0 ||
-                std::strcmp(argv[i], "--dump-vram") == 0 || std::strcmp(argv[i], "--dump-frames") == 0 ||
+                std::strcmp(argv[i], "--dump-vram") == 0 || std::strcmp(argv[i], "--dump-frames") == 0 || std::strcmp(argv[i], "--dump-audio") == 0 ||
                 std::strcmp(argv[i], "--every") == 0 || std::strcmp(argv[i], "--press") == 0 ||
                 std::strcmp(argv[i], "--watch-pc") == 0) { ++i; continue; } // read by --boot
             if (std::strcmp(argv[i], "--launch") == 0) {

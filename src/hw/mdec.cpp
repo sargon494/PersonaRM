@@ -20,6 +20,18 @@ void Mdec::Reset() {
     m_dec = mdec::BlockDecoder{};
     m_block = 0;
     m_out.clear();
+    m_ready = 0;
+    m_pending.clear();
+}
+
+void Mdec::Tick(uint32_t cycles) {
+    while (!m_pending.empty()) {
+        Pending& p = m_pending.front();
+        if (p.cycles > cycles) { p.cycles -= cycles; return; }
+        cycles -= p.cycles;
+        m_ready += p.words;
+        m_pending.pop_front();
+    }
 }
 
 // psx-spx MDEC status: 31 out-FIFO empty, 30 in-FIFO full/last word, 29 busy, 28 DREQ0, 27 DREQ1,
@@ -27,11 +39,11 @@ void Mdec::Reset() {
 // 15-0 parameter words remaining minus 1.
 // unverified: busy also covers undrained output; current block always reports the incoming block.
 uint32_t Mdec::Status() const {
-    const bool out_empty = m_out.empty();
+    const bool out_empty = m_ready == 0;
     uint32_t s = 0;
     if (out_empty) s |= 1u << 31;
     if (m_last_word) s |= 1u << 30;
-    if (m_left > 0 || !out_empty) s |= 1u << 29;
+    if (m_left > 0 || !m_out.empty()) s |= 1u << 29;
     if (m_en_in && m_left > 0) s |= 1u << 28;
     if (m_en_out && !out_empty) s |= 1u << 27;
     s |= ((m_cmd >> 25) & 0xF) << 23;
@@ -42,9 +54,10 @@ uint32_t Mdec::Status() const {
 
 uint32_t Mdec::Read32(uint32_t offset) {
     if ((offset & 4) != 0) return Status();
-    if (m_out.empty()) return 0;
+    if (m_ready == 0) return 0;
     const uint32_t w = m_out.front();
     m_out.pop_front();
+    --m_ready;
     return w;
 }
 
@@ -130,7 +143,7 @@ void Mdec::EmitColor() {
     uint8_t bytes[768];
     for (int i = 0; i < 768; ++i) bytes[i] = static_cast<uint8_t>(rgb[i]) ^ x;
     if (Depth(m_cmd) == 2) {
-        PushBytes(bytes, 768);
+        PushBytes(bytes, 768, 6);
         return;
     }
     uint8_t out[512];
@@ -141,7 +154,7 @@ void Mdec::EmitColor() {
         out[p * 2] = static_cast<uint8_t>(h);
         out[p * 2 + 1] = static_cast<uint8_t>(h >> 8);
     }
-    PushBytes(out, 512);
+    PushBytes(out, 512, 6);
 }
 
 void Mdec::EmitMono(const int16_t y[64]) {
@@ -149,15 +162,16 @@ void Mdec::EmitMono(const int16_t y[64]) {
     uint8_t px[64];
     for (int i = 0; i < 64; ++i) px[i] = static_cast<uint8_t>(mdec::YToMono(y[i])) ^ x;
     if (Depth(m_cmd) == 1) {
-        PushBytes(px, 64);
+        PushBytes(px, 64, 1);
         return;
     }
     uint8_t out[32];
     for (int i = 0; i < 32; ++i) out[i] = static_cast<uint8_t>((px[2 * i] >> 4) | (px[2 * i + 1] & 0xF0));
-    PushBytes(out, 32);
+    PushBytes(out, 32, 1);
 }
 
-void Mdec::PushBytes(const uint8_t* b, size_t n) {
+void Mdec::PushBytes(const uint8_t* b, size_t n, uint32_t blocks) {
+    m_pending.push_back({static_cast<uint32_t>(n / 4), blocks * kCyclesPerBlock});
     for (size_t i = 0; i + 3 < n; i += 4)
         m_out.push_back(b[i] | (b[i + 1] << 8) | (b[i + 2] << 16) | (static_cast<uint32_t>(b[i + 3]) << 24));
 }

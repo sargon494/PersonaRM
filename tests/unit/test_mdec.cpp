@@ -93,6 +93,11 @@ static void TestDeviceColorMacroblock() {
     for (int dc : {64, -64, 0}) m.Write32(0, DcBlock(dc));
     CHECK(((m.Read32(4) >> 16) & 7) == 3);  // block Y4
     m.Write32(0, DcBlock(64));
+    // Decode takes 6 blocks of kCyclesPerBlock: busy, out FIFO still empty, no DREQ1.
+    CHECK(m.Read32(4) == 0xE404FFFF && !m.DataOutRequest());
+    m.Tick(6 * hw::Mdec::kCyclesPerBlock - 1);
+    CHECK(!m.DataOutRequest() && m.Read32(0) == 0);
+    m.Tick(1);
     CHECK(m.Read32(4) == 0x6C04FFFF);  // last word, busy (output pending), DREQ1, none left
     CHECK(m.DataOutRequest() && !m.DataInRequest());
 
@@ -114,6 +119,7 @@ static void TestDeviceColorMacroblock() {
     m.Write32(0, 0x3A000006);
     m.Write32(0, DcBlock(64));
     for (int i = 0; i < 5; ++i) m.Write32(0, DcBlock(0));
+    m.Tick(6 * hw::Mdec::kCyclesPerBlock);
     const uint32_t w = m.Read32(0);
     CHECK((w & 0xFFFF) == 0xC1D2);  // stp | (128>>3)<<10 | (116>>3)<<5 | (150>>3)
 
@@ -126,10 +132,12 @@ static void TestDeviceMono() {
     UploadDefaultTables(m);
     m.Write32(0, 0x28000001);  // 8-bit unsigned, 1 word
     m.Write32(0, DcBlock(64));
+    m.Tick(hw::Mdec::kCyclesPerBlock);
     for (int i = 0; i < 16; ++i) CHECK(m.Read32(0) == 0x90909090u);  // 144
     CHECK(m.Read32(4) & 0x80000000u);
     m.Write32(0, 0x24000001);  // 4-bit signed: +16 -> 1 per nibble
     m.Write32(0, DcBlock(64));
+    m.Tick(hw::Mdec::kCyclesPerBlock);
     for (int i = 0; i < 8; ++i) CHECK(m.Read32(0) == 0x11111111u);
     m.Write32(0, 0x00001234);  // MDEC(0): no function, bits 15-0 to status
     CHECK((m.Read32(4) & 0xFFFF) == 0x1234);
