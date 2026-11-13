@@ -8,30 +8,58 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <string>
 #include <vector>
 
 #include "engine/engine.h"
 #include "host/host_logic.h"
+#include "loader/png_codec.h"
+#include "rendering/frame_interp.h"
 
 using namespace personarm;
 
 static void Usage() {
-    std::fprintf(stderr, "Usage: personarm_sdl <disc.cue> [--frames N] [--screenshot out.bmp]\n"
-                         "  --frames N         quit after N emulated frames\n"
-                         "  --screenshot file  save the last presented frame as BMP on quit\n");
+    std::fprintf(stderr, "Usage: personarm_sdl <disc.cue> [options]\n"
+                         "  --frames N           quit after N emulated frames\n"
+                         "  --screenshot file    save the last presented frame as BMP on quit\n"
+                         "  --input-script file  scripted pad presses (<frame> <button> [<hold>] per line)\n"
+                         "  --interp HZ          present HZ pictures/s (multiple of 60, e.g. 120), synthesizing the\n"
+                         "                       ones between the game's frames (display only, one game frame late)\n"
+                         "  --dump-dir D --dump-from F --dump-to G   every presented picture of frames F..G as PNG\n"
+                         "  --stats              per second: game flips, distinct pictures, interpolable pairs\n"
+                         "  --unthrottled        no 60 Hz pacing    --hidden  no visible window\n");
 }
 
 int main(int argc, char** argv) {
-    std::string disc, screenshot;
-    uint64_t max_frames = 0;
+    std::string disc, screenshot, input_script, dump_dir;
+    uint64_t max_frames = 0, dump_from = 0, dump_to = 0;
+    int interp_hz = 0;
+    bool stats = false, unthrottled = false, hidden = false;
     for (int i = 1; i < argc; ++i) {
         if (!std::strcmp(argv[i], "--frames") && i + 1 < argc) max_frames = std::strtoull(argv[++i], nullptr, 10);
         else if (!std::strcmp(argv[i], "--screenshot") && i + 1 < argc) screenshot = argv[++i];
+        else if (!std::strcmp(argv[i], "--input-script") && i + 1 < argc) input_script = argv[++i];
+        else if (!std::strcmp(argv[i], "--interp") && i + 1 < argc) interp_hz = std::atoi(argv[++i]);
+        else if (!std::strcmp(argv[i], "--dump-dir") && i + 1 < argc) dump_dir = argv[++i];
+        else if (!std::strcmp(argv[i], "--dump-from") && i + 1 < argc) dump_from = std::strtoull(argv[++i], nullptr, 10);
+        else if (!std::strcmp(argv[i], "--dump-to") && i + 1 < argc) dump_to = std::strtoull(argv[++i], nullptr, 10);
+        else if (!std::strcmp(argv[i], "--stats")) stats = true;
+        else if (!std::strcmp(argv[i], "--unthrottled")) unthrottled = true;
+        else if (!std::strcmp(argv[i], "--hidden")) hidden = true;
         else if (argv[i][0] != '-' && disc.empty()) disc = argv[i];
         else { Usage(); return EXIT_FAILURE; }
     }
-    if (disc.empty()) { Usage(); return EXIT_FAILURE; }
+    if (disc.empty() || interp_hz < 0 || interp_hz % 60) { Usage(); return EXIT_FAILURE; }
+    std::vector<Engine::PadPress> presses;
+    if (!input_script.empty()) {
+        std::ifstream in(input_script);
+        size_t bad = 0;
+        if (!in || !Engine::ParsePadScript(in, presses, bad)) {
+            std::fprintf(stderr, "cannot read %s (line %zu)\n", input_script.c_str(), bad);
+            return EXIT_FAILURE;
+        }
+    }
 
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD)) {
         std::fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
@@ -39,7 +67,8 @@ int main(int argc, char** argv) {
     }
     SDL_Window* window = nullptr;
     SDL_Renderer* renderer = nullptr;
-    if (!SDL_CreateWindowAndRenderer("PersonaRM", 960, 720, SDL_WINDOW_RESIZABLE, &window, &renderer)) {
+    if (!SDL_CreateWindowAndRenderer("PersonaRM", 960, 720, SDL_WINDOW_RESIZABLE | (hidden ? SDL_WINDOW_HIDDEN : 0),
+                                     &window, &renderer)) {
         std::fprintf(stderr, "SDL_CreateWindowAndRenderer: %s\n", SDL_GetError());
         SDL_Quit();
         return EXIT_FAILURE;
@@ -59,6 +88,7 @@ int main(int argc, char** argv) {
         SDL_Quit();
         return EXIT_FAILURE;
     }
+    engine.SetPadScript(presses);
 
     // Resolve the name tables to SDL codes once.
     struct KeyBit { SDL_Scancode code; uint16_t bit; };
@@ -79,6 +109,13 @@ int main(int argc, char** argv) {
     const uint64_t frame_ns = SDL_NS_PER_SECOND / 60;  // engine frame = 564480 cycles = 1/60 s
     uint64_t next = SDL_GetTicksNS();
     bool quit = false;
+    // --interp: the GPU logs its packets (display-only capture, emulation unchanged) for the interpolator.
+    interp::FrameInterpolator interp;
+    std::vector<uint32_t> cmd_log;
+    if (interp_hz) engine.GetGpu().SetCommandLog(&cmd_log);
+    const int sub = interp_hz ? interp_hz / 60 : 1;  // presents per emulated frame
+    uint64_t interp_ns = 0, interp_frames = 0, last_hash = 0;
+    uint32_t flips = 0, changes = 0, pairs = 0, pairs_ok = 0, last_start = ~0u;
 
     while (!quit && engine.GetState() == EngineState::Running && (!max_frames || engine.GetFrameCount() < max_frames)) {
         SDL_Event ev;
@@ -119,44 +156,92 @@ int main(int argc, char** argv) {
         }
 
         Ps1Gpu& gpu = engine.GetGpu();
-        const GpuDisplayArea& d = gpu.GetDisplayArea();
-        const uint32_t w = d.width ? d.width : 320, h = d.height ? d.height : 240;
-        if ((gpu.ReadGPUSTAT() >> 23) & 1) rgba.assign(size_t(w) * h, 0xFF000000u);  // display disabled
-        else host::DisplayToRgba(gpu.GetVram(), d.x, d.y, w, h, d.is_24bit, rgba);
-        for (uint32_t p : rgba)
-            if (p & 0xFFFFFFu) { ++lit_frames; break; }
-        if (!texture || tex_w != int(w) || tex_h != int(h)) {
-            if (texture) SDL_DestroyTexture(texture);
-            texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING, int(w), int(h));
-            SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_LINEAR);
-            tex_w = int(w), tex_h = int(h);
+        const uint64_t frame = engine.GetFrameCount();
+        if (interp_hz && interp.Consume(cmd_log, gpu, frame) && interp.Active(frame)) {
+            ++pairs;
+            pairs_ok += interp.PairOk();
         }
-        SDL_UpdateTexture(texture, nullptr, rgba.data(), int(w * 4));
-
-        int win_w = 0, win_h = 0;
-        SDL_GetRenderOutputSize(renderer, &win_w, &win_h);
-        const host::Rect r = host::Letterbox4x3(win_w, win_h);
-        const SDL_FRect dst{float(r.x), float(r.y), float(r.w), float(r.h)};
-        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-        SDL_RenderClear(renderer);
-        SDL_RenderTexture(renderer, texture, nullptr, &dst);
-        const bool last = !screenshot.empty() && (quit || (max_frames && engine.GetFrameCount() >= max_frames));
-        if (last) {
-            if (SDL_Surface* shot = SDL_RenderReadPixels(renderer, nullptr)) {
-                if (!SDL_SaveBMP(shot, screenshot.c_str())) std::fprintf(stderr, "SDL_SaveBMP: %s\n", SDL_GetError());
-                SDL_DestroySurface(shot);
+        if (stats) {  // flips = display start changes; pictures = emulated frames whose display area changed
+            const GpuDisplayArea& d = gpu.GetDisplayArea();
+            host::DisplayToRgba(gpu.GetVram(), d.x, d.y, d.width ? d.width : 320, d.height ? d.height : 240,
+                                d.is_24bit, rgba);
+            uint64_t hash = 1469598103934665603ull;
+            for (uint32_t p : rgba) hash = (hash ^ p) * 1099511628211ull;
+            changes += hash != last_hash;
+            last_hash = hash;
+            const uint32_t start = d.x | uint32_t(d.y) << 16;
+            flips += start != last_start;
+            last_start = start;
+            if (frame % 60 == 0) {
+                std::printf("[stats] f=%llu flips/s=%u pictures/s=%u interp_pairs=%u/%u %ux%u%s\n",
+                            (unsigned long long)frame, flips, changes, pairs_ok, pairs, d.width, d.height,
+                            d.is_24bit ? " 24bpp" : "");
+                std::fflush(stdout);
+                flips = changes = pairs_ok = pairs = 0;
             }
         }
-        SDL_RenderPresent(renderer);
 
-        next += frame_ns;
-        const uint64_t now = SDL_GetTicksNS();
-        if (now < next) SDL_DelayPrecise(next - now);
-        else if (now - next > 6 * frame_ns) next = now;  // too far behind: drop the debt instead of racing
+        for (int s = 0; s < sub; ++s) {
+            const std::vector<uint16_t>* vram = &gpu.GetVram();
+            GpuDisplayArea d = gpu.GetDisplayArea();
+            bool off = (gpu.ReadGPUSTAT() >> 23) & 1;
+            double t = -1;
+            if (interp_hz && interp.Active(frame)) {
+                t = interp.Fraction(double(frame) + double(s) / sub);
+                const uint64_t t0 = SDL_GetTicksNS();
+                interp.Render(t, vram, d);
+                if (t > 0 && t < 1 && interp.PairOk()) interp_ns += SDL_GetTicksNS() - t0, ++interp_frames;
+                off = false;
+            }
+            const uint32_t w = d.width ? d.width : 320, h = d.height ? d.height : 240;
+            if (off) rgba.assign(size_t(w) * h, 0xFF000000u);  // display disabled
+            else host::DisplayToRgba(*vram, d.x, d.y, w, h, d.is_24bit, rgba);
+            for (uint32_t p : rgba)
+                if (p & 0xFFFFFFu) { ++lit_frames; break; }
+            if (!dump_dir.empty() && frame >= dump_from && frame <= dump_to) {  // t999 = live, not interpolated
+                char name[64];
+                std::snprintf(name, sizeof name, "/f%06llu_%d_t%03d.png", (unsigned long long)frame, s,
+                              t < 0 ? 999 : int(t * 100 + 0.5));
+                PngCodec::EncodeToFile(dump_dir + name, w, h, reinterpret_cast<const uint8_t*>(rgba.data()));
+            }
+            if (!texture || tex_w != int(w) || tex_h != int(h)) {
+                if (texture) SDL_DestroyTexture(texture);
+                texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING, int(w), int(h));
+                SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_LINEAR);
+                tex_w = int(w), tex_h = int(h);
+            }
+            SDL_UpdateTexture(texture, nullptr, rgba.data(), int(w * 4));
+
+            int win_w = 0, win_h = 0;
+            SDL_GetRenderOutputSize(renderer, &win_w, &win_h);
+            const host::Rect r = host::Letterbox4x3(win_w, win_h);
+            const SDL_FRect dst{float(r.x), float(r.y), float(r.w), float(r.h)};
+            SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+            SDL_RenderClear(renderer);
+            SDL_RenderTexture(renderer, texture, nullptr, &dst);
+            const bool last = s == sub - 1 && !screenshot.empty() && (quit || (max_frames && frame >= max_frames));
+            if (last) {
+                if (SDL_Surface* shot = SDL_RenderReadPixels(renderer, nullptr)) {
+                    if (!SDL_SaveBMP(shot, screenshot.c_str())) std::fprintf(stderr, "SDL_SaveBMP: %s\n", SDL_GetError());
+                    SDL_DestroySurface(shot);
+                }
+            }
+            SDL_RenderPresent(renderer);
+
+            if (unthrottled) continue;
+            next += frame_ns / sub;
+            const uint64_t now = SDL_GetTicksNS();
+            if (now < next) SDL_DelayPrecise(next - now);
+            else if (now - next > 6 * frame_ns) next = now;  // too far behind: drop the debt instead of racing
+        }
     }
 
+    if (interp_frames)
+        std::printf("[interp] %llu synthesized pictures, %.3f ms each\n", (unsigned long long)interp_frames,
+                    double(interp_ns) / 1e6 / double(interp_frames));
     std::printf("[SDL] frames=%llu non-black=%llu audio_samples=%llu\n", (unsigned long long)engine.GetFrameCount(),
                 (unsigned long long)lit_frames, (unsigned long long)audio_samples);
+    engine.GetGpu().SetCommandLog(nullptr);
     engine.Shutdown();
     for (SDL_Gamepad* g : gamepads) SDL_CloseGamepad(g);
     if (texture) SDL_DestroyTexture(texture);

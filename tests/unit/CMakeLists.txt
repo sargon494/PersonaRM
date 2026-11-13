@@ -156,3 +156,9 @@ target_include_directories(unit_test_recomp_engine PRIVATE ${CMAKE_CURRENT_SOURC
 target_compile_features(unit_test_recomp_engine PRIVATE cxx_std_17)
 add_test(NAME unit_test_recomp_engine COMMAND unit_test_recomp_engine)
 set_tests_properties(unit_test_recomp_engine PROPERTIES LABELS "unit" TIMEOUT 300)
+
+add_executable(unit_test_frame_interp test_frame_interp.cpp)
+target_link_libraries(unit_test_frame_interp PRIVATE personarm_core)
+target_compile_features(unit_test_frame_interp PRIVATE cxx_std_17)
+add_test(NAME unit_test_frame_interp COMMAND unit_test_frame_interp)
+set_tests_properties(unit_test_frame_interp PROPERTIES LABELS "unit" TIMEOUT 120)

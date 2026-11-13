@@ -82,6 +82,13 @@ public:
     /// GP0 polygon commands (20h-3Fh) executed since construction (boot instrumentation).
     uint64_t GetPolygonCount() const { return m_polygon_count; }
 
+    /// Display-only capture for frame interpolation (rendering/frame_interp.h); null = off (default) and
+    /// emulation is unaffected either way. Appends every executed GP0 packet except VRAM uploads/reads
+    /// (A0h-DFh) as [n, w0..wn-1], polyline continuation words as [1, w], and each display-start change
+    /// (GP1 05h, a double-buffer flip) as [0, x | y << 16] followed by E1h-E6h packets for the current
+    /// draw state, so every segment between two flips replays on its own.
+    void SetCommandLog(std::vector<uint32_t>* log) { m_cmd_log = log; }
+
 private:
     // One rasterizer vertex: VRAM-space position (drawing offset applied), 24-bit color, texcoord.
     struct Vertex {
@@ -119,6 +126,11 @@ private:
     bool m_mask_set = false;
     bool m_mask_check = false;
     uint64_t m_polygon_count = 0;
+    std::vector<uint32_t>* m_cmd_log = nullptr;
+    void LogWords(const uint32_t* w, size_t n) {
+        m_cmd_log->push_back(static_cast<uint32_t>(n));
+        m_cmd_log->insert(m_cmd_log->end(), w, w + n);
+    }
 
     // Polyline (GP0 48h-4Fh / 58h-5Fh) streaming state
     bool m_in_polyline = false;
