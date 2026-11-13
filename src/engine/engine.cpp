@@ -1,15 +1,28 @@
 #include "engine/engine.h"
 #include "core/logger.h"
+#include <cstdlib>
 #include <cstring>
 #include <algorithm>
 
 namespace personarm {
+
+uint32_t ParseSystemCnfStack(const std::string& cnf, uint32_t fallback) {
+    // "STACK = 801FFFF0" (hex, psx-spx "CDROM File Formats" SYSTEM.CNF).
+    size_t p = cnf.find("STACK");
+    if (p == std::string::npos) return fallback;
+    p = cnf.find('=', p);
+    if (p == std::string::npos) return fallback;
+    char* end = nullptr;
+    unsigned long v = std::strtoul(cnf.c_str() + p + 1, &end, 16);
+    return end == cnf.c_str() + p + 1 || v == 0 ? fallback : static_cast<uint32_t>(v);
+}
 
 Engine::Engine()
     : m_bios(Ps1BiosHle::Instance()),
       m_input(InputManager::Instance()) {
     m_ram.resize(PS1_MAIN_RAM_SIZE, 0);
     m_scratchpad.resize(PS1_SCRATCHPAD_SIZE, 0);
+    WireDevices();
 }
 
 Engine::~Engine() {
@@ -51,7 +64,40 @@ void Engine::Reset() {
     m_i_mask = 0;
     m_timers = {};
     m_timer_cycles = 0;
+    WireDevices();
     m_state = EngineState::Idle;
+}
+
+uint32_t Engine::RamDma::ReadWord(uint32_t a) {
+    a &= PS1_MAIN_RAM_SIZE - 4;
+    return ram[a] | (ram[a + 1] << 8) | (ram[a + 2] << 16) | (uint32_t(ram[a + 3]) << 24);
+}
+void Engine::RamDma::WriteWord(uint32_t a, uint32_t v) {
+    a &= PS1_MAIN_RAM_SIZE - 4;
+    for (int i = 0; i < 4; ++i) ram[a + i] = static_cast<uint8_t>(v >> (8 * i));
+}
+
+// Wiring per the hw/cdrom.h and hw/dma.h header notes. Rebuilt on every Reset (fresh device state).
+void Engine::WireDevices() {
+    m_dma_mem = std::make_unique<RamDma>(m_ram);
+    m_cdrom = std::make_unique<hw::CdRom>(&m_cd_source);
+    m_dma = std::make_unique<hw::Dma>(*m_dma_mem);
+    m_cdrom->SetIrqCallback([this] { RaiseIrq(2); });
+    m_dma->SetIrqCallback([this] { RaiseIrq(3); });
+    m_dma->SetPort(hw::Dma::kGpu, {[this] { return m_gpu.ReadGP0(); }, [this](uint32_t w) { m_gpu.WriteGP0(w); }});
+    m_dma->SetPort(hw::Dma::kCdrom, {[this] { return m_cdrom->DmaRead32(); }, nullptr});
+    // shortcut: SPU->RAM DMA (sound RAM readback) reads open bus; add when SpuEmulator exposes a FIFO read.
+    m_dma->SetPort(hw::Dma::kSpu, {nullptr, [this](uint32_t w) {
+        const uint8_t b[4] = {uint8_t(w), uint8_t(w >> 8), uint8_t(w >> 16), uint8_t(w >> 24)};
+        m_spu.DmaWrite(b, 4);
+    }});
+    // MDEC (DMA0/1) stays an empty port until the MDEC gets a word interface.
+}
+
+void Engine::TickDevices(uint32_t cycles) {
+    TickTimers(cycles);
+    m_cdrom->Tick(cycles);
+    m_dma->Tick(cycles);
 }
 
 void Engine::Shutdown() {
@@ -162,7 +208,25 @@ uint32_t Engine::ReadBus(uint32_t address, uint32_t size) {
         return 0;
     }
 
-    // 4. GPU Hardware Registers (0x1F801810 / 0x1F801814)
+    // DMA controller 1F801080h..1F8010FFh
+    if (physical >= hw::Dma::kBase && physical < hw::Dma::kBase + 0x80) {
+        const uint32_t off = physical - hw::Dma::kBase;
+        return size == 1 ? m_dma->Read8(off) : size == 2 ? m_dma->Read16(off) : m_dma->Read32(off);
+    }
+    // CD-ROM controller 1F801800h..1F801803h
+    if (physical >= hw::CdRom::kBase && physical < hw::CdRom::kBase + 4) {
+        const uint32_t off = physical - hw::CdRom::kBase;
+        return size == 1 ? m_cdrom->Read8(off) : size == 2 ? m_cdrom->Read16(off) : m_cdrom->Read32(off);
+    }
+    // SPU 1F801C00h..1F801DFFh: 16-bit registers; a 32-bit access is two halfwords.
+    if (physical >= 0x1F801C00 && physical < 0x1F801E00) {
+        uint32_t v = m_spu.Read16(physical & ~1u);
+        if (size == 4) v |= static_cast<uint32_t>(m_spu.Read16(physical + 2)) << 16;
+        if (size == 1) v = (physical & 1) ? v >> 8 : v & 0xFF;
+        return v;
+    }
+
+    // 4. GPU Hardware Registers (0x1F801810 GPUREAD / 0x1F801814 GPUSTAT)
     if (physical == 0x1F801810) {
         return m_gpu.ReadGP0();
     }
@@ -267,6 +331,21 @@ void Engine::WriteBus(uint32_t address, uint32_t value, uint32_t size) {
         return;
     }
 
+    if (physical >= hw::Dma::kBase && physical < hw::Dma::kBase + 0x80) {
+        const uint32_t off = physical - hw::Dma::kBase;
+        if (size == 1) m_dma->Write8(off, static_cast<uint8_t>(value));
+        else if (size == 2) m_dma->Write16(off, static_cast<uint16_t>(value));
+        else m_dma->Write32(off, value);
+        return;
+    }
+    if (physical >= hw::CdRom::kBase && physical < hw::CdRom::kBase + 4) {
+        const uint32_t off = physical - hw::CdRom::kBase;
+        if (size == 1) m_cdrom->Write8(off, static_cast<uint8_t>(value));
+        else if (size == 2) m_cdrom->Write16(off, static_cast<uint16_t>(value));
+        else m_cdrom->Write32(off, value);
+        return;
+    }
+
     // 4. GPU Hardware Registers (0x1F801810 / 0x1F801814)
     if (physical == 0x1F801810) {
         m_gpu.WriteGP0(value);
@@ -279,7 +358,16 @@ void Engine::WriteBus(uint32_t address, uint32_t value, uint32_t size) {
 
     // 5. SPU Hardware Registers (0x1F801C00..0x1F801DFF)
     if (physical >= 0x1F801C00 && physical < 0x1F801E00) {
-        // SPU register writes
+        // shortcut: an 8-bit store writes the byte zero-extended into its halfword (no read-modify-write).
+        const uint32_t reg = physical & ~1u;
+        const uint16_t lo = static_cast<uint16_t>(size == 1 && (physical & 1) ? (value & 0xFF) << 8 : value);
+        m_spu.Write16(reg, lo);
+        if (size == 4) m_spu.Write16(reg + 2, static_cast<uint16_t>(value >> 16));
+        if (m_kon_hook) {
+            if (reg == 0x1F801D88 && lo) m_kon_hook(lo);
+            if (reg == 0x1F801D8A && (lo & 0xFF)) m_kon_hook(static_cast<uint32_t>(lo & 0xFF) << 16);
+            if (size == 4 && reg == 0x1F801D88 && (value >> 16)) m_kon_hook((value >> 16 & 0xFF) << 16);
+        }
         return;
     }
 }
@@ -292,6 +380,12 @@ bool Engine::BootFromDisc(const std::string& disc_path) {
 
     // Attempt to detect boot executable directly from SYSTEM.CNF via DiscReader
     std::string boot_exe_name = m_disc_reader.DetectBootExecutable();
+    m_boot_sp = 0x801FFFF0;
+    {
+        std::vector<uint8_t> cnf;
+        if (m_disc_reader.ReadFile("SYSTEM.CNF", cnf))
+            m_boot_sp = ParseSystemCnfStack(std::string(cnf.begin(), cnf.end()), m_boot_sp);
+    }
 
     std::vector<uint8_t> exe_payload;
     if (!boot_exe_name.empty()) {
@@ -329,7 +423,15 @@ bool Engine::BootFromDisc(const std::string& disc_path) {
 bool Engine::BootExecutable(const uint8_t* exe_buffer, size_t exe_size) {
     Reset();
     SetupMemoryBus();
-    if (m_config.enable_bios_hle) m_bios.InstallKernel(m_ram.data(), m_ram.size());
+    if (m_config.enable_bios_hle) {
+        m_bios.InstallKernel(m_ram.data(), m_ram.size());
+        // The real BIOS boots from CD and leaves the controller's interrupt enable (HINTMSK) at 1Fh;
+        // libcd CD_init never writes it and waits for INT3 forever otherwise (from memory, matches
+        // other HLE implementations; verify with a real-BIOS trace).
+        WriteBus(0x1F801800, 1, 1);
+        WriteBus(0x1F801802, 0x1F, 1);
+        WriteBus(0x1F801800, 0, 1);
+    }
 
     if (!m_trace_path.empty()) {
         if (m_trace) m_trace->OnEnd("quit", static_cast<uint32_t>(m_frame_counter));
@@ -351,6 +453,11 @@ bool Engine::BootExecutable(const uint8_t* exe_buffer, size_t exe_size) {
     if (!ExeLoader::LoadExe(exe_buffer, exe_size, m_cpu, m_ram, info)) {
         PRM_LOG_ERROR("ENGINE", "Failed to parse and load PS-X executable into RAM.");
         return false;
+    }
+    // BIOS Exec convention: header SP (base+offset) when nonzero, else the SYSTEM.CNF STACK value.
+    if (info.initial_sp == 0) {
+        m_cpu.SetGPR(29, m_boot_sp);
+        m_cpu.SetGPR(30, m_boot_sp);
     }
 
     m_state = EngineState::Running;
@@ -398,9 +505,13 @@ void Engine::RunFrame() {
             if (m_state != EngineState::Running) break;
         }
 
+        if (m_step_hook && !m_step_hook(m_cpu)) {
+            m_state = EngineState::Stopped;
+            break;
+        }
         m_cpu.Step();
         uint64_t now = m_cpu.GetCycleCount();
-        TickTimers(static_cast<uint32_t>(now - m_timer_cycles));
+        TickDevices(static_cast<uint32_t>(now - m_timer_cycles));
         m_timer_cycles = now;
     }
 
@@ -426,14 +537,19 @@ void Engine::RunFrame() {
 void Engine::TickTimers(uint32_t cycles) {
     for (uint32_t i = 0; i < 3; ++i) {
         RootCounter& t = m_timers[i];
+        // Clock source (psx-spx "Timers", mode bits 8-9): Timer1 1/3 = Hblank, Timer2 2/3 = sysclk/8.
+        // libetc VSync() spins until two reads of Timer1 agree, so a sysclk Timer1 hangs it.
+        uint32_t div = 1;
+        if (i == 1 && (t.mode & 0x100u)) div = kCyclesPerHblank;
+        if (i == 2 && (t.mode & 0x200u)) div = 8;
         uint32_t ticks = cycles;
-        if (i == 2 && (t.mode & 0x200u)) { // Timer 2 clock source 2/3 = sysclk/8
+        if (div > 1) {
             t.prescale += cycles;
-            ticks = t.prescale / 8;
-            t.prescale %= 8;
+            ticks = t.prescale / div;
+            t.prescale %= div;
         }
-        // shortcut: Timer0 dotclock / Timer1 hblank sources (mode bit 8) and sync modes (bits 0-2)
-        // count as plain sysclk; upgrade when the GPU exposes a dot/line clock.
+        // shortcut: Timer0 dotclock source (mode bit 8) and sync modes (bits 0-2) count as plain
+        // sysclk; upgrade when the GPU exposes a dot clock.
         while (ticks--) {
             t.value = (t.value + 1) & 0xFFFFu;
             bool irq = false;

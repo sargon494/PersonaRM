@@ -88,6 +88,12 @@ target_compile_features(unit_test_hle_kernel PRIVATE cxx_std_17)
 add_test(NAME unit_test_hle_kernel COMMAND unit_test_hle_kernel)
 set_tests_properties(unit_test_hle_kernel PROPERTIES LABELS "unit" TIMEOUT 120)
 
+add_executable(unit_test_engine_bus test_engine_bus.cpp)
+target_link_libraries(unit_test_engine_bus PRIVATE personarm_core)
+target_compile_features(unit_test_engine_bus PRIVATE cxx_std_17)
+add_test(NAME unit_test_engine_bus COMMAND unit_test_engine_bus)
+set_tests_properties(unit_test_engine_bus PROPERTIES LABELS "unit" TIMEOUT 120)
+
 add_executable(unit_test_mdec test_mdec.cpp)
 target_link_libraries(unit_test_mdec PRIVATE personarm_core)
 target_compile_features(unit_test_mdec PRIVATE cxx_std_17)

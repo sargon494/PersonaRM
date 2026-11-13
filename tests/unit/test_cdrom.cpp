@@ -150,6 +150,28 @@ static void TestSetmodeSectorSize() {
     CHECK(r.size() == 8 && r[2] == 20 && r[3] == 2 && r[6] == 0x08);
 }
 
+// libcd reads the 3-word header of a 924h sector, then the game's CdGetSector sets BFRD again:
+// the second request must continue at the user data, not rewind to the header (first-boot blocker).
+static void TestBfrdDoesNotRewind() {
+    FakeSource src;
+    CdRom cd(&src);
+    Command(cd, 0x0E, {0xA0});
+    WaitIrq(cd); Ack(cd);
+    Command(cd, 0x02, {0x00, 0x02, 0x05});
+    WaitIrq(cd); Ack(cd);
+    Command(cd, 0x06);
+    WaitIrq(cd); Ack(cd);
+    CHECK(WaitIrq(cd) == 1);
+    cd.Write8(0, 0); cd.Write8(3, 0x80);
+    for (int i = 0; i < 3; ++i) cd.DmaRead32();  // header + subheader
+    cd.Write8(0, 0); cd.Write8(3, 0x80);          // BFRD again with data pending
+    CHECK(cd.DataBytesRemaining() == 0x924 - 12);
+    CHECK(cd.Read8(2) == DataByte(5, 0));
+    cd.Write8(0, 0); cd.Write8(3, 0x00);          // BFRD=0 clears; next BFRD reloads
+    cd.Write8(0, 0); cd.Write8(3, 0x80);
+    CHECK(cd.DataBytesRemaining() == 0x924);
+}
+
 static void TestXaFilter() {
     FakeSource src;
     CdRom cd(&src);
@@ -217,6 +239,7 @@ static void TestIrqEnableMask() {
 int main() {
     TestReadSequence();
     TestSetmodeSectorSize();
+    TestBfrdDoesNotRewind();
     TestXaFilter();
     TestGetIdTestAndErrors();
     TestIrqEnableMask();

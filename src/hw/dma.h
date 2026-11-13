@@ -3,7 +3,7 @@
 // DPCR at +70h, DICR at +74h. Source: psx-spx "DMA Channels" (HW-022 in
 // docs/research/PS1_HARDWARE_REQUIREMENTS.md). The game uses channels 0,1,2,3,4,6.
 //
-// WIRING (Engine, later change):
+// WIRING (done in Engine::WireDevices, src/engine/engine.cpp):
 //   1. Implement hw::DmaMemory over main RAM (addresses arrive masked to 0x1FFFFC).
 //   2. hw::Dma dma(mem); for addr in [Dma::kBase, kBase+0x7F] route Read/Write 8/16/32
 //      with offset = addr - Dma::kBase.

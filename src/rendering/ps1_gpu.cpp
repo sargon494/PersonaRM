@@ -441,6 +441,7 @@ Ps1Gpu::Vertex Ps1Gpu::ParseVertex(uint32_t xy_word, uint32_t color_word) const 
 }
 
 void Ps1Gpu::DrawPolygon(uint8_t cmd) {
+    ++m_polygon_count;
     const bool gouraud = (cmd & 0x10) != 0;
     const bool quad = (cmd & 0x08) != 0;
     DrawFlags f;
