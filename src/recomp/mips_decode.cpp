@@ -26,14 +26,14 @@ Insn Decode(uint32_t w, uint32_t addr) {
     Insn in;
     in.word = w;
     in.addr = addr;
-    const uint32_t op = w >> 26;
-    in.rs = static_cast<uint8_t>((w >> 21) & 31);
-    in.rt = static_cast<uint8_t>((w >> 16) & 31);
-    in.rd = static_cast<uint8_t>((w >> 11) & 31);
-    const uint32_t funct = w & 63;
-    const int32_t simm = static_cast<int16_t>(w & 0xFFFF);
+    const uint32_t op = OpOf(w);
+    in.rs = static_cast<uint8_t>(RsOf(w));
+    in.rt = static_cast<uint8_t>(RtOf(w));
+    in.rd = static_cast<uint8_t>(RdOf(w));
+    const uint32_t funct = FunctOf(w);
+    const int32_t simm = SImmOf(w);
     const uint32_t branch_target = addr + 4 + (static_cast<uint32_t>(simm) << 2);
-    const uint32_t jump_target = ((addr + 4) & 0xF0000000u) | ((w & 0x03FFFFFFu) << 2);
+    const uint32_t jump_target = ((addr + 4) & 0xF0000000u) | (TargetOf(w) << 2);
 
     switch (op) {
         case 0x00:  // SPECIAL
@@ -67,7 +67,7 @@ Insn Decode(uint32_t w, uint32_t addr) {
             in.kind = InsnKind::Cop; break;
         case 0x20: case 0x21: case 0x22: case 0x23: case 0x24: case 0x25: case 0x26:
             in.kind = InsnKind::Load; break;
-        case 0x28: case 0x29: case 0x2A: case 0x2B: case 0x2C: case 0x2D: case 0x2E:
+        case 0x28: case 0x29: case 0x2A: case 0x2B: case 0x2E:   // SB SH SWL SW SWR (0x2C/0x2D are MIPS-III SDL/SDR: reserved)
             in.kind = InsnKind::Store; break;
         case 0x30: case 0x31: case 0x32: case 0x33:            // LWCn (n = 0..3)
         case 0x38: case 0x39: case 0x3A: case 0x3B:            // SWCn
@@ -123,7 +123,7 @@ std::string DescribeInsn(uint32_t w) {
     }
     const char* name = kImm[op];
     if (!name) { std::snprintf(buf, sizeof buf, ".word 0x%08X", w); return buf; }
-    if (op == 2 || op == 3) { std::snprintf(buf, sizeof buf, "%s 0x%07X", name, (w & 0x03FFFFFFu) << 2); return buf; }
+    if (op == 2 || op == 3) { std::snprintf(buf, sizeof buf, "%s 0x%07X", name, TargetOf(w) << 2); return buf; }
     if (op >= 4 && op <= 7) { std::snprintf(buf, sizeof buf, "%s $%u,$%u,%d", name, rs, rt, imm); return buf; }
     if (op == 0x0F) { std::snprintf(buf, sizeof buf, "lui $%u,0x%04X", rt, w & 0xFFFF); return buf; }
     if (op >= 0x20 && op <= 0x2E) { std::snprintf(buf, sizeof buf, "%s $%u,%d($%u)", name, rt, imm, rs); return buf; }
