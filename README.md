@@ -22,9 +22,9 @@
 
 PersonaRM aims to run *Persona 2: Eternal Punishment* natively on Windows and Linux, without an external emulator. It rebuilds the PlayStation 1 hardware the game depends on (MIPS R3000A CPU, GTE, GPU, MDEC, SPU, CD-ROM) and wraps it in a launcher that manages your disc images, controls, and display options.
 
-> **The game does not run yet.** PersonaRM is a research-driven work in progress: the disc and executable analysis is far along, while the hardware core is still being built. See [Status](#status) for what exists today.
+> **The game does not run yet.** PersonaRM is a research-driven work in progress. The game's real executable now boots in the interpreter up to its first overlay load, but nothing is drawn on screen yet. See [Status](#status) for what exists today.
 >
-> **Current phase: step 2 of 6, completing the machine core.** Step 1 (CPU correctness) is done. In step 2, the GTE, GPU rasterizer, interrupts, timers, kernel events, CD-ROM, DMA, SPU and the trace format are in. Now: wiring CD-ROM, DMA and SPU into the bus, MDEC video and XA audio, and the first boot attempt of the real game (the gate into step 3).
+> **Current phase: step 3 of 6, first boot.** Steps 1 (CPU correctness) and 2 (machine core) are done apart from MDEC video and XA audio, which are in progress. `personarm --boot` runs disc 1 from `main` through the scene loop and loads the first overlay byte-for-byte. Next: keep booting until the first image is drawn, and confirm the boot against a reference emulator trace.
 
 PersonaRM follows a strict **Bring Your Own Copy (BYOC)** model:
 
@@ -49,8 +49,8 @@ Verified by reading the Japanese release's discs and executable (nothing here is
 The chosen approach is an **interpreter-first native runtime**, with static recompilation added on top once the interpreter can be checked against a reference emulator:
 
 1. ✅ **CPU correctness.** A conformance test suite for every MIPS-I instruction, including delay slots, load delays, unaligned access, overflow traps, exceptions, and edge cases of `DIV`.
-2. 🔨 **Complete machine core.** Interrupt controller, DMA, timers, CD-ROM, joypad bus, and a real GPU rasterizer.
-3. **First boot.** Run the game's main executable up to the first overlay load, and compare against a reference trace.
+2. ✅ **Complete machine core.** Interrupt controller, DMA, timers, CD-ROM, joypad bus, and a real GPU rasterizer.
+3. 🔨 **First boot.** Run the game's main executable up to the first overlay load, and compare against a reference trace.
 4. **Static recompilation.** Translate the main executable and each overlay ahead of time, with the interpreter as fallback.
 5. **Replace library routines** (video playback, pad, memory card, CD, SPU, GPU) with hand-written native code.
 6. **Host layer.** SDL3 window and input, OpenGL display, host audio, then the launcher and modern enhancements.
@@ -68,10 +68,11 @@ A JIT is not planned: the PS1 workload does not call for one.
 | GTE (geometry engine) | ✅ All 22 commands, FLAG and UNR division (not yet checked against real-hardware results) |
 | GPU and VRAM | ✅ Software rasterizer: polygons, lines, sprites, textures with CLUT, semi-transparency, GPUREAD |
 | MDEC video decoder | 🟡 Partial |
-| SPU audio | 🟡 Registers, ADPCM, pitch, ADSR and reverb; the interpolation table is an approximation and it is not wired into the bus yet |
+| SPU audio | 🟡 Registers, ADPCM, pitch, ADSR and reverb, wired into the bus; the interpolation table is an approximation |
 | BIOS HLE | ✅ Kernel events, interrupt chain, patchable tables and file calls the game uses (memory card still missing) |
 | Interrupts, VBlank, root counters | ✅ Implemented (timing approximated) |
-| DMA, CD-ROM | 🟡 Implemented as devices with tests; wiring into the bus is in progress |
+| DMA, CD-ROM | ✅ Wired into the bus; the game reads FILEPOS and its first overlay through them (timing approximated) |
+| Real-game boot (`personarm --boot`) | 🔨 Disc 1 reaches the first overlay load; no image drawn yet |
 | Trace format for reference comparison (`PRMTRACE v1`) | ✅ Format, comparator and `--trace-out` |
 | Static recompiler (code generation) | ⏳ Not started |
 | Windowed SDL / OpenGL display and host audio | ⏳ Stubs only |

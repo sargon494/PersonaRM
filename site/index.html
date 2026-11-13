@@ -51,8 +51,8 @@
                 <p class="lead">
                     PersonaRM is an open-source runtime and launcher for Windows and Linux, in
                     active development. It rebuilds the PlayStation 1 hardware the game needs.
-                    The game does not run yet; the disc and executable analysis is far along and
-                    the hardware core is next.
+                    The game does not run yet, but its real executable already boots up to the
+                    first overlay load.
                 </p>
                 <div class="actions">
                     <a class="btn btn-primary" href="#start">Get started</a>
@@ -146,10 +146,9 @@
             <p class="intro reveal">PersonaRM is in active development and the game does not run yet. The plan:
                 get the CPU provably correct, finish the machine core, boot the game, then compile its code ahead of
                 time.</p>
-            <p class="intro reveal"><strong>Current phase: step 2 of 6, completing the machine core.</strong> Step 1,
-                CPU correctness, is done. In step 2 the GTE, GPU rasterizer, interrupts, timers, kernel events, CD-ROM,
-                DMA, SPU and the trace format are in. Now: wiring them into the bus, MDEC video and XA audio, and the
-                first boot attempt of the real game.</p>
+            <p class="intro reveal"><strong>Current phase: step 3 of 6, first boot.</strong> The CPU and the machine core
+                are done, apart from MDEC video and XA audio. Disc 1 now boots from <code>main</code> through the scene
+                loop and loads its first overlay byte-for-byte. Next: boot until the first image is drawn.</p>
             <div class="status-table reveal" role="table" aria-label="Subsystem status">
                 <div class="row head" role="row"><span role="columnheader">Subsystem</span><span
                         role="columnheader">Status</span></div>
@@ -170,7 +169,9 @@
                 <div class="row" role="row"><span role="cell">Interrupts, VBlank and timers</span><span role="cell"
                         class="tag ok">Implemented</span></div>
                 <div class="row" role="row"><span role="cell">DMA, CD-ROM and SPU</span><span role="cell"
-                        class="tag progress">Built, being wired</span></div>
+                        class="tag ok">Wired into the bus</span></div>
+                <div class="row" role="row"><span role="cell">Real-game boot</span><span role="cell"
+                        class="tag progress">Reaches first overlay</span></div>
                 <div class="row" role="row"><span role="cell">Static recompiler</span><span role="cell"
                         class="tag prototype">Not started</span></div>
                 <div class="row" role="row"><span role="cell">Window, display and host audio</span><span role="cell"
