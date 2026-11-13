@@ -143,9 +143,50 @@ em {
 }
 
 @media (max-width: 680px) {
-    .topbar nav a:not(.nav-cta) {
+    .topbar nav a:not(.nav-cta):not(.lang-link) {
         display: none;
     }
+
+    .topbar nav {
+        gap: .6rem;
+    }
+
+    .topbar .lang {
+        gap: .45rem;
+    }
+
+}
+
+@media (max-width: 480px) {
+    .brand span {
+        display: none; /* the logo link keeps its aria-label; frees room for the language switcher */
+    }
+}
+
+.topbar .lang {
+    display: flex;
+    gap: .6rem;
+}
+
+.topbar nav .lang-link {
+    font-size: .85rem;
+    letter-spacing: .08em;
+}
+
+.topbar nav .lang-link[aria-current] {
+    color: var(--paper);
+    border-bottom: 2px solid var(--red);
+}
+
+/* Japanese: the Latin faces have no kana/kanji; the page loads Noto JP only on /ja/ */
+:lang(ja) {
+    --display: "Bodoni Moda", "Noto Serif JP", "Yu Mincho", serif;
+    --ui: "Barlow Condensed", "Noto Sans JP", "Yu Gothic", sans-serif;
+    --body: "Barlow", "Noto Sans JP", system-ui, "Yu Gothic", sans-serif;
+}
+
+:lang(ja) em {
+    font-style: normal;
 }
 
 /* ---------- Hero ---------- */
