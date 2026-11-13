@@ -1,11 +1,11 @@
 // recomp_gen: raw MIPS image -> C++ (static recompiler v0). Offline developer tool.
 //
 //   recomp_gen <image> <base> <out.cpp> [--skip N] [--size N] [--entries a,b,...] [--entries-file f]
-//              [--cfg-entry addr] [--module name] [--exclude a,b,...]
+//              [--cfg-entry a,b,...] [--cfg-entries-file f] [--module name] [--exclude a,b,...]
 //
 // <image> is read from byte offset --skip (0x800 for a PS-X EXE payload) and loaded at <base>.
 // Entries come from the list, from a file (one address per line), and/or from the control-flow
-// analysis started at --cfg-entry. The output path is required: nothing is written by default.
+// analysis started at each --cfg-entry (repeatable, or a comma list). The output path is required: nothing is written by default.
 // --exclude keeps addresses as function boundaries but leaves them to the interpreter (PC hooks of
 // the boot harness: load_file_by_id, cd_read_start). The module name must be a C identifier; the
 // engine build (-DPRM_RECOMP_GENERATED_DIR) expects it to equal the .cpp file name.
@@ -49,7 +49,7 @@ bool ParseList(const std::string& s, char sep, std::vector<uint32_t>& out) {
 
 int Usage() {
     std::cerr << "usage: recomp_gen <image> <base> <out.cpp> [--skip N] [--size N] [--entries a,b,...] "
-                 "[--entries-file f] [--cfg-entry addr] [--module name] [--exclude a,b,...]\n";
+                 "[--entries-file f] [--cfg-entry a,b,...] [--cfg-entries-file f] [--module name] [--exclude a,b,...]\n";
     return 2;
 }
 
@@ -58,10 +58,9 @@ int Usage() {
 int main(int argc, char** argv) {
     if (argc < 4) return Usage();
     const std::string in_path = argv[1], out_path = argv[3];
-    uint32_t base = 0, skip = 0, cfg_entry = 0, size_limit = 0;
-    bool use_cfg = false;
+    uint32_t base = 0, skip = 0, size_limit = 0;
     std::string module = "module";
-    std::vector<uint32_t> entries, exclude;
+    std::vector<uint32_t> entries, exclude, cfg_entries;
     if (!ParseU32(argv[2], base)) return Usage();
     for (int i = 4; i < argc; ++i) {
         const std::string a = argv[i];
@@ -75,7 +74,12 @@ int main(int argc, char** argv) {
             if (!f) { std::cerr << "cannot read " << v << "\n"; return 1; }
             if (!ParseList(std::string(std::istreambuf_iterator<char>(f), {}), '\n', entries)) return 2;
         }
-        else if (a == "--cfg-entry") { if (!ParseU32(v, cfg_entry)) return Usage(); use_cfg = true; }
+        else if (a == "--cfg-entry") { if (!ParseList(v, ',', cfg_entries)) return 2; }
+        else if (a == "--cfg-entries-file") {
+            std::ifstream f(v);
+            if (!f) { std::cerr << "cannot read " << v << "\n"; return 1; }
+            if (!ParseList(std::string(std::istreambuf_iterator<char>(f), {}), '\n', cfg_entries)) return 2;
+        }
         else if (a == "--module") module = v;
         else if (a == "--exclude") { if (!ParseList(v, ',', exclude)) return 2; }
         else return Usage();
@@ -89,8 +93,8 @@ int main(int argc, char** argv) {
     if (size_limit && size_limit < data.size()) data.resize(size_limit);  // e.g. resident text only, below the overlay slots
     data.resize(data.size() & ~size_t{3});
 
-    if (use_cfg) {
-        const CfgReport r = AnalyzeControlFlow(data.data(), data.size(), base, cfg_entry);
+    for (uint32_t e : cfg_entries) {   // e.g. every known entry of an overlay: their callees join too
+        const CfgReport r = AnalyzeControlFlow(data.data(), data.size(), base, e);
         entries.insert(entries.end(), r.function_entries.begin(), r.function_entries.end());
     }
     if (entries.empty()) { std::cerr << "no entries\n"; return 2; }

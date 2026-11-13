@@ -3,6 +3,9 @@
 // tools/recomp_gen generated from it at build time (module "rengine") at quantum 1. Every frame
 // must end at the same cycle, PC, registers and RAM: IRQs delivered while native code runs, frame
 // ends inside native loops, syscalls, HLE calls from native code, dispatch misses and resumes.
+// Both also run with devices ticked after every instruction (SetEagerDevices): lazy device time
+// must not change a thing. The overlay program (recomp_overlay_program.h) swaps two generated
+// overlays in one slot and writes into live code (CPU store, HLE memcpy, DMA) the same way.
 #undef NDEBUG
 #include <cstdio>
 #include <cstdlib>
@@ -12,8 +15,12 @@
 #include "engine/engine.h"
 #include "loader/exe_loader.h"
 #include "recomp_engine_program.h"
+#include "recomp_overlay_program.h"
 
 extern const personarm::recomp::Module kRecompModule_rengine;
+extern const personarm::recomp::Module kRecompModule_rovl_main;
+extern const personarm::recomp::Module kRecompModule_rovl_a;
+extern const personarm::recomp::Module kRecompModule_rovl_b;
 
 using namespace personarm;
 
@@ -50,19 +57,23 @@ std::vector<uint8_t> Exe(const g2::Program& p) {
     return exe;
 }
 
-Run Boot(const std::vector<uint8_t>& exe, std::vector<const recomp::Module*> modules, uint32_t quantum) {
+Run Boot(const std::vector<uint8_t>& exe, std::vector<const recomp::Module*> modules, uint32_t quantum,
+         bool eager = false) {
     auto& e = Engine::Instance();
     EngineBootConfig config;
     config.enable_bios_hle = true;
     e.Initialize(config);
     e.SetRecompModules(std::move(modules), quantum);
+    e.SetEagerDevices(eager);
     CHECK(e.BootExecutable(exe.data(), exe.size()));
     Run r;
     for (int f = 0; f < kFrames; ++f) {
         e.RunFrame();
         // A host RAM read between frames stalls like a guest load (the boot harness does this):
-        // the devices then lag the CPU until the next instruction ends, in both modes.
+        // the devices then lag the CPU until the next instruction ends, in both modes; then an MMIO
+        // read from the host sees them there.
         (void)e.Read(rengine::kData + 0x300, 4);
+        (void)e.Read(0x1F801100, 4);
         const CpuRegisters& regs = e.GetCpu().GetRegisters();
         r.frames.push_back({e.GetCycles(), regs.pc, recomp::Fnv1a64(reinterpret_cast<const uint8_t*>(&regs), sizeof regs),
                             recomp::Fnv1a64(e.GetRam().data(), e.GetRam().size()),
@@ -71,6 +82,7 @@ Run Boot(const std::vector<uint8_t>& exe, std::vector<const recomp::Module*> mod
     r.stats = e.GetRecompStats();
     r.ram = e.GetRam();
     e.SetRecompModules({});
+    e.SetEagerDevices(false);
     e.Shutdown();
     return r;
 }
@@ -105,6 +117,9 @@ int main() {
     if (diff) std::fprintf(stderr, "recompiled run differs from the interpreter at frame %d\n", diff);
     CHECK(diff == 0);
     CHECK(native.ram == interp.ram);
+    // Lazy device time vs ticking after every instruction (the reference), both modes.
+    CHECK(FirstDifference(interp, Boot(exe, {}, 1, true)) == 0);
+    CHECK(FirstDifference(interp, Boot(exe, {&kRecompModule_rengine}, 1, true)) == 0);
     const auto& st = native.stats;
     CHECK(st.active.size() == 1 && st.rejected.empty());
     CHECK(st.native_instructions > 4 * st.interp_resident);  // resume points bring the main loop back
@@ -121,7 +136,7 @@ int main() {
 
     // Hash guard: code generated from another image is never run.
     recomp::Module other = kRecompModule_rengine;
-    other.hash ^= 1;
+    other.code_hash ^= 1;
     const Run guarded = Boot(exe, {&other}, 1);
     CHECK(guarded.stats.rejected.size() == 1 && guarded.stats.native_instructions == 0);
     CHECK(FirstDifference(interp, guarded) == 0);
@@ -131,6 +146,40 @@ int main() {
     CHECK(coarse.frames.size() == static_cast<size_t>(kFrames));
     CHECK(coarse.stats.native_instructions > 0);
     CHECK(Word(coarse.ram, d + 32) > kFrames);
+
+    // Overlays: two modules for one slot, live only while their code is in RAM.
+    const rovl::Set ov = rovl::Build();
+    const std::vector<uint8_t> ovl_exe = Exe(ov.main);
+    const std::vector<const recomp::Module*> ovl_mods = {&kRecompModule_rovl_main, &kRecompModule_rovl_a, &kRecompModule_rovl_b};
+    const Run oi = Boot(ovl_exe, {}, 1);
+    const uint32_t od = rovl::kData;
+    CHECK(Word(oi.ram, od) > 20);                     // main loop iterations
+    CHECK(Word(oi.ram, od + 20) > 40);                // resident helper called from both overlays
+    CHECK(FirstDifference(oi, Boot(ovl_exe, {}, 1, true)) == 0);
+    const Run on = Boot(ovl_exe, ovl_mods, 1);
+    const int odiff = FirstDifference(oi, on);
+    if (odiff) std::fprintf(stderr, "overlay run differs from the interpreter at frame %d\n", odiff);
+    CHECK(odiff == 0);
+    CHECK(on.ram == oi.ram);
+    CHECK(FirstDifference(oi, Boot(ovl_exe, ovl_mods, 1, true)) == 0);
+    const auto& os = on.stats;
+    CHECK(os.active.size() == 1 && os.rejected.size() == 2);   // the overlays are not in RAM at boot
+    CHECK(os.loads.count("rovl_a") && os.loads.at("rovl_a") > 10);
+    CHECK(os.loads.count("rovl_b") && os.loads.at("rovl_b") > 10);
+    CHECK(os.hash_mismatches > 0);                    // same first word: the hash tells A from B
+    // Every load retires the one before (CPU copy, memcpy, DMA), plus the patches of A.
+    CHECK(os.invalidations + 1 >= os.loads.at("rovl_a") + os.loads.at("rovl_b"));
+    CHECK(os.native_instructions > 20 * (os.interp_resident + os.interp_overlay));
+    std::printf("recomp overlays: native %llu, interpreted %llu, loads A %llu B %llu, mismatches %llu, retired %llu, stops %llu\n",
+                (unsigned long long)os.native_instructions, (unsigned long long)(os.interp_resident + os.interp_overlay),
+                (unsigned long long)os.loads.at("rovl_a"), (unsigned long long)os.loads.at("rovl_b"),
+                (unsigned long long)os.hash_mismatches, (unsigned long long)os.invalidations, (unsigned long long)os.stops);
+    // Code from another image at the slot is never run: a mismatching overlay stays interpreted.
+    recomp::Module bad_a = kRecompModule_rovl_a;
+    bad_a.code_hash ^= 1;
+    const Run ob = Boot(ovl_exe, {&kRecompModule_rovl_main, &bad_a, &kRecompModule_rovl_b}, 1);
+    CHECK(FirstDifference(oi, ob) == 0);
+    CHECK(!ob.stats.loads.count("rovl_a") && ob.stats.loads.count("rovl_b"));
 
     std::printf("recomp engine integration: %d failures\n", g_fail);
     return g_fail == 0 ? 0 : 1;

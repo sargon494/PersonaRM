@@ -64,6 +64,9 @@ public:
     }
 
     void Tick(uint32_t cycles);
+    /// CPU cycles until Tick() may act on its own (complete a channel); 1 while a DRQ-paced transfer
+    /// runs (it may move on any tick); UINT64_MAX when idle. A host may batch ticks up to this point.
+    uint64_t CyclesToNextEvent() const;
 
     /// DICR bit 31 (the IRQ3 line).
     bool IrqLine() const { return (m_dicr >> 31) != 0; }

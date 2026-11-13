@@ -82,6 +82,8 @@ static void PrintUsage(const char* prog) {
               << "                                            -DPRM_RECOMP_GENERATED_DIR builds) and report counters\n"
               << "                     --recomp-quantum <n>   cycles between service points (default 1 = exact\n"
               << "                                            interpreter timing; larger = faster, IRQs late)\n"
+              << "                     --eager-devices        tick devices after every instruction (reference for\n"
+              << "                                            the lazy device time; same results, slower)\n"
               << "  --config           Open interactive settings menu\n"
               << "  --scan [dir]       Scan directory for legal game disc images (.iso/.bin/.cue)\n"
               << "  --diagnostics      Run full diagnostic suite\n"
@@ -808,6 +810,7 @@ struct BootOptions {
     std::vector<uint32_t> watch_pcs; // --watch-pc: log the first hits of these PCs (debugging aid)
     bool recomp = false;             // --recomp: run the linked recompiled modules natively
     uint32_t recomp_quantum = 1;     // --recomp-quantum: cycles between service points
+    bool eager_devices = false;      // --eager-devices: per-instruction device ticks (reference)
 };
 
 // Overlay slots (OVERLAY_MAP OV-010, discs 1 and 2): code loaded above the resident EXE text.
@@ -873,6 +876,7 @@ static int RunBootHarness(const std::string& disc_path, const BootOptions& opt) 
         }
         engine.SetRecompModules(modules, opt.recomp_quantum);
     }
+    engine.SetEagerDevices(opt.eager_devices);
     if (!engine.BootFromDisc(disc_path)) {
         std::cerr << "[BOOT] cannot boot " << disc_path << "\n";
         return EXIT_FAILURE;
@@ -1030,13 +1034,20 @@ static int RunBootHarness(const std::string& disc_path, const BootOptions& opt) 
         const uint64_t interp = st.interp_resident + st.interp_overlay + st.interp_kernel;
         const double total = double(st.native_instructions + interp);
         auto pct = [&](uint64_t v) { return total > 0 ? 100.0 * double(v) / total : 0.0; };
-        std::printf("[RECOMP] modules active: %s, rejected: %s, quantum %u\n", join(st.active).c_str(),
-                    join(st.rejected).c_str(), opt.recomp_quantum);
+        std::printf("[RECOMP] modules live at boot: %s; %zu more waiting for their code (overlays), quantum %u\n",
+                    join(st.active).c_str(), st.rejected.size(), opt.recomp_quantum);
         std::printf("[RECOMP] native entries %llu, service stops %llu, hand-backs %llu, dispatch misses %llu, "
                     "blocked entries %llu, HLE calls from native %llu\n", (unsigned long long)st.entries,
                     (unsigned long long)st.stops, (unsigned long long)(st.entries - st.stops),
                     (unsigned long long)st.dispatch_misses, (unsigned long long)st.blocked,
                     (unsigned long long)st.hle_calls);
+        std::vector<std::pair<std::string, uint64_t>> loads(st.loads.begin(), st.loads.end());
+        std::sort(loads.begin(), loads.end());
+        std::string lline;
+        for (const auto& l : loads) lline += " " + l.first + "x" + std::to_string(l.second);
+        std::printf("[RECOMP] overlay modules loaded %llu times (%llu hash mismatches, %llu retired by writes):%s\n",
+                    (unsigned long long)st.validations, (unsigned long long)st.hash_mismatches,
+                    (unsigned long long)st.invalidations, lline.empty() ? " none" : lline.c_str());
         std::printf("[RECOMP] instructions: native %llu (%.1f%%), interpreted resident %llu (%.1f%%), "
                     "overlay/other %llu (%.1f%%), kernel %llu (%.1f%%)\n",
                     (unsigned long long)st.native_instructions, pct(st.native_instructions),
@@ -1056,7 +1067,7 @@ static int RunBootHarness(const std::string& disc_path, const BootOptions& opt) 
         line.clear();
         for (size_t i = 0; i < top.size() && i < 12; ++i)
             line += " " + hex(top[i].first) + "x" + std::to_string(top[i].second);
-        std::printf("[RECOMP] hottest interpreted resident PCs:%s\n", line.empty() ? " none" : line.c_str());
+        std::printf("[RECOMP] hottest interpreted PCs in RAM:%s\n", line.empty() ? " none" : line.c_str());
     }
     if (!opt.dump_ram.empty()) { // debugging aid: raw 2 MB RAM image at stop (keep it out of the repo)
         std::ofstream f(opt.dump_ram, std::ios::binary);
@@ -1122,6 +1133,7 @@ int main(int argc, char* argv[]) {
                 for (int k = 1; k < argc; ++k) {
                     if (std::strcmp(argv[k], "--stop-at-first-load") == 0) opt.stop_at_first_load = true;
                     if (std::strcmp(argv[k], "--recomp") == 0) opt.recomp = true;
+                    if (std::strcmp(argv[k], "--eager-devices") == 0) opt.eager_devices = true;
                     if (k + 1 >= argc) continue;
                     if (std::strcmp(argv[k], "--max-frames") == 0) opt.max_frames = std::strtoull(argv[k + 1], nullptr, 10);
                     if (std::strcmp(argv[k], "--every") == 0) opt.every = std::strtoull(argv[k + 1], nullptr, 10);
@@ -1156,7 +1168,8 @@ int main(int argc, char* argv[]) {
                 }
                 return RunBootHarness(disc, opt);
             }
-            if (std::strcmp(argv[i], "--stop-at-first-load") == 0 || std::strcmp(argv[i], "--recomp") == 0) continue; // read by --boot
+            if (std::strcmp(argv[i], "--stop-at-first-load") == 0 || std::strcmp(argv[i], "--recomp") == 0 ||
+                std::strcmp(argv[i], "--eager-devices") == 0) continue; // read by --boot
             if (std::strcmp(argv[i], "--max-frames") == 0 || std::strcmp(argv[i], "--dump-ram") == 0 ||
                 std::strcmp(argv[i], "--dump-vram") == 0 || std::strcmp(argv[i], "--dump-frames") == 0 || std::strcmp(argv[i], "--dump-audio") == 0 ||
                 std::strcmp(argv[i], "--every") == 0 || std::strcmp(argv[i], "--press") == 0 ||

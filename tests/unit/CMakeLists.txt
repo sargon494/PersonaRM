@@ -150,7 +150,25 @@ add_custom_command(OUTPUT ${RENGINE_BIN} ${RENGINE_ENTRIES}
 add_custom_command(OUTPUT ${RENGINE_GEN}
     COMMAND recomp_gen ${RENGINE_BIN} 0x80010000 ${RENGINE_GEN} --entries-file ${RENGINE_ENTRIES} --module rengine
     DEPENDS recomp_gen ${RENGINE_BIN} ${RENGINE_ENTRIES})
-add_executable(unit_test_recomp_engine test_recomp_engine.cpp ${RENGINE_GEN})
+# Overlays (synthetic): a resident main and two overlays of one slot, each generated as its own module.
+add_executable(recomp_overlay_writer recomp_overlay_writer.cpp)
+target_compile_features(recomp_overlay_writer PRIVATE cxx_std_17)
+set(ROVL_STEM ${CMAKE_CURRENT_BINARY_DIR}/rovl)
+add_custom_command(OUTPUT ${ROVL_STEM}_main.bin ${ROVL_STEM}_main.entries ${ROVL_STEM}_a.bin ${ROVL_STEM}_a.entries
+                          ${ROVL_STEM}_b.bin ${ROVL_STEM}_b.entries
+    COMMAND recomp_overlay_writer ${ROVL_STEM}
+    DEPENDS recomp_overlay_writer)
+set(ROVL_GEN)
+foreach(_part main:0x80010000 a:0x80040000 b:0x80040000)
+    string(REPLACE ":" ";" _pb ${_part})
+    list(GET _pb 0 _p)
+    list(GET _pb 1 _base)
+    add_custom_command(OUTPUT ${ROVL_STEM}_${_p}_gen.cpp
+        COMMAND recomp_gen ${ROVL_STEM}_${_p}.bin ${_base} ${ROVL_STEM}_${_p}_gen.cpp --entries-file ${ROVL_STEM}_${_p}.entries --module rovl_${_p}
+        DEPENDS recomp_gen ${ROVL_STEM}_${_p}.bin ${ROVL_STEM}_${_p}.entries)
+    list(APPEND ROVL_GEN ${ROVL_STEM}_${_p}_gen.cpp)
+endforeach()
+add_executable(unit_test_recomp_engine test_recomp_engine.cpp ${RENGINE_GEN} ${ROVL_GEN})
 target_link_libraries(unit_test_recomp_engine PRIVATE personarm_core)
 target_include_directories(unit_test_recomp_engine PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(unit_test_recomp_engine PRIVATE cxx_std_17)

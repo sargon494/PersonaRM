@@ -26,7 +26,14 @@ void RaiseException(CpuState& s, uint32_t exc_code, uint32_t pc, bool delay_slot
 
 void Dispatch(CpuState& s, uint32_t target) {
     s.pc = target;
-    if (RecompFn fn = s.dispatcher ? s.dispatcher->Find(target) : nullptr) fn(s);
+    RecompFn fn = nullptr;
+    if (s.map) {
+        const uint32_t i = (target - s.map_lo) >> 2;
+        if (!(target & 3u) && i < s.map_words) fn = s.map[i];
+    } else if (s.dispatcher) {
+        fn = s.dispatcher->Find(target);
+    }
+    if (fn) fn(s);
     else if (!s.external || !s.external(s)) ++s.fallbacks;
 }
 

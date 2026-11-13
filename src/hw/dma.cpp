@@ -154,6 +154,15 @@ void Dma::UpdateMaster() {
     if (!was && now && m_irq_cb) m_irq_cb();
 }
 
+uint64_t Dma::CyclesToNextEvent() const {
+    uint64_t e = UINT64_MAX;
+    for (const Chan& c : m_ch) {
+        if (!c.running) continue;
+        e = std::min<uint64_t>(e, c.paced || c.pending == 0 ? 1 : c.pending);
+    }
+    return e;
+}
+
 void Dma::Tick(uint32_t cycles) {
     for (int ch = 0; ch < kNumChannels; ++ch) {
         Chan& c = m_ch[ch];
