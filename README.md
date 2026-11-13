@@ -22,9 +22,9 @@
 
 PersonaRM aims to run *Persona 2: Eternal Punishment* natively on Windows and Linux, without an external emulator. It rebuilds the PlayStation 1 hardware the game depends on (MIPS R3000A CPU, GTE, GPU, MDEC, SPU, CD-ROM) and wraps it in a launcher that manages your disc images, controls, and display options.
 
-> **Not playable yet.** PersonaRM is a research-driven work in progress. In a headless test harness, the game's real executable already plays its intro videos with sound, shows the title screen, and on a new game reaches the first 3D scenes with dialogue. There is no game window yet, and the boot has not been checked against a reference emulator. See [Status](#status) for what exists today.
+> **Not playable yet.** PersonaRM is a research-driven work in progress. The game's real executable plays its intro videos with sound, shows the title screen and, on a new game, reaches the first story scenes, free movement of the player character and the main menu. An optional SDL3 window shows it live; music and sound effects (SPU) are not audible yet. See [Status](#status) for what exists today.
 >
-> **Current phase: step 3 of 6, first boot.** Steps 1 (CPU correctness) and 2 (machine core) are done. `personarm --boot` runs disc 1 through the intro FMVs, the title screen and a new game up to the first in-game dialogue, with frames and audio dumped to files. Next: confirm the boot against a reference emulator trace, then player control in the field.
+> **Current phase: step 3 of 6, first boot.** Steps 1 and 2 are done, and the boot matches the PCSX-Redux reference emulator at event level up to the first overlay loads (gate G1: pass with known BIOS and timing differences). Next: SPU audio in the window, playing further (area changes, first battle), and then step 4, static recompilation.
 
 PersonaRM follows a strict **Bring Your Own Copy (BYOC)** model:
 
@@ -50,7 +50,7 @@ The chosen approach is an **interpreter-first native runtime**, with static reco
 
 1. ✅ **CPU correctness.** A conformance test suite for every MIPS-I instruction, including delay slots, load delays, unaligned access, overflow traps, exceptions, and edge cases of `DIV`.
 2. ✅ **Complete machine core.** Interrupt controller, DMA, timers, CD-ROM, joypad bus, and a real GPU rasterizer.
-3. 🔨 **First boot.** Run the game's main executable up to the first overlay load, and compare against a reference trace.
+3. 🔨 **First boot.** Run disc 1 from the intro FMVs to player control (done) and match a reference emulator trace (done, gate G1); keep playing further.
 4. **Static recompilation.** Translate the main executable and each overlay ahead of time, with the interpreter as fallback.
 5. **Replace library routines** (video playback, pad, memory card, CD, SPU, GPU) with hand-written native code.
 6. **Host layer.** SDL3 window and input, OpenGL display, host audio, then the launcher and modern enhancements.
@@ -72,10 +72,11 @@ A JIT is not planned: the PS1 workload does not call for one.
 | BIOS HLE | ✅ Kernel events, interrupt chain, patchable tables and file calls the game uses (memory card still missing) |
 | Interrupts, VBlank, root counters | ✅ Implemented (timing approximated) |
 | DMA, CD-ROM | ✅ Wired into the bus; the game reads FILEPOS and its first overlay through them (timing approximated) |
-| Real-game boot (`personarm --boot`) | 🔨 Disc 1: intro FMVs, title screen, new game and first 3D scenes with dialogue (scripted input, frames/audio dumped to files) |
+| Real-game boot (`personarm --boot`) | 🔨 Disc 1: intro, title, new game, story scenes, free movement and the main menu (scripted input via `--input-script`) |
+| Reference comparison (gate G1) | ✅ Matches PCSX-Redux at event level up to the first overlay loads; known BIOS/timing differences |
 | Trace format for reference comparison (`PRMTRACE v1`) | ✅ Format, comparator and `--trace-out` |
 | Static recompiler (code generation) | ⏳ Not started |
-| Windowed SDL / OpenGL display and host audio | ⏳ Stubs only |
+| Window, input and audio (`personarm_sdl`, optional SDL3) | 🟡 Window, keyboard/gamepad and XA audio work; SPU audio not wired to the host yet |
 | Launcher | 🟡 Disc scan and verification; launching the game is a stub |
 
 ## Quick start
