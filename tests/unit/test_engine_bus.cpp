@@ -2,6 +2,7 @@
 // post-BIOS CD state and SYSTEM.CNF STACK. Synthetic data only (psx-spx "Memory Map", "DMA Channels",
 // "CDROM Controller I/O Ports", "SPU Control and Status Register", "Timers").
 #undef NDEBUG
+#include <sstream>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -174,6 +175,15 @@ static void TestPadScript(Engine& e) {
     CHECK(Engine::ParsePadPress("start@10", p) && p.mask == 0x0008 && p.frame == 10 && p.frames == 5);
     CHECK(Engine::ParsePadPress("cross@3+2", p) && p.mask == 0x4000 && p.frame == 3 && p.frames == 2);
     CHECK(!Engine::ParsePadPress("start", p) && !Engine::ParsePadPress("jump@1", p) && !Engine::ParsePadPress("up@x", p));
+    {
+        std::istringstream in("# intro\n300 start\n\n1900 circle 3  # confirm\n");
+        std::vector<Engine::PadPress> v;
+        size_t bad = 0;
+        CHECK(Engine::ParsePadScript(in, v, bad) && v.size() == 2 && v[0].frame == 300 && v[0].frames == 5 &&
+              v[1].mask == 0x2000 && v[1].frame == 1900 && v[1].frames == 3);
+        std::istringstream bad_in("10 start\n20 jump\n");
+        CHECK(!Engine::ParsePadScript(bad_in, v, bad) && bad == 2);
+    }
     auto poll = [&] {
         uint32_t b[5];
         const uint32_t tx[5] = {0x01, 0x42, 0, 0, 0};

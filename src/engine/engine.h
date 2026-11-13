@@ -116,6 +116,9 @@ public:
     void SetPadScript(std::vector<PadPress> script) { m_pad_script = std::move(script); }
     /// "<button>@<frame>[+<frames>]", e.g. "start@300" or "cross@600+10". False on bad syntax.
     static bool ParsePadPress(const std::string& text, PadPress& out);
+    /// --input-script: one "<frame> <button> [<hold>]" per line, '#' comments. False (and the 1-based
+    /// line in bad_line) on the first bad line.
+    static bool ParsePadScript(std::istream& in, std::vector<PadPress>& out, size_t& bad_line);
     /// Buttons held by the script at the current frame (bit set = pressed).
     uint16_t ScriptedButtons() const;
 
