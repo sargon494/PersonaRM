@@ -1,5 +1,6 @@
 // Reveal sections as they scroll into view.
 (function () {
+    document.documentElement.classList.add('js');
     var items = document.querySelectorAll('.reveal');
     if (!('IntersectionObserver' in window)) {
         items.forEach(function (el) { el.classList.add('in'); });

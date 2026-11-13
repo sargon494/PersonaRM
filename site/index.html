@@ -51,8 +51,9 @@
                 <p class="lead">
                     PersonaRM is an open-source runtime and launcher for Windows and Linux, in
                     active development. It rebuilds the PlayStation 1 hardware the game needs.
-                    Not playable yet, but the game's real executable already plays its intro, shows
-                    the title screen and reaches its first 3D scenes with dialogue.
+                    Not playable yet, but in a headless test harness (no game window yet) the game's
+                    real executable already plays its intro, shows the title screen and reaches its first
+                    3D scenes with dialogue.
                 </p>
                 <div class="actions">
                     <a class="btn btn-primary" href="#start">Get started</a>
@@ -104,19 +105,19 @@
                 </article>
                 <article class="feature reveal">
                     <h3>Geometry engine</h3>
-                    <p>GTE vector and matrix math. Partial today: about 6 of 22 commands.</p>
+                    <p>GTE vector and matrix math: all 22 commands, not yet checked against real-hardware results.</p>
                 </article>
                 <article class="feature reveal">
                     <h3>GPU and VRAM</h3>
-                    <p>1 MB VRAM at 1024×512 with GP0 and GP1 handling. Polygon drawing is not implemented yet.</p>
+                    <p>Software rasterizer over 1 MB of VRAM: polygons, lines, sprites, CLUT textures and semi-transparency.</p>
                 </article>
                 <article class="feature reveal">
                     <h3>MDEC video</h3>
-                    <p>Macroblock decoder, partial. The game's videos are 320×240 STR streams with XA audio.</p>
+                    <p>Decodes the game's 320×240 STR videos with their XA audio; timing values are approximated.</p>
                 </article>
                 <article class="feature reveal">
                     <h3>SPU audio</h3>
-                    <p>24 voices with ADPCM decoding and stereo mixing. Pitch, envelopes and reverb are still to do.</p>
+                    <p>24 voices with ADPCM, pitch, envelopes and reverb. The interpolation table is still an approximation.</p>
                 </article>
                 <article class="feature reveal">
                     <h3>Disc handling</h3>
@@ -132,7 +133,7 @@
                 </article>
                 <article class="feature reveal">
                     <h3>Memory card and saves</h3>
-                    <p>A virtual 128 KB PS1 memory card, plus quicksave, in the prototype save manager.</p>
+                    <p>Planned. For now the game sees no memory card inserted; quicksave comes later.</p>
                 </article>
             </div>
         </section>
@@ -147,14 +148,14 @@
                 get the CPU provably correct, finish the machine core, boot the game, then compile its code ahead of
                 time.</p>
             <p class="intro reveal"><strong>Current phase: step 3 of 6, first boot.</strong> The CPU and the machine core
-                are done. Disc 1 now plays its intro videos with sound, shows the title screen and, on a new game,
-                reaches the first 3D scenes with dialogue. Next: check the boot against a reference emulator, then
+                are done. In a headless test harness, disc 1 now plays its intro videos with sound, shows the title
+                screen and, on a new game, reaches the first 3D scenes with dialogue. Next: check the boot against a reference emulator, then
                 player control.</p>
             <div class="status-table reveal" role="table" aria-label="Subsystem status">
                 <div class="row head" role="row"><span role="columnheader">Subsystem</span><span
                         role="columnheader">Status</span></div>
-                <div class="row" role="row"><span role="cell">BYOC launcher and configuration</span><span role="cell"
-                        class="tag prototype">Prototype</span></div>
+                <div class="row" role="row"><span role="cell">Launcher (disc scan and verification)</span><span role="cell"
+                        class="tag prototype">Launching the game is a stub</span></div>
                 <div class="row" role="row"><span role="cell">Disc reader and PS-X EXE loader</span><span role="cell"
                         class="tag ok">Implemented</span></div>
                 <div class="row" role="row"><span role="cell">Static analysis tools</span><span role="cell"
@@ -164,7 +165,7 @@
                 <div class="row" role="row"><span role="cell">GTE and GPU rasterizer</span><span role="cell"
                         class="tag ok">Implemented</span></div>
                 <div class="row" role="row"><span role="cell">MDEC video, XA audio and SPU</span><span role="cell"
-                        class="tag ok">Wired in</span></div>
+                        class="tag progress">Wired in, timing approximated</span></div>
                 <div class="row" role="row"><span role="cell">BIOS HLE and kernel events</span><span role="cell"
                         class="tag ok">Implemented</span></div>
                 <div class="row" role="row"><span role="cell">Interrupts, VBlank and timers</span><span role="cell"
@@ -197,7 +198,7 @@
                 </li>
                 <li class="reveal">
                     <h3>Download or build PersonaRM</h3>
-                    <p>Build from source using the instructions in the README, or wait for a release.</p>
+                    <p>Build from source using the instructions in the README. There are no releases yet.</p>
                 </li>
                 <li class="reveal">
                     <h3>Point it at your discs</h3>

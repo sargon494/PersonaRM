@@ -50,7 +50,7 @@ The chosen approach is an **interpreter-first native runtime**, with static reco
 
 1. ✅ **CPU correctness.** A conformance test suite for every MIPS-I instruction, including delay slots, load delays, unaligned access, overflow traps, exceptions, and edge cases of `DIV`.
 2. ✅ **Complete machine core.** Interrupt controller, DMA, timers, CD-ROM, joypad bus, and a real GPU rasterizer.
-3. 🔨 **First boot.** Run the game's main executable up to the first overlay load, and compare against a reference trace.
+3. 🔨 **First boot.** Run disc 1 from the intro FMVs to the first in-game dialogue (done), then compare it against a reference emulator trace.
 4. **Static recompilation.** Translate the main executable and each overlay ahead of time, with the interpreter as fallback.
 5. **Replace library routines** (video playback, pad, memory card, CD, SPU, GPU) with hand-written native code.
 6. **Host layer.** SDL3 window and input, OpenGL display, host audio, then the launcher and modern enhancements.
