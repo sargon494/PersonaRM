@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PersonaRM — 「ペルソナ2 罰」向けネイティブランタイム</title>
+    <meta name="description"
+        content="PersonaRM は「ペルソナ2 罰」(Persona 2: Eternal Punishment)向けのオープンソースのネイティブ PC ランタイム兼ランチャーです。ゲームはご自身のコピーをご用意ください。" />
+    <meta name="theme-color" content="#07070b" />
+    <link rel="icon" href="../assets/logo.png" />
+    <meta property="og:title" content="PersonaRM" />
+    <meta property="og:description"
+        content="「ペルソナ2 罰」向けネイティブ PC ランタイム。ゲームはご自身のコピーをご用意ください。" />
+    <meta property="og:image" content="../assets/logo.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+        href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:opsz,wght@6..96,500;6..96,700&family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500&display=swap"
+        rel="stylesheet" />
+    <link rel="alternate" hreflang="en" href="https://sargon494.github.io/PersonaRM/" />
+    <link rel="alternate" hreflang="es" href="https://sargon494.github.io/PersonaRM/es/" />
+    <link rel="alternate" hreflang="ja" href="https://sargon494.github.io/PersonaRM/ja/" />
+    <link rel="alternate" hreflang="x-default" href="https://sargon494.github.io/PersonaRM/" />
+    <link
+        href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=Noto+Serif+JP:wght@500;700&display=swap"
+        rel="stylesheet" />
+    <link rel="stylesheet" href="../styles.css" />
+</head>
+
+<body>
+
+    <a class="skip" href="#main">本文へスキップ</a>
+
+    <header class="topbar">
+        <a class="brand" href="#top" aria-label="PersonaRM ホーム">
+            <img src="../assets/logo.png" alt="" width="34" height="34" />
+            <span>PersonaRM</span>
+        </a>
+        <nav aria-label="メインメニュー">
+            <a href="#features">機能</a>
+            <a href="#status">進捗</a>
+            <a href="#start">クイックスタート</a>
+            <a href="#developers">開発者向け</a>
+            <span class="lang" role="group" aria-label="言語">
+                <a class="lang-link" href="../index.html" hreflang="en" lang="en">EN</a>
+                <a class="lang-link" href="../es/index.html" hreflang="es" lang="es">ES</a>
+                <a class="lang-link" href="index.html" hreflang="ja" lang="ja" aria-current="true">日本語</a>
+            </span>
+            <a class="nav-cta" href="https://github.com/sargon494/PersonaRM">GitHub</a>
+        </nav>
+    </header>
+
+    <main id="main">
+
+        <!-- HERO -->
+        <section class="hero" id="top">
+            <div class="smoke" aria-hidden="true"></div>
+            <div class="hero-inner">
+                <img class="hero-logo" src="../assets/logo.png" alt="PersonaRM のロゴ" />
+                <p class="eyebrow">ネイティブ PC ランタイム · ペルソナ2 罰</p>
+                <h1>ゲームをネイティブで動かす。 <span>コピーはご自身で。</span></h1>
+                <p class="lead">
+                    PersonaRM は Windows と Linux 向けのオープンソースのランタイム兼ランチャーで、
+                    現在開発中です。ゲームに必要な PlayStation 1 のハードウェアを再構築しています。
+                    まだプレイはできませんが、ゲーム本来の実行ファイルはすでにイントロを再生し、
+                    タイトル画面を表示し、ニューゲームでは操作キャラクターの自由移動とメインメニューまで
+                    到達します(任意で SDL3 ウィンドウを使用)。
+                </p>
+                <div class="actions">
+                    <a class="btn btn-primary" href="#start">はじめる</a>
+                    <a class="btn" href="https://github.com/sargon494/PersonaRM">ソースを見る</a>
+                </div>
+                <ul class="chips" aria-label="プロジェクトの概要">
+                    <li>GPL v3+</li>
+                    <li>Windows · Linux</li>
+                    <li>C++17</li>
+                    <li>ゲームファイルは含まれません</li>
+                </ul>
+            </div>
+        </section>
+
+        <!-- PRINCIPLES -->
+        <section class="section principles" aria-labelledby="principles-title">
+            <header class="section-head reveal">
+                <span class="num">01</span>
+                <h2 id="principles-title"><em>Bring Your Own Copy</em>(ご自身のコピー)が前提</h2>
+            </header>
+            <div class="grid three">
+                <article class="card reveal">
+                    <h3>ゲームの内容は含みません</h3>
+                    <p>PersonaRM にはゲームのバイナリ、ROM、アセットは一切含まれません。ダウンロードするのはランタイムだけです。
+                    </p>
+                </article>
+                <article class="card reveal">
+                    <h3>あなたのディスク、あなたのファイル</h3>
+                    <p>ご自身が所有するコピーのディスクイメージ(<code>.cue/.bin</code>、<code>.iso</code>、
+                        <code>.img</code>)を PersonaRM に指定します。</p>
+                </article>
+                <article class="card reveal">
+                    <h3>予定している拡張機能</h3>
+                    <p>ゲームが起動した後に、ワイドスクリーン表示、コントローラーのボタン表示、最大 16 倍のターボ速度、即時クイックセーブを予定しています。</p>
+                </article>
+            </div>
+        </section>
+
+        <!-- FEATURES -->
+        <section class="section" id="features" aria-labelledby="features-title">
+            <header class="section-head reveal">
+                <span class="num">02</span>
+                <h2 id="features-title">ハードウェアを<em>再構築中</em></h2>
+            </header>
+            <div class="grid features">
+                <article class="feature reveal">
+                    <h3>MIPS-I CPU</h3>
+                    <p>分岐およびロードのディレイスロットに対応した R3000A インタプリタです。ほかの部分を検証する際の基準になります。</p>
+                </article>
+                <article class="feature reveal">
+                    <h3>ジオメトリエンジン</h3>
+                    <p>GTE のベクトル・行列演算を 22 コマンドすべて実装済みです。実機の結果との照合はまだ行っていません。</p>
+                </article>
+                <article class="feature reveal">
+                    <h3>GPU と VRAM</h3>
+                    <p>1 MB の VRAM 上で動作するソフトウェアラスタライザです。ポリゴン、線、スプライト、CLUT テクスチャ、半透明に対応しています。</p>
+                </article>
+                <article class="feature reveal">
+                    <h3>MDEC ムービー</h3>
+                    <p>ゲームの 320×240 の STR ムービーを XA 音声とともにデコードします。タイミングの値は近似です。</p>
+                </article>
+                <article class="feature reveal">
+                    <h3>SPU オーディオ</h3>
+                    <p>ADPCM、ピッチ、エンベロープ、リバーブを備えた 24 ボイス。補間テーブルはまだ近似です。</p>
+                </article>
+                <article class="feature reveal">
+                    <h3>ディスクの扱い</h3>
+                    <p>ISO 9660 と生の CD-ROM XA イメージに対応し、<code>.cue</code> も解決します。ゲームのデータファイルをマッピングするツールも備えています。</p>
+                </article>
+                <article class="feature reveal">
+                    <h3>表示モード</h3>
+                    <p>予定:4:3(左右に黒帯)、16:9、21:9 ウルトラワイド、画面いっぱい(Fill)。</p>
+                </article>
+                <article class="feature reveal">
+                    <h3>コントローラー</h3>
+                    <p>予定:キーボード、マウス、ゲームパッド。PlayStation、Xbox、Nintendo のプロファイルを用意します。</p>
+                </article>
+                <article class="feature reveal">
+                    <h3>メモリーカードとセーブ</h3>
+                    <p>予定。現時点では、ゲームからはメモリーカードが挿入されていないように見えます。クイックセーブは後で対応します。</p>
+                </article>
+            </div>
+        </section>
+
+        <!-- STATUS -->
+        <section class="section" id="status" aria-labelledby="status-title">
+            <header class="section-head reveal">
+                <span class="num">03</span>
+                <h2 id="status-title">プロジェクトの<em>進捗</em></h2>
+            </header>
+            <p class="intro reveal">PersonaRM は開発中で、まだプレイはできません。計画は次のとおりです。
+                CPU の正しさを検証できる状態にし、マシンの中核を完成させ、ゲームを起動し、その後ゲームのコードを事前にコンパイルします。</p>
+            <p class="intro reveal"><strong>現在のフェーズ:全 6 ステップ中のステップ 3、初回起動。</strong> CPU とマシンの中核は完成しています。
+                ディスク 1 は音声付きでイントロを再生し、タイトル画面を表示し、ニューゲームでは自由移動とメインメニューまで到達します。
+                起動の挙動は、最初のオーバーレイのロードまで、リファレンスエミュレーターの PCSX-Redux と一致しています。
+                次は、SPU オーディオ、さらに先まで進めること、そして静的再コンパイルです。</p>
+            <div class="status-table reveal" role="table" aria-label="サブシステムの進捗">
+                <div class="row head" role="row"><span role="columnheader">サブシステム</span><span
+                        role="columnheader">状況</span></div>
+                <div class="row" role="row"><span role="cell">ランチャー(ディスクのスキャンと検証)</span><span role="cell"
+                        class="tag prototype">ゲームの起動は仮実装</span></div>
+                <div class="row" role="row"><span role="cell">ディスクリーダーと PS-X EXE ローダー</span><span role="cell"
+                        class="tag ok">実装済み</span></div>
+                <div class="row" role="row"><span role="cell">静的解析ツール</span><span role="cell"
+                        class="tag ok">実装済み</span></div>
+                <div class="row" role="row"><span role="cell">MIPS-I CPU インタプリタ</span><span role="cell"
+                        class="tag ok">適合テストスイート合格</span></div>
+                <div class="row" role="row"><span role="cell">GTE と GPU ラスタライザ</span><span role="cell"
+                        class="tag ok">実装済み</span></div>
+                <div class="row" role="row"><span role="cell">MDEC ムービー、XA 音声、SPU</span><span role="cell"
+                        class="tag progress">接続済み、タイミングは近似</span></div>
+                <div class="row" role="row"><span role="cell">BIOS HLE とカーネルイベント</span><span role="cell"
+                        class="tag ok">実装済み</span></div>
+                <div class="row" role="row"><span role="cell">割り込み、VBlank、タイマー</span><span role="cell"
+                        class="tag ok">実装済み</span></div>
+                <div class="row" role="row"><span role="cell">DMA、CD-ROM、SPU</span><span role="cell"
+                        class="tag ok">バスに接続済み</span></div>
+                <div class="row" role="row"><span role="cell">実ゲームの起動</span><span role="cell"
+                        class="tag progress">自由移動とメインメニュー</span></div>
+                <div class="row" role="row"><span role="cell">静的リコンパイラ</span><span role="cell"
+                        class="tag prototype">未着手</span></div>
+                <div class="row" role="row"><span role="cell">ウィンドウ、入力、オーディオ(SDL3)</span><span role="cell"
+                        class="tag progress">動作中。SPU オーディオは未対応</span></div>
+            </div>
+        </section>
+
+        <!-- QUICK START -->
+        <section class="section" id="start" aria-labelledby="start-title">
+            <header class="section-head reveal">
+                <span class="num">04</span>
+                <h2 id="start-title"><em>クイック</em>スタート</h2>
+            </header>
+            <div class="notice reveal">
+                <strong>まだプレイはできません。</strong>ゲームのウィンドウはありません。以下のコマンドは、開発用にディスクイメージと
+                設定を管理するものです。
+            </div>
+            <ol class="steps">
+                <li class="reveal">
+                    <h3>正規のコピーを用意する</h3>
+                    <p>ご自身が所有する「ペルソナ2 罰」(<em>Persona 2: Eternal Punishment</em>)のディスクが必要です。</p>
+                </li>
+                <li class="reveal">
+                    <h3>PersonaRM をダウンロードまたはビルドする</h3>
+                    <p>README の手順に従ってソースからビルドしてください。リリース版はまだありません。</p>
+                </li>
+                <li class="reveal">
+                    <h3>ディスクを指定する</h3>
+                    <p>フォルダーをスキャンし、イメージを検証します。</p>
+                    <div class="code">
+                        <pre><code>personarm --scan "/path/to/discs"
+personarm --verify-disc "/path/to/disc1.cue"
+personarm --portal</code></pre>
+                        <button class="copy" type="button" aria-label="コマンドをコピー">コピー</button>
+                    </div>
+                </li>
+            </ol>
+            <p class="fine reveal">設定は <code>personarm_config.json</code> に保存されます。すべてのオプションは
+                <code>personarm --help</code> で確認できます。</p>
+        </section>
+
+        <!-- DEVELOPERS -->
+        <section class="section" id="developers" aria-labelledby="dev-title">
+            <header class="section-head reveal">
+                <span class="num">05</span>
+                <h2 id="dev-title"><em>開発者</em>向け</h2>
+            </header>
+            <div class="grid two">
+                <article class="card reveal">
+                    <h3>アーキテクチャ</h3>
+                    <p>中央のエンジンが、KUSEG、KSEG0、KSEG1 のバスを通じて、メモリを RAM、スクラッチパッド、GPU、
+                        SPU、コントローラー SPI へ振り分けます。</p>
+                    <a class="link" href="https://github.com/sargon494/PersonaRM/blob/main/ARCHITECTURE.md">ARCHITECTURE.md を読む →</a>
+                </article>
+                <article class="card reveal">
+                    <h3>ビルドとテスト</h3>
+                    <p>CMake 3.20 以上、C++17、Python 製のテストランナーを使います。継続的インテグレーションは Windows と Linux で動作します。
+                    </p>
+                    <a class="link"
+                        href="https://github.com/sargon494/PersonaRM/blob/main/docs/DEVELOPER_GUIDE.md">開発者ガイド →</a>
+                </article>
+                <article class="card reveal">
+                    <h3>コントリビュート</h3>
+                    <p>バグ報告、機能要望、プルリクエストを歓迎します。まずコントリビューター向けのルールをお読みください。
+                    </p>
+                    <a class="link"
+                        href="https://github.com/sargon494/PersonaRM/blob/main/CONTRIBUTING.md">CONTRIBUTING.md →</a>
+                </article>
+                <article class="card reveal">
+                    <h3>オープンソース</h3>
+                    <p>GPL v3 以降のライセンスで公開しています。フォークして、読み解き、改良してください。</p>
+                    <a class="link" href="https://github.com/sargon494/PersonaRM">リポジトリを見る →</a>
+                </article>
+            </div>
+        </section>
+
+        <!-- CTA -->
+        <section class="cta reveal">
+            <div class="smoke" aria-hidden="true"></div>
+            <h2><em>降りる</em>準備はできましたか?</h2>
+            <p>リポジトリをクローンしてビルドし、ご自身のディスクを用意してください。</p>
+            <a class="btn btn-primary" href="https://github.com/sargon494/PersonaRM">GitHub で開く</a>
+        </section>
+
+    </main>
+
+    <footer class="footer">
+        <div class="footer-inner">
+            <img src="../assets/logo.png" alt="" width="64" height="64" />
+            <p class="legal">
+                PersonaRM は独立した非公式のプロジェクトです。Atlus、Sega、Sony Interactive Entertainmentとは提携・承認・後援の関係にありません。
+                ゲームのディスク、バイナリ、ROM、アセットは一切配布しません。
+                すべての商標は、それぞれの所有者に帰属します。
+            </p>
+            <p class="license">GPL v3 以降で公開 · <a
+                    href="https://github.com/sargon494/PersonaRM">sargon494/PersonaRM</a></p>
+        </div>
+    </footer>
+
+    <script src="../main.js"></script>
+</body>
+
+</html>

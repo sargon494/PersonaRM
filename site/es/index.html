@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PersonaRM — Runtime nativo para Persona 2: Eternal Punishment</title>
+    <meta name="description"
+        content="PersonaRM es un runtime y lanzador nativo de código abierto para PC de Persona 2: Eternal Punishment. Trae tu propia copia." />
+    <meta name="theme-color" content="#07070b" />
+    <link rel="icon" href="../assets/logo.png" />
+    <meta property="og:title" content="PersonaRM" />
+    <meta property="og:description"
+        content="Runtime nativo para PC de Persona 2: Eternal Punishment. Trae tu propia copia." />
+    <meta property="og:image" content="../assets/logo.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+        href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:opsz,wght@6..96,500;6..96,700&family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500&display=swap"
+        rel="stylesheet" />
+    <link rel="alternate" hreflang="en" href="https://sargon494.github.io/PersonaRM/" />
+    <link rel="alternate" hreflang="es" href="https://sargon494.github.io/PersonaRM/es/" />
+    <link rel="alternate" hreflang="ja" href="https://sargon494.github.io/PersonaRM/ja/" />
+    <link rel="alternate" hreflang="x-default" href="https://sargon494.github.io/PersonaRM/" />
+    <link rel="stylesheet" href="../styles.css" />
+</head>
+
+<body>
+
+    <a class="skip" href="#main">Saltar al contenido</a>
+
+    <header class="topbar">
+        <a class="brand" href="#top" aria-label="Inicio de PersonaRM">
+            <img src="../assets/logo.png" alt="" width="34" height="34" />
+            <span>PersonaRM</span>
+        </a>
+        <nav aria-label="Principal">
+            <a href="#features">Características</a>
+            <a href="#status">Estado</a>
+            <a href="#start">Inicio rápido</a>
+            <a href="#developers">Desarrolladores</a>
+            <span class="lang" role="group" aria-label="Idioma">
+                <a class="lang-link" href="../index.html" hreflang="en" lang="en">EN</a>
+                <a class="lang-link" href="index.html" hreflang="es" lang="es" aria-current="true">ES</a>
+                <a class="lang-link" href="../ja/index.html" hreflang="ja" lang="ja">日本語</a>
+            </span>
+            <a class="nav-cta" href="https://github.com/sargon494/PersonaRM">GitHub</a>
+        </nav>
+    </header>
+
+    <main id="main">
+
+        <!-- HERO -->
+        <section class="hero" id="top">
+            <div class="smoke" aria-hidden="true"></div>
+            <div class="hero-inner">
+                <img class="hero-logo" src="../assets/logo.png" alt="Logotipo de PersonaRM" />
+                <p class="eyebrow">Runtime nativo para PC · Persona 2: Eternal Punishment</p>
+                <h1>Ejecuta el juego de forma nativa. <span>Trae tu propia copia.</span></h1>
+                <p class="lead">
+                    PersonaRM es un runtime y lanzador de código abierto para Windows y Linux, en
+                    desarrollo activo. Reconstruye el hardware de PlayStation 1 que necesita el juego.
+                    Todavía no se puede jugar, pero el ejecutable real del juego ya reproduce su intro, muestra la
+                    pantalla de título y, en una partida nueva, llega al movimiento libre del personaje y al
+                    menú principal, en una ventana SDL3 opcional.
+                </p>
+                <div class="actions">
+                    <a class="btn btn-primary" href="#start">Empezar</a>
+                    <a class="btn" href="https://github.com/sargon494/PersonaRM">Ver código</a>
+                </div>
+                <ul class="chips" aria-label="Datos del proyecto">
+                    <li>GPL v3+</li>
+                    <li>Windows · Linux</li>
+                    <li>C++17</li>
+                    <li>Sin archivos del juego</li>
+                </ul>
+            </div>
+        </section>
+
+        <!-- PRINCIPLES -->
+        <section class="section principles" aria-labelledby="principles-title">
+            <header class="section-head reveal">
+                <span class="num">01</span>
+                <h2 id="principles-title">Basado en <em>Trae tu propia copia</em></h2>
+            </header>
+            <div class="grid three">
+                <article class="card reveal">
+                    <h3>Sin contenido del juego</h3>
+                    <p>PersonaRM no contiene binarios, ROMs ni recursos del juego. El runtime es lo único que descargas.
+                    </p>
+                </article>
+                <article class="card reveal">
+                    <h3>Tu disco, tus archivos</h3>
+                    <p>Indica a PersonaRM una imagen de disco de una copia que poseas: <code>.cue/.bin</code>, <code>.iso</code>
+                        o <code>.img</code>.</p>
+                </article>
+                <article class="card reveal">
+                    <h3>Mejoras previstas</h3>
+                    <p>Vistas panorámicas, iconos de mando, velocidad turbo de hasta 16× y guardado rápido instantáneo, cuando el juego arranque.</p>
+                </article>
+            </div>
+        </section>
+
+        <!-- FEATURES -->
+        <section class="section" id="features" aria-labelledby="features-title">
+            <header class="section-head reveal">
+                <span class="num">02</span>
+                <h2 id="features-title">Hardware, <em>en reconstrucción</em></h2>
+            </header>
+            <div class="grid features">
+                <article class="feature reveal">
+                    <h3>CPU MIPS-I</h3>
+                    <p>Intérprete del R3000A con delay slots de salto y de carga. Es la referencia con la que se comprueba el resto.</p>
+                </article>
+                <article class="feature reveal">
+                    <h3>Motor de geometría</h3>
+                    <p>Cálculo vectorial y matricial del GTE: los 22 comandos, aún sin contrastar con resultados de hardware real.</p>
+                </article>
+                <article class="feature reveal">
+                    <h3>GPU y VRAM</h3>
+                    <p>Rasterizador por software sobre 1 MB de VRAM: polígonos, líneas, sprites, texturas CLUT y semitransparencia.</p>
+                </article>
+                <article class="feature reveal">
+                    <h3>Vídeo MDEC</h3>
+                    <p>Decodifica los vídeos STR de 320×240 del juego con su audio XA; los valores de temporización son aproximados.</p>
+                </article>
+                <article class="feature reveal">
+                    <h3>Audio SPU</h3>
+                    <p>24 voces con ADPCM, tono, envolventes y reverb. La tabla de interpolación sigue siendo una aproximación.</p>
+                </article>
+                <article class="feature reveal">
+                    <h3>Gestión de discos</h3>
+                    <p>Imágenes ISO 9660 y CD-ROM XA en bruto con resolución de <code>.cue</code>, y herramientas que mapean los archivos de datos del juego.</p>
+                </article>
+                <article class="feature reveal">
+                    <h3>Modos de pantalla</h3>
+                    <p>Previsto: 4:3 con bandas laterales, 16:9, 21:9 UltraWide y Rellenar.</p>
+                </article>
+                <article class="feature reveal">
+                    <h3>Mandos</h3>
+                    <p>Previsto: teclado, ratón y mando, con perfiles de PlayStation, Xbox y Nintendo.</p>
+                </article>
+                <article class="feature reveal">
+                    <h3>Tarjeta de memoria y partidas</h3>
+                    <p>Previsto. Por ahora el juego no ve ninguna tarjeta de memoria insertada; el guardado rápido llegará después.</p>
+                </article>
+            </div>
+        </section>
+
+        <!-- STATUS -->
+        <section class="section" id="status" aria-labelledby="status-title">
+            <header class="section-head reveal">
+                <span class="num">03</span>
+                <h2 id="status-title"><em>Estado</em> del proyecto</h2>
+            </header>
+            <p class="intro reveal">PersonaRM está en desarrollo activo y todavía no se puede jugar. El plan:
+                lograr una CPU demostrablemente correcta, terminar el núcleo de la máquina, arrancar el juego y después compilar su código por
+                adelantado.</p>
+            <p class="intro reveal"><strong>Fase actual: paso 3 de 6, primer arranque.</strong> La CPU y el núcleo de la máquina
+                están terminados. El disco 1 reproduce su intro con sonido, muestra la pantalla de título y, en una partida nueva, llega al movimiento
+                libre y al menú principal. El arranque coincide con el emulador de referencia PCSX-Redux hasta las primeras
+                cargas de overlays. Siguiente: audio SPU, avanzar más en el juego y luego la recompilación estática.</p>
+            <div class="status-table reveal" role="table" aria-label="Estado de los subsistemas">
+                <div class="row head" role="row"><span role="columnheader">Subsistema</span><span
+                        role="columnheader">Estado</span></div>
+                <div class="row" role="row"><span role="cell">Lanzador (escaneo y verificación de discos)</span><span role="cell"
+                        class="tag prototype">Lanzar el juego es un esbozo</span></div>
+                <div class="row" role="row"><span role="cell">Lector de discos y cargador de PS-X EXE</span><span role="cell"
+                        class="tag ok">Implementado</span></div>
+                <div class="row" role="row"><span role="cell">Herramientas de análisis estático</span><span role="cell"
+                        class="tag ok">Implementado</span></div>
+                <div class="row" role="row"><span role="cell">Intérprete de CPU MIPS-I</span><span role="cell"
+                        class="tag ok">Suite de conformidad superada</span></div>
+                <div class="row" role="row"><span role="cell">GTE y rasterizador de GPU</span><span role="cell"
+                        class="tag ok">Implementado</span></div>
+                <div class="row" role="row"><span role="cell">Vídeo MDEC, audio XA y SPU</span><span role="cell"
+                        class="tag progress">Integrado, temporización aproximada</span></div>
+                <div class="row" role="row"><span role="cell">BIOS HLE y eventos del kernel</span><span role="cell"
+                        class="tag ok">Implementado</span></div>
+                <div class="row" role="row"><span role="cell">Interrupciones, VBlank y temporizadores</span><span role="cell"
+                        class="tag ok">Implementado</span></div>
+                <div class="row" role="row"><span role="cell">DMA, CD-ROM y SPU</span><span role="cell"
+                        class="tag ok">Conectado al bus</span></div>
+                <div class="row" role="row"><span role="cell">Arranque del juego real</span><span role="cell"
+                        class="tag progress">Movimiento libre y menú principal</span></div>
+                <div class="row" role="row"><span role="cell">Recompilador estático</span><span role="cell"
+                        class="tag prototype">Sin empezar</span></div>
+                <div class="row" role="row"><span role="cell">Ventana, entrada y audio (SDL3)</span><span role="cell"
+                        class="tag progress">Funciona; falta el audio SPU</span></div>
+            </div>
+        </section>
+
+        <!-- QUICK START -->
+        <section class="section" id="start" aria-labelledby="start-title">
+            <header class="section-head reveal">
+                <span class="num">04</span>
+                <h2 id="start-title"><em>Inicio</em> rápido</h2>
+            </header>
+            <div class="notice reveal">
+                <strong>Todavía no se puede jugar.</strong> No hay ventana de juego. Los comandos de abajo gestionan imágenes de disco y
+                configuración para el desarrollo.
+            </div>
+            <ol class="steps">
+                <li class="reveal">
+                    <h3>Consigue una copia legal</h3>
+                    <p>Necesitas el disco de <em>Persona 2: Eternal Punishment</em>, de una copia que poseas.</p>
+                </li>
+                <li class="reveal">
+                    <h3>Descarga o compila PersonaRM</h3>
+                    <p>Compila desde el código fuente siguiendo las instrucciones del README. Todavía no hay versiones publicadas.</p>
+                </li>
+                <li class="reveal">
+                    <h3>Indícale tus discos</h3>
+                    <p>Escanea una carpeta y verifica la imagen:</p>
+                    <div class="code">
+                        <pre><code>personarm --scan "/path/to/discs"
+personarm --verify-disc "/path/to/disc1.cue"
+personarm --portal</code></pre>
+                        <button class="copy" type="button" aria-label="Copiar comandos">Copiar</button>
+                    </div>
+                </li>
+            </ol>
+            <p class="fine reveal">La configuración se guarda en <code>personarm_config.json</code>. Ejecuta
+                <code>personarm --help</code> para ver todas las opciones.</p>
+        </section>
+
+        <!-- DEVELOPERS -->
+        <section class="section" id="developers" aria-labelledby="dev-title">
+            <header class="section-head reveal">
+                <span class="num">05</span>
+                <h2 id="dev-title">Para <em>desarrolladores</em></h2>
+            </header>
+            <div class="grid two">
+                <article class="card reveal">
+                    <h3>Arquitectura</h3>
+                    <p>Un motor central enruta la memoria a través de un bus KUSEG, KSEG0 y KSEG1 hacia la RAM, el scratchpad, la GPU,
+                        la SPU y el SPI de los mandos.</p>
+                    <a class="link" href="https://github.com/sargon494/PersonaRM/blob/main/ARCHITECTURE.md">Leer
+                        ARCHITECTURE.md →</a>
+                </article>
+                <article class="card reveal">
+                    <h3>Compilar y probar</h3>
+                    <p>CMake 3.20+, C++17 y un ejecutor de pruebas en Python. La integración continua se ejecuta en Windows y Linux.
+                    </p>
+                    <a class="link"
+                        href="https://github.com/sargon494/PersonaRM/blob/main/docs/DEVELOPER_GUIDE.md">Guía para desarrolladores
+                        →</a>
+                </article>
+                <article class="card reveal">
+                    <h3>Contribuir</h3>
+                    <p>Se agradecen informes de errores, peticiones de funciones y pull requests. Lee primero las normas para colaboradores.
+                    </p>
+                    <a class="link"
+                        href="https://github.com/sargon494/PersonaRM/blob/main/CONTRIBUTING.md">CONTRIBUTING.md →</a>
+                </article>
+                <article class="card reveal">
+                    <h3>Código abierto</h3>
+                    <p>Con licencia GPL v3 o posterior. Haz un fork, estúdialo y mejóralo.</p>
+                    <a class="link" href="https://github.com/sargon494/PersonaRM">Explorar el repositorio →</a>
+                </article>
+            </div>
+        </section>
+
+        <!-- CTA -->
+        <section class="cta reveal">
+            <div class="smoke" aria-hidden="true"></div>
+            <h2>¿Listo para <em>descender</em>?</h2>
+            <p>Clona el repositorio, compílalo y trae tu propio disco.</p>
+            <a class="btn btn-primary" href="https://github.com/sargon494/PersonaRM">Abrir en GitHub</a>
+        </section>
+
+    </main>
+
+    <footer class="footer">
+        <div class="footer-inner">
+            <img src="../assets/logo.png" alt="" width="64" height="64" />
+            <p class="legal">
+                PersonaRM es un proyecto independiente y no oficial. No está afiliado, respaldado ni patrocinado por
+                Atlus, Sega ni Sony Interactive Entertainment. No distribuye discos, binarios, ROMs ni recursos del juego.
+                Todas las marcas pertenecen a sus respectivos propietarios.
+            </p>
+            <p class="license">Publicado bajo GPL v3 o posterior · <a
+                    href="https://github.com/sargon494/PersonaRM">sargon494/PersonaRM</a></p>
+        </div>
+    </footer>
+
+    <script src="../main.js"></script>
+</body>
+
+</html>
