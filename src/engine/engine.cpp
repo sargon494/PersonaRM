@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <algorithm>
+#include <sstream>
 
 namespace personarm {
 
@@ -627,6 +628,22 @@ bool Engine::ParsePadPress(const std::string& text, PadPress& out) {
     }
     if (*end != 0) return false;
     out = r;
+    return true;
+}
+
+bool Engine::ParsePadScript(std::istream& in, std::vector<PadPress>& out, size_t& bad_line) {
+    std::string line;
+    for (bad_line = 1; std::getline(in, line); ++bad_line) {
+        line = line.substr(0, line.find('#'));
+        std::istringstream ls(line);
+        std::string frame, button, hold, extra;
+        if (!(ls >> frame)) continue;  // blank or comment
+        PadPress p{};
+        if (!(ls >> button) || (ls >> hold && ls >> extra) ||
+            !ParsePadPress(button + "@" + frame + (hold.empty() ? "" : "+" + hold), p))
+            return false;
+        out.push_back(p);
+    }
     return true;
 }
 

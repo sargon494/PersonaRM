@@ -75,6 +75,7 @@ static void PrintUsage(const char* prog) {
               << "                     --dump-frames <dir> --every N   display area PNG every N frames\n"
               << "                     --dump-audio <wav>     CD XA audio, 16-bit stereo 44.1 kHz\n"
               << "                     --press <btn>@<frame>[+<n>]     hold a pad button n frames (default 5)\n"
+              << "                     --input-script <file>  presses from lines <frame> <btn> [<n>] (# comments)\n"
               << "                     --watch-pc <hex>       log the first 20 hits of a PC (repeatable)\n"
               << "  --config           Open interactive settings menu\n"
               << "  --scan [dir]       Scan directory for legal game disc images (.iso/.bin/.cue)\n"
@@ -1071,6 +1072,15 @@ int main(int argc, char* argv[]) {
                     if (std::strcmp(argv[k], "--watch-pc") == 0) opt.watch_pcs.push_back(std::strtoul(argv[k + 1], nullptr, 16));
                     if (std::strcmp(argv[k], "--trace-out") == 0)
                         personarm::Engine::Instance().SetTraceOutput(argv[k + 1]);
+                    if (std::strcmp(argv[k], "--input-script") == 0) {
+                        std::ifstream in(argv[k + 1]);
+                        size_t bad = 0;
+                        if (!in || !personarm::Engine::ParsePadScript(in, opt.presses, bad)) {
+                            std::cerr << "--input-script " << argv[k + 1] << ": cannot read, or bad line " << bad
+                                      << " (want <frame> <button> [<hold>])\n";
+                            return EXIT_FAILURE;
+                        }
+                    }
                     if (std::strcmp(argv[k], "--press") == 0) {
                         personarm::Engine::PadPress p{};
                         if (!personarm::Engine::ParsePadPress(argv[k + 1], p)) {
@@ -1087,6 +1097,7 @@ int main(int argc, char* argv[]) {
             if (std::strcmp(argv[i], "--max-frames") == 0 || std::strcmp(argv[i], "--dump-ram") == 0 ||
                 std::strcmp(argv[i], "--dump-vram") == 0 || std::strcmp(argv[i], "--dump-frames") == 0 || std::strcmp(argv[i], "--dump-audio") == 0 ||
                 std::strcmp(argv[i], "--every") == 0 || std::strcmp(argv[i], "--press") == 0 ||
+                std::strcmp(argv[i], "--input-script") == 0 ||
                 std::strcmp(argv[i], "--watch-pc") == 0) { ++i; continue; } // read by --boot
             if (std::strcmp(argv[i], "--launch") == 0) {
                 return launcher.LaunchGame();
