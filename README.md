@@ -22,9 +22,9 @@
 
 PersonaRM aims to run *Persona 2: Eternal Punishment* natively on Windows and Linux, without an external emulator. It rebuilds the PlayStation 1 hardware the game depends on (MIPS R3000A CPU, GTE, GPU, MDEC, SPU, CD-ROM) and wraps it in a launcher that manages your disc images, controls, and display options.
 
-> **The game does not run yet.** PersonaRM is a research-driven work in progress. The game's real executable now boots in the interpreter up to its first overlay load, but nothing is drawn on screen yet. See [Status](#status) for what exists today.
+> **Not playable yet.** PersonaRM is a research-driven work in progress. In a headless test harness, the game's real executable already plays its intro videos with sound, shows the title screen, and on a new game reaches the first 3D scenes with dialogue. There is no game window yet, and the boot has not been checked against a reference emulator. See [Status](#status) for what exists today.
 >
-> **Current phase: step 3 of 6, first boot.** Steps 1 (CPU correctness) and 2 (machine core) are done apart from MDEC video and XA audio, which are in progress. `personarm --boot` runs disc 1 from `main` through the scene loop and loads the first overlay byte-for-byte. Next: keep booting until the first image is drawn, and confirm the boot against a reference emulator trace.
+> **Current phase: step 3 of 6, first boot.** Steps 1 (CPU correctness) and 2 (machine core) are done. `personarm --boot` runs disc 1 through the intro FMVs, the title screen and a new game up to the first in-game dialogue, with frames and audio dumped to files. Next: confirm the boot against a reference emulator trace, then player control in the field.
 
 PersonaRM follows a strict **Bring Your Own Copy (BYOC)** model:
 
@@ -67,12 +67,12 @@ A JIT is not planned: the PS1 workload does not call for one.
 | Static analysis tools (`psx_analyze`: FILEPOS, file extraction, chunks, RLE, hazard scan, control-flow graph) | ✅ Implemented |
 | GTE (geometry engine) | ✅ All 22 commands, FLAG and UNR division (not yet checked against real-hardware results) |
 | GPU and VRAM | ✅ Software rasterizer: polygons, lines, sprites, textures with CLUT, semi-transparency, GPUREAD |
-| MDEC video decoder | 🟡 Partial |
+| MDEC video and XA audio | ✅ Wired in; the game's FMVs decode with sound (timing values approximated) |
 | SPU audio | 🟡 Registers, ADPCM, pitch, ADSR and reverb, wired into the bus; the interpolation table is an approximation |
 | BIOS HLE | ✅ Kernel events, interrupt chain, patchable tables and file calls the game uses (memory card still missing) |
 | Interrupts, VBlank, root counters | ✅ Implemented (timing approximated) |
 | DMA, CD-ROM | ✅ Wired into the bus; the game reads FILEPOS and its first overlay through them (timing approximated) |
-| Real-game boot (`personarm --boot`) | 🔨 Disc 1 reaches the first overlay load; no image drawn yet |
+| Real-game boot (`personarm --boot`) | 🔨 Disc 1: intro FMVs, title screen, new game and first 3D scenes with dialogue (scripted input, frames/audio dumped to files) |
 | Trace format for reference comparison (`PRMTRACE v1`) | ✅ Format, comparator and `--trace-out` |
 | Static recompiler (code generation) | ⏳ Not started |
 | Windowed SDL / OpenGL display and host audio | ⏳ Stubs only |
