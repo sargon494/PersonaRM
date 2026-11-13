@@ -25,6 +25,10 @@ set(CORE_SOURCES
     recomp/mips_decode.cpp
     recomp/cfg.h
     recomp/cfg.cpp
+    recomp/codegen.h
+    recomp/codegen.cpp
+    recomp/runtime/recomp_runtime.h
+    recomp/runtime/recomp_runtime.cpp
     core/save_manager.cpp
     core/save_manager.h
     trace/trace.cpp
