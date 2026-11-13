@@ -8,6 +8,12 @@
 // (the guest $ra on a normal return, an exception vector, or a target nobody compiled). A caller
 // resumes after a call only when `s.pc` equals its own return address; anything else unwinds to
 // the interpreter, which continues from `s.pc`.
+//
+// Time (engine integration): every translated instruction adds 1 to `s.cycles` after it executes,
+// and a data load from main RAM adds `ram_stall` (the interpreter's model). When `cycles` reaches
+// `deadline` the code calls the host's `service` (devices, IRQs, frame end); if it asks to stop,
+// `s.pc` (and `next_pc` for a stop inside a delay slot) says where the interpreter resumes and
+// `stopped` makes every caller unwind.
 
 #include <cstddef>
 #include <cstdint>
@@ -24,6 +30,24 @@ struct FunctionEntry {
     uint32_t address;
     RecompFn fn;
 };
+
+/// One generated image: `hash` (FNV-1a 64) of the `size` bytes it was generated from at `base`;
+/// the host checks it against RAM before using the code.
+struct Module {
+    const char* name;
+    uint32_t base, size;
+    uint64_t hash;
+    const FunctionEntry* entries;   // function entries (f_*)
+    size_t count;
+    const FunctionEntry* resume;    // mid-function resume points (r_*: continue at s.pc)
+    size_t resume_count;
+};
+
+inline uint64_t Fnv1a64(const uint8_t* p, size_t n) {
+    uint64_t h = 0xCBF29CE484222325ull;
+    for (size_t i = 0; i < n; ++i) { h ^= p[i]; h *= 0x100000001B3ull; }
+    return h;
+}
 
 /// Address -> compiled function. Lookups miss for anything not generated (the interpreter runs it).
 class Dispatcher {
@@ -48,10 +72,86 @@ struct CpuState {
 
     const Dispatcher* dispatcher = nullptr;
     uint64_t fallbacks = 0;  // dispatches that found no compiled function
+
+    // Fast paths (null = everything goes through read/write): 2 MB main RAM mirrored over the
+    // first 8 MB of each segment, and the 1 KB scratchpad at 1F800000h.
+    uint8_t* ram = nullptr;
+    uint8_t* scratch = nullptr;
+    uint32_t ram_stall = 0;   // extra cycles per data load from main RAM
+    uint64_t stalls = 0;      // stall cycles added so far (part of `cycles`)
+
+    uint64_t cycles = 0;
+    uint64_t deadline = ~0ull;
+    bool (*service)(CpuState&) = nullptr;  // true = stop here
+    // Dispatch miss: the host may run `pc` itself (HLE vector) and return true with `pc` where
+    // execution continues (and `stopped` if it must hand back now).
+    bool (*external)(CpuState&) = nullptr;
+    void* host = nullptr;
+    bool stopped = false;
+    uint32_t next_pc = 0;     // nonzero: stopped in a delay slot at `pc`, the branch continues here
+    uint32_t load_reg = 0, load_val = 0;  // stopped right after a delayed load: still in flight
+    uint32_t pair_prev = 0;   // register value before a chain of loads into it (LWL/LWR pairs)
 };
 
-inline uint32_t Read(CpuState& s, uint32_t address, uint32_t size) { return s.read(s.mem, address, size); }
-inline void Write(CpuState& s, uint32_t address, uint32_t value, uint32_t size) { s.write(s.mem, address, value, size); }
+inline uint32_t LoadLe(const uint8_t* p, uint32_t size) {
+    uint32_t v = p[0];
+    if (size >= 2) v |= static_cast<uint32_t>(p[1]) << 8;
+    if (size == 4) v |= (static_cast<uint32_t>(p[2]) << 16) | (static_cast<uint32_t>(p[3]) << 24);
+    return v;
+}
+inline void StoreLe(uint8_t* p, uint32_t v, uint32_t size) {
+    p[0] = static_cast<uint8_t>(v);
+    if (size >= 2) p[1] = static_cast<uint8_t>(v >> 8);
+    if (size == 4) { p[2] = static_cast<uint8_t>(v >> 16); p[3] = static_cast<uint8_t>(v >> 24); }
+}
+
+// LWC2/SWC2 and SB/LB need no alignment; an access that would cross the end of RAM wraps
+// byte by byte, as Engine::ReadBus does, and one crossing the scratchpad end takes the callback.
+inline uint32_t Read(CpuState& s, uint32_t address, uint32_t size) {
+    const uint32_t p = address & 0x1FFFFFFFu;
+    if (s.ram && p < 0x00800000u) {
+        s.cycles += s.ram_stall;
+        s.stalls += s.ram_stall;
+        const uint32_t o = p & 0x1FFFFFu;
+        if (o + size <= 0x200000u) return LoadLe(s.ram + o, size);
+        uint32_t v = 0;
+        for (uint32_t i = 0; i < size; ++i) v |= static_cast<uint32_t>(s.ram[(o + i) & 0x1FFFFFu]) << (8 * i);
+        return v;
+    }
+    if (s.scratch && p - 0x1F800000u <= 0x400u - size) return LoadLe(s.scratch + (p & 0x3FFu), size);
+    return s.read(s.mem, address, size);
+}
+inline void Write(CpuState& s, uint32_t address, uint32_t value, uint32_t size) {
+    const uint32_t p = address & 0x1FFFFFFFu;
+    if (s.ram && p < 0x00800000u) {
+        const uint32_t o = p & 0x1FFFFFu;
+        if (o + size <= 0x200000u) { StoreLe(s.ram + o, value, size); return; }
+        for (uint32_t i = 0; i < size; ++i) s.ram[(o + i) & 0x1FFFFFu] = static_cast<uint8_t>(value >> (8 * i));
+        return;
+    }
+    if (s.scratch && p - 0x1F800000u <= 0x400u - size) { StoreLe(s.scratch + (p & 0x3FFu), value, size); return; }
+    s.write(s.mem, address, value, size);
+}
+
+/// Called by generated code once `cycles >= deadline`, before the instruction at `pc`
+/// (`next`: nonzero when `pc` is a delay slot). True = return to the host now.
+inline bool Stop(CpuState& s, uint32_t pc, uint32_t next = 0) {
+    if (!s.service || !s.service(s)) return false;
+    s.pc = pc;
+    s.next_pc = next;
+    s.stopped = true;
+    return true;
+}
+
+/// Stop() right after a load into `reg` that the interpreter would still hold in its delay:
+/// `reg` gets its value from before the load back and the loaded value is reported in flight.
+inline bool StopLoad(CpuState& s, uint32_t pc, uint32_t reg, uint32_t prev) {
+    if (!Stop(s, pc)) return false;
+    s.load_reg = reg;
+    s.load_val = s.gpr[reg];
+    s.gpr[reg] = prev;
+    return true;
+}
 
 /// Same as CpuContext::RaiseException: EPC/BD, ExcCode, KU/IE push, pc = vector (BEV).
 /// `pc` is the address of the faulting instruction; `delay_slot` when it sits in a delay slot.

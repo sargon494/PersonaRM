@@ -136,3 +136,23 @@ target_link_libraries(unit_test_recomp_g2 PRIVATE personarm_core)
 target_compile_features(unit_test_recomp_g2 PRIVATE cxx_std_17)
 add_test(NAME unit_test_recomp_g2 COMMAND unit_test_recomp_g2)
 set_tests_properties(unit_test_recomp_g2 PROPERTIES LABELS "unit" TIMEOUT 300)
+
+# Recompiled execution inside the Engine (synthetic): the boot program of recomp_engine_program.h is
+# generated at build time like the G2 program and run against the interpreter frame by frame.
+add_executable(recomp_engine_writer recomp_engine_writer.cpp)
+target_compile_features(recomp_engine_writer PRIVATE cxx_std_17)
+set(RENGINE_BIN ${CMAKE_CURRENT_BINARY_DIR}/recomp_engine.bin)
+set(RENGINE_ENTRIES ${CMAKE_CURRENT_BINARY_DIR}/recomp_engine.entries)
+set(RENGINE_GEN ${CMAKE_CURRENT_BINARY_DIR}/recomp_engine_gen.cpp)
+add_custom_command(OUTPUT ${RENGINE_BIN} ${RENGINE_ENTRIES}
+    COMMAND recomp_engine_writer ${RENGINE_BIN} ${RENGINE_ENTRIES}
+    DEPENDS recomp_engine_writer)
+add_custom_command(OUTPUT ${RENGINE_GEN}
+    COMMAND recomp_gen ${RENGINE_BIN} 0x80010000 ${RENGINE_GEN} --entries-file ${RENGINE_ENTRIES} --module rengine
+    DEPENDS recomp_gen ${RENGINE_BIN} ${RENGINE_ENTRIES})
+add_executable(unit_test_recomp_engine test_recomp_engine.cpp ${RENGINE_GEN})
+target_link_libraries(unit_test_recomp_engine PRIVATE personarm_core)
+target_include_directories(unit_test_recomp_engine PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(unit_test_recomp_engine PRIVATE cxx_std_17)
+add_test(NAME unit_test_recomp_engine COMMAND unit_test_recomp_engine)
+set_tests_properties(unit_test_recomp_engine PROPERTIES LABELS "unit" TIMEOUT 300)
