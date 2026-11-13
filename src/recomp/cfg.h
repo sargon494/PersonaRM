@@ -96,4 +96,9 @@ struct CfgReport {
 CfgReport AnalyzeControlFlow(const uint8_t* code, size_t size, uint32_t load_address, uint32_t entry,
                              const CfgOptions& options = CfgOptions{});
 
+/// The switch table behind the `jr` at `jr_addr`, when it matches the pattern the CFG resolves
+/// (bounded index, constant base): `count` words starting at `base`. Used by the code generator.
+bool FindSwitchTable(const uint8_t* code, size_t size, uint32_t load_address, uint32_t jr_addr,
+                     uint32_t& base, uint32_t& count);
+
 } // namespace personarm::recomp

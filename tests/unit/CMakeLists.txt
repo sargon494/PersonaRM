@@ -117,3 +117,22 @@ target_include_directories(unit_test_host_logic PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_compile_features(unit_test_host_logic PRIVATE cxx_std_17)
 add_test(NAME unit_test_host_logic COMMAND unit_test_host_logic)
 set_tests_properties(unit_test_host_logic PROPERTIES LABELS "unit" TIMEOUT 120)
+
+# Gate G2 (synthetic): the synthetic program is written at build time, tools/recomp_gen turns it
+# into C++, and the test compares that code against the interpreter.
+add_executable(g2_synth_writer g2_synth_writer.cpp)
+target_compile_features(g2_synth_writer PRIVATE cxx_std_17)
+set(G2_BIN ${CMAKE_CURRENT_BINARY_DIR}/g2_synth.bin)
+set(G2_ENTRIES ${CMAKE_CURRENT_BINARY_DIR}/g2_synth.entries)
+set(G2_GEN ${CMAKE_CURRENT_BINARY_DIR}/g2_synth_gen.cpp)
+add_custom_command(OUTPUT ${G2_BIN} ${G2_ENTRIES}
+    COMMAND g2_synth_writer ${G2_BIN} ${G2_ENTRIES}
+    DEPENDS g2_synth_writer)
+add_custom_command(OUTPUT ${G2_GEN}
+    COMMAND recomp_gen ${G2_BIN} 0x80010000 ${G2_GEN} --entries-file ${G2_ENTRIES} --module g2
+    DEPENDS recomp_gen ${G2_BIN} ${G2_ENTRIES})
+add_executable(unit_test_recomp_g2 test_recomp_g2.cpp ${G2_GEN})
+target_link_libraries(unit_test_recomp_g2 PRIVATE personarm_core)
+target_compile_features(unit_test_recomp_g2 PRIVATE cxx_std_17)
+add_test(NAME unit_test_recomp_g2 COMMAND unit_test_recomp_g2)
+set_tests_properties(unit_test_recomp_g2 PROPERTIES LABELS "unit" TIMEOUT 300)

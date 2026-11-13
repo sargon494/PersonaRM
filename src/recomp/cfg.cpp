@@ -556,4 +556,13 @@ CfgReport AnalyzeControlFlow(const uint8_t* code, size_t size, uint32_t load, ui
     return r;
 }
 
+bool FindSwitchTable(const uint8_t* code, size_t size, uint32_t load_address, uint32_t jr_addr,
+                     uint32_t& base, uint32_t& count) {
+    JumpTable jt;
+    if (!FindJumpTable(code, size, load_address, jr_addr, jt)) return false;
+    base = jt.base;
+    count = jt.count;
+    return true;
+}
+
 } // namespace personarm::recomp

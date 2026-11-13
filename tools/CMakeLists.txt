@@ -10,6 +10,10 @@ target_compile_features(psx_analyzer PUBLIC cxx_std_17)
 add_executable(psx_analyze psx_analyze/main.cpp)
 target_link_libraries(psx_analyze PRIVATE psx_analyzer)
 
+add_executable(recomp_gen recomp_gen/main.cpp)
+target_link_libraries(recomp_gen PRIVATE personarm_core)
+target_compile_features(recomp_gen PRIVATE cxx_std_17)
+
 add_executable(trace_compare trace_compare/main.cpp)
 target_link_libraries(trace_compare PRIVATE personarm_core)
 target_compile_features(trace_compare PRIVATE cxx_std_17)
