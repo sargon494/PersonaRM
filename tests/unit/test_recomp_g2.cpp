@@ -65,7 +65,7 @@ int main() {
         {"mem", [](CpuRegisters& r) { r.gpr[g2::a0] = kBuffer; }},
         {"ovf", nullptr}, {"ovf_ds", nullptr}, {"chain_a", nullptr}, {"switch", [&](CpuRegisters& r) { r.gpr[g2::a0] = rng() % 6; }},
         {"jalr", nullptr}, {"jalr_unk", nullptr}, {"gte", nullptr}, {"cop0", nullptr}, {"sys", nullptr}, {"brk", nullptr},
-        {"adel", nullptr}, {"hazard", [](CpuRegisters& r) { r.gpr[g2::a0] = kBuffer; }},
+        {"adel", nullptr}, {"below", nullptr}, {"hazard", [](CpuRegisters& r) { r.gpr[g2::a0] = kBuffer; }},
     };
 
     uint64_t runs = 0, fallback_runs = 0;

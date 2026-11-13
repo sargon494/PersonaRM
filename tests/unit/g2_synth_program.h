@@ -62,7 +62,7 @@ inline Program Build() {
     auto addiu = [&](uint32_t t, uint32_t s, int32_t i) { A.I(0x09, s, t, static_cast<uint32_t>(i)); };
     const std::vector<std::string> names = {"arith", "divs", "loop", "branches", "bal_sub", "mem", "ovf", "ovf_ds",
                                             "chain_a", "chain_b", "chain_c", "switch", "jalr", "jalr_unk", "unlisted",
-                                            "gte", "cop0", "sys", "brk", "adel", "hazard"};
+                                            "gte", "cop0", "sys", "brk", "adel", "below", "hazard"};
 
     A.Label("arith");                                   // every ALU form, delay slot does work
     addu(v0, a0, a1); A.R(0x23, a0, a1, v1); A.R(0x24, a0, a1, t0); A.R(0x25, a0, a1, t1);
@@ -181,7 +181,12 @@ inline Program Build() {
     A.Label("brk"); A.JrRa(); A.W(0x0001000Du);         // break in a delay slot
     A.Label("adel"); A.I(0x0D, a0, t0, 1); A.I(0x23, t0, v0, 0); A.JrRa(); A.Nop();
 
-    A.Label("hazard");                                  // uses a load in its delay: never generated
+    A.Label("below_body");                              // reached only from "below", at a lower address
+    addiu(v0, v0, 1); A.JrRa(); A.Nop();
+    A.Label("below");
+    addiu(v0, zero, 5); A.Br(0x04, zero, zero, "below_body"); A.Nop();
+
+    A.Label("hazard");                                 // uses a load in its delay: never generated
     A.I(0x23, a0, t0, 0); addu(v0, t0, zero); A.JrRa(); A.Nop();
 
     A.Label("sw_table");

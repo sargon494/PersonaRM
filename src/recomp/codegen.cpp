@@ -194,6 +194,10 @@ public:
 
     std::string Body() {
         std::ostringstream os;
+        if (*m_f.starts.begin() != m_f.entry) {   // blocks below the entry are emitted first
+            m_f.labels.insert(m_f.entry);
+            os << "    goto L_" << Addr(m_f.entry) << ";\n";
+        }
         for (auto it = m_f.starts.begin(); it != m_f.starts.end(); ++it) {
             const uint32_t a = *it;
             const auto next = std::next(it);
