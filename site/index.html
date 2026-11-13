@@ -62,7 +62,7 @@
                     active development. It rebuilds the PlayStation 1 hardware the game needs.
                     Not playable yet, but the game's real executable already plays its intro, shows the
                     title screen and, on a new game, reaches free movement of the player character and the
-                    main menu, in an optional SDL3 window.
+                    main menu, in an optional SDL3 window, with music and sound effects.
                 </p>
                 <div class="actions">
                     <a class="btn btn-primary" href="#start">Get started</a>
@@ -156,10 +156,11 @@
             <p class="intro reveal">PersonaRM is in active development and not playable yet. The plan:
                 get the CPU provably correct, finish the machine core, boot the game, then compile its code ahead of
                 time.</p>
-            <p class="intro reveal"><strong>Current phase: step 3 of 6, first boot.</strong> The CPU and the machine core
-                are done. Disc 1 plays its intro with sound, shows the title screen and, on a new game, reaches free
+            <p class="intro reveal"><strong>Current phase: step 4 of 6, static recompilation (just started).</strong> The CPU and the machine core
+                are done. Step 3, first boot, continues for playing further. Disc 1 plays its intro with sound, shows the title screen and, on a new game, reaches free
                 movement and the main menu. The boot matches the PCSX-Redux reference emulator up to the first
-                overlay loads. Next: SPU audio, playing further, then static recompilation.</p>
+                overlay loads. Music and sound effects now play, with the SPU on emulated time. The first recompiler
+                translates MIPS functions to C++ but does not run the game yet. Next: overlays and a real-boot comparison.</p>
             <div class="status-table reveal" role="table" aria-label="Subsystem status">
                 <div class="row head" role="row"><span role="columnheader">Subsystem</span><span
                         role="columnheader">Status</span></div>
@@ -173,8 +174,10 @@
                         class="tag ok">Conformance suite passing</span></div>
                 <div class="row" role="row"><span role="cell">GTE and GPU rasterizer</span><span role="cell"
                         class="tag ok">Implemented</span></div>
-                <div class="row" role="row"><span role="cell">MDEC video, XA audio and SPU</span><span role="cell"
+                <div class="row" role="row"><span role="cell">MDEC video and XA audio</span><span role="cell"
                         class="tag progress">Wired in, timing approximated</span></div>
+                <div class="row" role="row"><span role="cell">SPU audio</span><span role="cell"
+                        class="tag progress">Music and sound effects play; interpolation approximated</span></div>
                 <div class="row" role="row"><span role="cell">BIOS HLE and kernel events</span><span role="cell"
                         class="tag ok">Implemented</span></div>
                 <div class="row" role="row"><span role="cell">Interrupts, VBlank and timers</span><span role="cell"
@@ -184,9 +187,9 @@
                 <div class="row" role="row"><span role="cell">Real-game boot</span><span role="cell"
                         class="tag progress">Free movement and main menu</span></div>
                 <div class="row" role="row"><span role="cell">Static recompiler</span><span role="cell"
-                        class="tag prototype">Not started</span></div>
+                        class="tag progress">v0: function-level C++ generation, synthetic G2 passing; not yet running the game</span></div>
                 <div class="row" role="row"><span role="cell">Window, input and audio (SDL3)</span><span role="cell"
-                        class="tag progress">Works; SPU audio missing</span></div>
+                        class="tag progress">Works; full SPU and CD/XA mix in the window</span></div>
             </div>
         </section>
 
@@ -197,7 +200,7 @@
                 <h2 id="start-title">Quick <em>start</em></h2>
             </header>
             <div class="notice reveal">
-                <strong>Not playable yet.</strong> There is no game window. The commands below manage disc images and
+                <strong>Not playable yet.</strong> There are no releases yet; build from source. The commands below manage disc images and
                 configuration for development.
             </div>
             <ol class="steps">

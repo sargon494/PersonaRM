@@ -65,7 +65,7 @@
                     現在開発中です。ゲームに必要な PlayStation 1 のハードウェアを再構築しています。
                     まだプレイはできませんが、ゲーム本来の実行ファイルはすでにイントロを再生し、
                     タイトル画面を表示し、ニューゲームでは操作キャラクターの自由移動とメインメニューまで
-                    到達します(任意で SDL3 ウィンドウを使用)。
+                    到達します(任意で SDL3 ウィンドウを使用。音楽と効果音も再生されます)。
                 </p>
                 <div class="actions">
                     <a class="btn btn-primary" href="#start">はじめる</a>
@@ -158,10 +158,10 @@
             </header>
             <p class="intro reveal">PersonaRM は開発中で、まだプレイはできません。計画は次のとおりです。
                 CPU の正しさを検証できる状態にし、マシンの中核を完成させ、ゲームを起動し、その後ゲームのコードを事前にコンパイルします。</p>
-            <p class="intro reveal"><strong>現在のフェーズ:全 6 ステップ中のステップ 3、初回起動。</strong> CPU とマシンの中核は完成しています。
+            <p class="intro reveal"><strong>現在のフェーズ:全 6 ステップ中のステップ 4、静的再コンパイル(着手したばかり)。</strong> CPU とマシンの中核は完成しています。ステップ 3(初回起動)は、さらに先へ進めるために継続中です。
                 ディスク 1 は音声付きでイントロを再生し、タイトル画面を表示し、ニューゲームでは自由移動とメインメニューまで到達します。
                 起動の挙動は、最初のオーバーレイのロードまで、リファレンスエミュレーターの PCSX-Redux と一致しています。
-                次は、SPU オーディオ、さらに先まで進めること、そして静的再コンパイルです。</p>
+                音楽と効果音が再生されるようになり、SPU はエミュレートされた時間(44,100 Hz)で動作します。最初のリコンパイラは関数を C++ へ変換しますが、まだゲームは実行していません。次は、オーバーレイと実起動との比較です。</p>
             <div class="status-table reveal" role="table" aria-label="サブシステムの進捗">
                 <div class="row head" role="row"><span role="columnheader">サブシステム</span><span
                         role="columnheader">状況</span></div>
@@ -175,8 +175,10 @@
                         class="tag ok">適合テストスイート合格</span></div>
                 <div class="row" role="row"><span role="cell">GTE と GPU ラスタライザ</span><span role="cell"
                         class="tag ok">実装済み</span></div>
-                <div class="row" role="row"><span role="cell">MDEC ムービー、XA 音声、SPU</span><span role="cell"
+                <div class="row" role="row"><span role="cell">MDEC ムービーと XA 音声</span><span role="cell"
                         class="tag progress">接続済み、タイミングは近似</span></div>
+                <div class="row" role="row"><span role="cell">SPU オーディオ</span><span role="cell"
+                        class="tag progress">音楽と効果音が再生; 補間は近似</span></div>
                 <div class="row" role="row"><span role="cell">BIOS HLE とカーネルイベント</span><span role="cell"
                         class="tag ok">実装済み</span></div>
                 <div class="row" role="row"><span role="cell">割り込み、VBlank、タイマー</span><span role="cell"
@@ -186,9 +188,9 @@
                 <div class="row" role="row"><span role="cell">実ゲームの起動</span><span role="cell"
                         class="tag progress">自由移動とメインメニュー</span></div>
                 <div class="row" role="row"><span role="cell">静的リコンパイラ</span><span role="cell"
-                        class="tag prototype">未着手</span></div>
+                        class="tag progress">v0:関数単位の C++ 生成、合成テスト G2 合格。まだゲームは実行していません</span></div>
                 <div class="row" role="row"><span role="cell">ウィンドウ、入力、オーディオ(SDL3)</span><span role="cell"
-                        class="tag progress">動作中。SPU オーディオは未対応</span></div>
+                        class="tag progress">動作中。ウィンドウで SPU と CD/XA の全ミックスを再生</span></div>
             </div>
         </section>
 
@@ -199,7 +201,7 @@
                 <h2 id="start-title"><em>クイック</em>スタート</h2>
             </header>
             <div class="notice reveal">
-                <strong>まだプレイはできません。</strong>ゲームのウィンドウはありません。以下のコマンドは、開発用にディスクイメージと
+                <strong>まだプレイはできません。</strong>リリース版はまだないため、ソースからビルドしてください。以下のコマンドは、開発用にディスクイメージと
                 設定を管理するものです。
             </div>
             <ol class="steps">
