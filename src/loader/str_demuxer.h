@@ -51,6 +51,38 @@ struct StrDemuxedFrame {
     bool complete = false;
 };
 
+// Real STR v2/v3 video sector header: the first 20h bytes of the user data (raw sector + 18h).
+// Source: psx-spx "CDROM File Video Streaming STR (Sony)"; matches AF-013 on disc 1 (F0866).
+// StrSectorHeader/StrDemuxer below use an older synthetic layout kept for main.cpp's self-test.
+#pragma pack(push, 1)
+struct StrVideoHeader {
+    uint16_t status;         // 0160h
+    uint16_t type;           // 8001h = MDEC
+    uint16_t sector_index;   // chunk within the frame
+    uint16_t sector_count;   // chunks per frame
+    uint32_t frame_number;   // 1 = first
+    uint32_t frame_size;     // BS bytes in the frame
+    uint16_t width;
+    uint16_t height;
+    uint8_t bs_header_copy[12];
+};
+#pragma pack(pop)
+static_assert(sizeof(StrVideoHeader) == 0x20, "STR header is 20h bytes");
+
+/// Assembles BS frames from raw 2352-byte STR video sectors (7E0h payload bytes each).
+class StrFrameAssembler {
+public:
+    static constexpr size_t kPayload = 0x7E0;
+    /// Returns true when `raw2352` completes a frame: `bs` = frame_size bytes, `hdr` = its header.
+    /// Non-video sectors (no 0160h/8001h header) are ignored.
+    bool Push(const uint8_t* raw2352, std::vector<uint8_t>& bs, StrVideoHeader& hdr);
+
+private:
+    std::vector<uint8_t> m_buf;
+    uint32_t m_frame = 0xFFFFFFFF;
+    uint32_t m_have = 0;  // bitmask of received chunks (frames have < 32 chunks)
+};
+
 class StrDemuxer {
 public:
     StrDemuxer() = default;

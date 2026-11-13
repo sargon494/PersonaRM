@@ -47,6 +47,8 @@ set(AUDIO_SOURCES
     audio/vag_decoder.h
     audio/spu_emulator.cpp
     audio/spu_emulator.h
+    audio/xa_adpcm.cpp
+    audio/xa_adpcm.h
 )
 set(CPU_SOURCES
     cpu/cpu_context.cpp
@@ -81,12 +83,16 @@ set(RENDERING_SOURCES
     rendering/gl_renderer.h
     rendering/mdec_decoder.cpp
     rendering/mdec_decoder.h
+    rendering/bs_decoder.cpp
+    rendering/bs_decoder.h
 )
 set(HW_SOURCES
     hw/cdrom.cpp
     hw/cdrom.h
     hw/dma.cpp
     hw/dma.h
+    hw/mdec.cpp
+    hw/mdec.h
 )
 set(ENGINE_SOURCES
     engine/engine.cpp

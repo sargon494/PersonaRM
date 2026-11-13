@@ -16,6 +16,28 @@ void StrDemuxer::Reset() {
     m_frames_completed = 0;
 }
 
+bool StrFrameAssembler::Push(const uint8_t* raw, std::vector<uint8_t>& bs, StrVideoHeader& hdr) {
+    StrVideoHeader h;
+    std::memcpy(&h, raw + 0x18, sizeof(h));
+    if (h.status != STR_MAGIC || h.type != 0x8001 || h.sector_count == 0 || h.sector_count > 32 ||
+        h.sector_index >= h.sector_count || h.frame_size > h.sector_count * kPayload) {
+        return false;
+    }
+    if (h.frame_number != m_frame) {
+        m_frame = h.frame_number;
+        m_have = 0;
+        m_buf.assign(h.sector_count * kPayload, 0);
+    }
+    if (m_buf.size() < h.sector_count * kPayload) return false;  // inconsistent chunk count mid-frame
+    std::memcpy(m_buf.data() + h.sector_index * kPayload, raw + 0x18 + sizeof(h), kPayload);
+    m_have |= 1u << h.sector_index;
+    if (m_have != (h.sector_count == 32 ? 0xFFFFFFFFu : (1u << h.sector_count) - 1)) return false;
+    bs.assign(m_buf.begin(), m_buf.begin() + h.frame_size);
+    hdr = h;
+    m_frame = 0xFFFFFFFF;
+    return true;
+}
+
 bool StrDemuxer::ProcessSector(const uint8_t* sector_data, size_t sector_size, StrDemuxedFrame& out_frame) {
     m_sectors_processed++;
 
