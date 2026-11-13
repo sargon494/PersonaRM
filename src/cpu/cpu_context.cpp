@@ -1,5 +1,6 @@
 #include "cpu_context.h"
 #include "core/logger.h"
+#include "recomp/mips_decode.h"
 
 namespace personarm {
 
@@ -92,8 +93,7 @@ void CpuContext::Step() {
     uint32_t opcode = m_read_memory(current_pc, 4);
     m_current_pc = current_pc;
     m_in_delay_slot = m_prev_was_branch;
-    uint32_t op = opcode >> 26, fn = opcode & 0x3F;
-    m_prev_was_branch = (op >= 0x01 && op <= 0x07) || (op == 0x00 && (fn == 0x08 || fn == 0x09));
+    m_prev_was_branch = recomp::OwnsDelaySlot(opcode);
 
     // Two-stage PC pipeline: a taken branch rewrites m_next_pc, so the delay slot
     // (already in m_regs.pc) runs once and the target follows it.
@@ -109,15 +109,16 @@ void CpuContext::Step() {
 }
 
 void CpuContext::ExecuteInstruction(uint32_t opcode) {
-    uint32_t op     = (opcode >> 26) & 0x3F;
-    uint32_t rs     = (opcode >> 21) & 0x1F;
-    uint32_t rt     = (opcode >> 16) & 0x1F;
-    uint32_t rd     = (opcode >> 11) & 0x1F;
-    uint32_t shamt  = (opcode >> 6)  & 0x1F;
-    uint32_t funct  = opcode & 0x3F;
-    uint16_t imm    = opcode & 0xFFFF;
-    int32_t  simm   = static_cast<int16_t>(imm);
-    uint32_t target = opcode & 0x03FFFFFF;
+    using namespace recomp;  // shared field accessors (src/recomp/mips_decode.h)
+    uint32_t op     = OpOf(opcode);
+    uint32_t rs     = RsOf(opcode);
+    uint32_t rt     = RtOf(opcode);
+    uint32_t rd     = RdOf(opcode);
+    uint32_t shamt  = ShamtOf(opcode);
+    uint32_t funct  = FunctOf(opcode);
+    uint16_t imm    = static_cast<uint16_t>(ImmOf(opcode));
+    int32_t  simm   = SImmOf(opcode);
+    uint32_t target = TargetOf(opcode);
 
     uint32_t rs_val = GetGPR(rs);
     uint32_t rt_val = GetGPR(rt);
