@@ -29,6 +29,8 @@
 #include "rendering/gl_renderer.h"
 #include "rendering/mdec_decoder.h"
 
+static void StoreLE32(uint8_t* p, uint32_t v) { std::memcpy(p, &v, 4); }
+
 int main() {
     std::cout << "[UNIT TEST] Running Core and Input Unit Tests...\n";
 
@@ -87,10 +89,10 @@ int main() {
         // 3.1 Test PS-X EXE Header Parsing
         std::vector<uint8_t> psx(2048, 0);
         std::memcpy(psx.data(), "PS-X EXE", 8);
-        *reinterpret_cast<uint32_t*>(psx.data() + 0x10) = 0x80010000; // Entry point
-        *reinterpret_cast<uint32_t*>(psx.data() + 0x14) = 0x80020000; // GP
-        *reinterpret_cast<uint32_t*>(psx.data() + 0x18) = 0x80010000; // Load address
-        *reinterpret_cast<uint32_t*>(psx.data() + 0x1C) = 256 * 1024; // 256KB
+        StoreLE32(psx.data() + 0x10, 0x80010000); // Entry point
+        StoreLE32(psx.data() + 0x14, 0x80020000); // GP
+        StoreLE32(psx.data() + 0x18, 0x80010000); // Load address
+        StoreLE32(psx.data() + 0x1C, 256 * 1024); // 256KB
 
         auto psx_info = personarm::DiscReader::ParseExecutable(psx.data(), psx.size());
         assert(psx_info.valid);
@@ -104,7 +106,7 @@ int main() {
         // 3.2 Test ELF Header Parsing
         std::vector<uint8_t> elf(128, 0);
         elf[0] = 0x7F; elf[1] = 'E'; elf[2] = 'L'; elf[3] = 'F';
-        *reinterpret_cast<uint32_t*>(elf.data() + 0x18) = 0x00100000; // Entry point
+        StoreLE32(elf.data() + 0x18, 0x00100000); // Entry point
 
         auto elf_info = personarm::DiscReader::ParseExecutable(elf.data(), elf.size());
         assert(elf_info.valid);
@@ -930,15 +932,15 @@ int main() {
         // Root directory record at offset 156
         size_t root_rec = pvd_off + 156;
         disc_data[root_rec + 0] = 34; // record length
-        *reinterpret_cast<uint32_t*>(disc_data.data() + root_rec + 2) = 18; // root LBA
-        *reinterpret_cast<uint32_t*>(disc_data.data() + root_rec + 10) = 2048; // root length
+        StoreLE32(disc_data.data() + root_rec + 2, 18); // root LBA
+        StoreLE32(disc_data.data() + root_rec + 10, 2048); // root length
 
         // Sector 18: Root directory records
         size_t dir_off = 18 * SECTOR_SIZE + HEADER_OFF;
         uint8_t entry_len = 33 + 10;
         disc_data[dir_off + 0] = entry_len;
-        *reinterpret_cast<uint32_t*>(disc_data.data() + dir_off + 2) = 19; // LBA
-        *reinterpret_cast<uint32_t*>(disc_data.data() + dir_off + 10) = 40; // size
+        StoreLE32(disc_data.data() + dir_off + 2, 19); // LBA
+        StoreLE32(disc_data.data() + dir_off + 10, 40); // size
         disc_data[dir_off + 25] = 0x00; // file flag
         disc_data[dir_off + 32] = 10; // name len
         std::memcpy(disc_data.data() + dir_off + 33, "SYSTEM.CNF", 10);
