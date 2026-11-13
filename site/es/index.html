@@ -159,8 +159,7 @@
             <p class="intro reveal"><strong>Fase actual: paso 4 de 6, recompilación estática (recién empezada).</strong> La CPU y el núcleo de la máquina
                 están terminados. El paso 3, primer arranque, sigue en curso para avanzar más en el juego. El disco 1 reproduce su intro con sonido, muestra la pantalla de título y, en una partida nueva, llega al movimiento
                 libre y al menú principal. El arranque coincide con el emulador de referencia PCSX-Redux hasta las primeras
-                cargas de overlays. Ya suenan la música y los efectos de sonido, con la SPU en tiempo emulado. El primer
-                recompilador traduce funciones MIPS a C++, pero todavía no ejecuta el juego. Siguiente: overlays y una comparación con el arranque real.</p>
+                cargas de overlays. Ya suenan la música y los efectos de sonido, con la SPU en tiempo emulado. El ejecutable principal recompilado ya funciona dentro del arranque real (modo opcional <code>--recomp</code>, con el intérprete como respaldo). Frente al modo solo intérprete, la traza coincide exactamente (hashes de registros, RAM y VRAM en cada fotograma) hasta el movimiento libre, con alrededor del 44-66 % de las instrucciones ejecutadas como código nativo según cuántas funciones se encuentren, y unas 1,2 veces más rápido en esa configuración exacta. Los overlays (código del juego que se carga desde el disco bajo demanda, cerca de un tercio de las instrucciones) siguen interpretándose; recompilarlos es el siguiente paso. El código generado se construye localmente a partir del propio disco del usuario y nunca se distribuye.</p>
             <div class="status-table reveal" role="table" aria-label="Estado de los subsistemas">
                 <div class="row head" role="row"><span role="columnheader">Subsistema</span><span
                         role="columnheader">Estado</span></div>
@@ -187,7 +186,7 @@
                 <div class="row" role="row"><span role="cell">Arranque del juego real</span><span role="cell"
                         class="tag progress">Movimiento libre y menú principal</span></div>
                 <div class="row" role="row"><span role="cell">Recompilador estático</span><span role="cell"
-                        class="tag progress">v0: generación de C++ por función, G2 sintético superado; todavía no ejecuta el juego</span></div>
+                        class="tag progress">Funciona dentro del arranque real con <code>--recomp</code> (traza exacta hasta el movimiento libre, respaldo en el intérprete); overlays todavía interpretados</span></div>
                 <div class="row" role="row"><span role="cell">Ventana, entrada y audio (SDL3)</span><span role="cell"
                         class="tag progress">Funciona; mezcla completa de SPU y CD/XA en la ventana</span></div>
             </div>

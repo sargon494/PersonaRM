@@ -161,7 +161,7 @@
             <p class="intro reveal"><strong>現在のフェーズ:全 6 ステップ中のステップ 4、静的再コンパイル(着手したばかり)。</strong> CPU とマシンの中核は完成しています。ステップ 3(初回起動)は、さらに先へ進めるために継続中です。
                 ディスク 1 は音声付きでイントロを再生し、タイトル画面を表示し、ニューゲームでは自由移動とメインメニューまで到達します。
                 起動の挙動は、最初のオーバーレイのロードまで、リファレンスエミュレーターの PCSX-Redux と一致しています。
-                音楽と効果音が再生されるようになり、SPU はエミュレートされた時間(44,100 Hz)で動作します。最初のリコンパイラは関数を C++ へ変換しますが、まだゲームは実行していません。次は、オーバーレイと実起動との比較です。</p>
+                音楽と効果音が再生されるようになり、SPU はエミュレートされた時間(44,100 Hz)で動作します。再コンパイル済みのメイン実行ファイルが、実起動の中で動作するようになりました(任意の <code>--recomp</code> モード。インタープリターはフォールバックとして使用)。インタープリターのみの実行と比べ、トレースは自由移動まで完全に一致します(各フレームのレジスタ、RAM、VRAM のハッシュ)。関数の見つかり方によって命令の約 44〜66% がネイティブコードとして実行され、その設定ではインタープリターより約 1.2 倍速く動作します。オーバーレイ(ディスクから必要に応じて読み込まれるゲームコードで、命令の約 3 分の 1)はまだインタープリターで実行されており、次はこれを再コンパイルします。生成されるコードはユーザー自身のディスクからローカルでビルドされ、配布やコミットは行いません。</p>
             <div class="status-table reveal" role="table" aria-label="サブシステムの進捗">
                 <div class="row head" role="row"><span role="columnheader">サブシステム</span><span
                         role="columnheader">状況</span></div>
@@ -188,7 +188,7 @@
                 <div class="row" role="row"><span role="cell">実ゲームの起動</span><span role="cell"
                         class="tag progress">自由移動とメインメニュー</span></div>
                 <div class="row" role="row"><span role="cell">静的リコンパイラ</span><span role="cell"
-                        class="tag progress">v0:関数単位の C++ 生成、合成テスト G2 合格。まだゲームは実行していません</span></div>
+                        class="tag progress"><code>--recomp</code> で実起動の中で動作(自由移動まで完全一致、インタープリターへのフォールバックあり)。オーバーレイはまだインタープリターで実行</span></div>
                 <div class="row" role="row"><span role="cell">ウィンドウ、入力、オーディオ(SDL3)</span><span role="cell"
                         class="tag progress">動作中。ウィンドウで SPU と CD/XA の全ミックスを再生</span></div>
             </div>

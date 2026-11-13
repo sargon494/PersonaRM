@@ -24,7 +24,7 @@ PersonaRM aims to run *Persona 2: Eternal Punishment* natively on Windows and Li
 
 > **Not playable yet.** PersonaRM is a research-driven work in progress. The game's real executable plays its intro videos with sound, shows the title screen and, on a new game, reaches the first story scenes, free movement of the player character and the main menu. An optional SDL3 window shows it live, with music and sound effects from the emulated SPU. See [Status](#status) for what exists today.
 >
-> **Current phase: step 4 of 6, static recompilation (just started).** Steps 1 and 2 are done. Step 3, first boot, continues for playing further (area changes, first battle): the boot matches the PCSX-Redux reference emulator at event level up to the first overlay loads (gate G1: pass with known BIOS and timing differences). Music and sound effects now play, with the SPU on emulated time. The first recompiler does not run the game yet; overlays and a real-boot comparison are next.
+> **Current phase: step 4 of 6, static recompilation (just started).** Steps 1 and 2 are done. Step 3, first boot, continues for playing further (area changes, first battle): the boot matches the PCSX-Redux reference emulator at event level up to the first overlay loads (gate G1: pass with known BIOS and timing differences). Music and sound effects now play, with the SPU on emulated time. The recompiled main executable now runs inside the real boot (optional `--recomp` mode, interpreter as fallback). Compared with the interpreter-only run, the trace matches exactly (registers, RAM and VRAM hashes at every frame) up to free movement (frame ~19,000), with about 44-66% of instructions executed as native code depending on how many functions are found, and about 1.2x the interpreter's speed at that exact setting. Overlays (the game code loaded from disc on demand, about a third of the instructions) are still interpreted; recompiling them is next.
 
 PersonaRM follows a strict **Bring Your Own Copy (BYOC)** model:
 
@@ -51,7 +51,7 @@ The chosen approach is an **interpreter-first native runtime**, with static reco
 1. ✅ **CPU correctness.** A conformance test suite for every MIPS-I instruction, including delay slots, load delays, unaligned access, overflow traps, exceptions, and edge cases of `DIV`.
 2. ✅ **Complete machine core.** Interrupt controller, DMA, timers, CD-ROM, joypad bus, and a real GPU rasterizer.
 3. 🔨 **First boot.** Run disc 1 from the intro FMVs to player control (done) and match a reference emulator trace (done, gate G1); keep playing further.
-4. 🔨 **Static recompilation.** Translate the main executable and each overlay ahead of time, with the interpreter as fallback. Started: `tools/recomp_gen` translates MIPS functions to C++ with the interpreter's exact semantics; the synthetic differential gate G2 shows 0 divergences, and locally all 399 functions found in the disc 1 main executable matched the interpreter on random inputs. Overlays and a real-boot comparison are next.
+4. 🔨 **Static recompilation.** Translate the main executable and each overlay ahead of time, with the interpreter as fallback. Started: `tools/recomp_gen` translates MIPS functions to C++ with the interpreter's exact semantics; the synthetic differential gate G2 shows 0 divergences, and locally all 399 functions found in the disc 1 main executable matched the interpreter on random inputs. The recompiled main executable now runs inside the real boot (`--recomp`, interpreter as fallback): the trace matches the interpreter-only run exactly (registers, RAM and VRAM hashes at every frame) up to free movement (frame ~19,000), with about 44-66% of instructions executed as native code depending on how many functions are found, and about 1.2x the interpreter's speed at that setting. Overlays are still interpreted and come next. Generated code is built locally from the user's own disc and never distributed or committed.
 5. **Replace library routines** (video playback, pad, memory card, CD, SPU, GPU) with hand-written native code.
 6. **Host layer.** SDL3 window and input, OpenGL display, host audio, then the launcher and modern enhancements.
 
@@ -75,7 +75,7 @@ A JIT is not planned: the PS1 workload does not call for one.
 | Real-game boot (`personarm --boot`) | 🔨 Disc 1: intro, title, new game, story scenes, free movement and the main menu (scripted input via `--input-script`) |
 | Reference comparison (gate G1) | ✅ Matches PCSX-Redux at event level up to the first overlay loads; known BIOS/timing differences |
 | Trace format for reference comparison (`PRMTRACE v1`) | ✅ Format, comparator and `--trace-out` |
-| Static recompiler (`tools/recomp_gen`) | 🔨 v0: function-level C++ generation, synthetic G2 passing; not yet running the game |
+| Static recompiler (`tools/recomp_gen`) | 🔨 Function-level C++ generation, synthetic G2 passing; runs inside the real boot with `--recomp` (exact trace up to free movement, interpreter fallback); overlays still interpreted |
 | Window, input and audio (`personarm_sdl`, optional SDL3) | 🟡 Window, keyboard/gamepad and audio work; the full SPU and CD/XA mix plays in the window and in `--dump-audio` output |
 | Launcher | 🟡 Disc scan and verification; launching the game is a stub |
 
