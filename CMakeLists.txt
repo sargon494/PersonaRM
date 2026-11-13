@@ -35,6 +35,7 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/Release)
 option(BUILD_TESTS "Build tests" OFF)
 option(BUILD_DOCS "Build documentation" OFF)
 option(BUILD_SHARED_LIBS "Build shared libraries" OFF)
+option(PRM_WITH_SDL3 "Build the personarm_sdl window/input/audio host (SDL3)" OFF)
 
 # ───────────────────────────────────────────────────────────────────────
 # Subdirectories

@@ -155,6 +155,45 @@ install(TARGETS personarm
 )
 
 # ───────────────────────────────────────────────────────────────────────
+# SDL3 host: personarm_sdl (optional, -DPRM_WITH_SDL3=ON)
+# ───────────────────────────────────────────────────────────────────────
+
+if(PRM_WITH_SDL3)
+    find_package(SDL3 CONFIG QUIET)
+    if(NOT SDL3_FOUND)
+        message(STATUS "SDL3 not found: fetching release-3.4.18 (zlib license)")
+        include(FetchContent)
+        set(SDL_SHARED ON CACHE BOOL "" FORCE)
+        set(SDL_STATIC OFF CACHE BOOL "" FORCE)
+        set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
+        FetchContent_Declare(SDL3
+            GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
+            GIT_TAG release-3.4.18
+            GIT_SHALLOW TRUE)
+        FetchContent_MakeAvailable(SDL3)
+    endif()
+
+    add_executable(personarm_sdl
+        host/sdl_main.cpp
+        host/host_logic.cpp
+        host/host_logic.h
+    )
+    target_link_libraries(personarm_sdl PRIVATE personarm_core SDL3::SDL3)
+    if(MSVC)
+        target_compile_options(personarm_sdl PRIVATE /W4)
+    else()
+        target_compile_options(personarm_sdl PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+    if(WIN32)
+        # Put SDL3.dll next to the executable.
+        add_custom_command(TARGET personarm_sdl POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:personarm_sdl> $<TARGET_FILE_DIR:personarm_sdl>
+            COMMAND_EXPAND_LISTS)
+    endif()
+    install(TARGETS personarm_sdl RUNTIME DESTINATION bin)
+endif()
+
+# ───────────────────────────────────────────────────────────────────────
 # Static Analysis Target
 # ───────────────────────────────────────────────────────────────────────
 
