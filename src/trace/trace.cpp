@@ -209,10 +209,10 @@ static double Repeats(const JsonValue& e) {
 // collapsed and an uncollapsed producer align. Merged runs keep their first event; counts go to `reps`.
 static std::vector<const JsonValue*> Filter(const TraceFile& t, const CompareOptions& o, std::vector<double>& reps) {
     std::vector<const JsonValue*> r;
-    auto key = [](const JsonValue& e) {
+    auto key = [&o](const JsonValue& e) {
         std::string k;
         for (const auto& [name, v] : e.Members())
-            if (name != "seq" && name != "n") k += name + "=" + v.Dump(-1) + ";";
+            if (name != "seq" && name != "n" && !o.ignore_fields.count(name)) k += name + "=" + v.Dump(-1) + ";";
         return k;
     };
     std::string last;
@@ -264,11 +264,13 @@ Divergence CompareTraces(const TraceFile& a, const TraceFile& b, const CompareOp
     std::string h = DiffFields(a.header, b.header, {"src", "build"});
     if (!h.empty()) return done(0, "header " + h);
 
+    std::set<std::string> skip = opt.ignore_fields;
+    skip.insert({"seq", "n"});
     size_t n = std::min(ea.size(), eb.size());
     for (size_t i = 0; i < n; ++i) {
         if (Key(*ea[i]) != Key(*eb[i]))
             return done(i, "event type: " + Key(*ea[i]) + " vs " + Key(*eb[i]));
-        std::string f = DiffFields(*ea[i], *eb[i], {"seq", "n"});
+        std::string f = DiffFields(*ea[i], *eb[i], skip);
         if (!f.empty()) return done(i, "event '" + Key(*ea[i]) + "' " + f);
         if (opt.compare_repeat_counts && ra[i] != rb[i])
             return done(i, "event '" + Key(*ea[i]) + "' repeat count: " + std::to_string((long long)ra[i]) +
@@ -277,6 +279,29 @@ Divergence CompareTraces(const TraceFile& a, const TraceFile& b, const CompareOp
     if (ea.size() != eb.size())
         return done(n, std::string("trace ") + (ea.size() < eb.size() ? "A" : "B") + " ends early");
     return d;
+}
+
+std::vector<Divergence> CompareTracesBySegment(const TraceFile& a, const TraceFile& b, const std::string& sync_ev,
+                                               const CompareOptions& opt) {
+    auto split = [&](const TraceFile& t) {
+        std::vector<TraceFile> segs(1);
+        segs[0].header = t.header;
+        for (const auto& e : t.events) {
+            if (e.StringOr("ev", "") == sync_ev) { segs.emplace_back(); segs.back().header = t.header; }
+            segs.back().events.push_back(e);
+        }
+        return segs;
+    };
+    std::vector<TraceFile> sa = split(a), sb = split(b);
+    const size_t n = std::max(sa.size(), sb.size());
+    sa.resize(n); sb.resize(n);
+    std::vector<Divergence> r;
+    for (size_t i = 0; i < n; ++i) {
+        if (sa[i].header.IsNull()) sa[i].header = a.header; // missing segment: empty, same header
+        if (sb[i].header.IsNull()) sb[i].header = b.header;
+        r.push_back(CompareTraces(sa[i], sb[i], opt));
+    }
+    return r;
 }
 
 } // namespace personarm::trace

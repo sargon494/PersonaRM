@@ -117,6 +117,9 @@ struct CompareOptions {
     /// Compare the "n" repeat count of collapsed `call` runs. Off by default: polling counts
     /// (TestEvent loops) depend on emulation timing.
     bool compare_repeat_counts = false;
+    /// Event fields never compared and not part of a `call`'s identity when merging runs (e.g. "a3":
+    /// a register the callee does not read, left over from the real vs HLE BIOS).
+    std::set<std::string> ignore_fields;
 };
 
 struct Divergence {
@@ -128,5 +131,11 @@ struct Divergence {
 
 /// First divergence between two traces, aligned by event order (seq is ignored; see TRACE_FORMAT.md).
 Divergence CompareTraces(const TraceFile& a, const TraceFile& b, const CompareOptions& opt = {});
+
+/// Re-synchronising comparison: each trace is cut before every `sync_ev` event (e.g. "load_file"), and
+/// segment i of A is compared with segment i of B. One result per segment (max of both counts; a missing
+/// segment compares as empty). Indices are relative to the segment.
+std::vector<Divergence> CompareTracesBySegment(const TraceFile& a, const TraceFile& b, const std::string& sync_ev,
+                                               const CompareOptions& opt = {});
 
 } // namespace personarm::trace
