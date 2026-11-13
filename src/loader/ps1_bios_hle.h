@@ -97,6 +97,7 @@ private:
     uint32_t DeliverEvent(uint32_t cls, uint32_t spec, uint8_t* ram, size_t ram_size, std::vector<uint32_t>& callbacks);
     uint32_t EventCall(uint32_t fn, CpuContext& cpu, uint8_t* ram, size_t ram_size, bool& blocked);
     void LogUnimplemented(BiosVector vec, uint32_t fn);
+    void CardNoCard(uint32_t cls, uint8_t* ram, size_t ram_size, std::vector<uint32_t>& callbacks);
 
     // Vector A Handlers (C Runtime & File I/O)
     void HandleFileOpen(CpuContext& cpu, const uint8_t* ram, size_t ram_size);
