@@ -294,7 +294,7 @@ void Engine::WriteBus(uint32_t address, uint32_t value, uint32_t size) {
             m_joy_rx_fifo.push_back(0x5A); // Header end marker
         } else if (m_joy_step == 3) {
             // Buttons Byte 1 (active low 0=pressed)
-            uint8_t b1 = 0xFF;
+            uint8_t b1 = static_cast<uint8_t>(~ScriptedButtons());
             if (m_input.IsActionPressed(VirtualAction::MoveUp))    b1 &= ~(1 << 4);
             if (m_input.IsActionPressed(VirtualAction::MoveRight)) b1 &= ~(1 << 5);
             if (m_input.IsActionPressed(VirtualAction::MoveDown))  b1 &= ~(1 << 6);
@@ -303,7 +303,7 @@ void Engine::WriteBus(uint32_t address, uint32_t value, uint32_t size) {
             m_joy_rx_fifo.push_back(b1);
         } else if (m_joy_step == 4) {
             // Buttons Byte 2 (active low 0=pressed)
-            uint8_t b2 = 0xFF;
+            uint8_t b2 = static_cast<uint8_t>(~ScriptedButtons() >> 8);
             if (m_input.IsActionPressed(VirtualAction::CameraRotateLeft))  b2 &= ~(1 << 2); // L1
             if (m_input.IsActionPressed(VirtualAction::CameraRotateRight)) b2 &= ~(1 << 3); // R1
             if (m_input.IsActionPressed(VirtualAction::Menu))              b2 &= ~(1 << 4); // Triangle
@@ -569,6 +569,37 @@ void Engine::TickTimers(uint32_t cycles) {
             if (!(t.mode & 0x80u)) t.mode |= 0x400u;
         }
     }
+}
+
+bool Engine::ParsePadPress(const std::string& text, PadPress& out) {
+    static const char* const kNames[16] = {"select", "l3", "r3", "start", "up", "right", "down", "left",
+                                           "l2", "r2", "l1", "r1", "triangle", "circle", "cross", "square"};
+    const size_t at = text.find('@');
+    if (at == std::string::npos) return false;
+    const std::string name = text.substr(0, at);
+    const auto it = std::find(std::begin(kNames), std::end(kNames), name);
+    if (it == std::end(kNames)) return false;
+    char* end = nullptr;
+    const char* p = text.c_str() + at + 1;
+    PadPress r;
+    r.mask = static_cast<uint16_t>(1u << (it - std::begin(kNames)));
+    r.frame = std::strtoull(p, &end, 10);
+    if (end == p) return false;
+    if (*end == '+') {
+        p = end + 1;
+        r.frames = std::strtoull(p, &end, 10);
+        if (end == p) return false;
+    }
+    if (*end != 0) return false;
+    out = r;
+    return true;
+}
+
+uint16_t Engine::ScriptedButtons() const {
+    uint16_t held = 0;
+    for (const PadPress& p : m_pad_script)
+        if (m_frame_counter >= p.frame && m_frame_counter < p.frame + p.frames) held |= p.mask;
+    return held;
 }
 
 void Engine::GetCurrentFrame(std::vector<uint32_t>& out_rgba, uint32_t& out_w, uint32_t& out_h) {

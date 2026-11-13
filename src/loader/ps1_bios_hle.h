@@ -66,6 +66,8 @@ public:
 
     /// Get total calls intercepted since boot
     uint64_t GetInterceptedCallCount() const { return m_intercept_count; }
+    /// Unimplemented calls seen so far, as (vector << 8) | function (e.g. 0xB04A).
+    const std::set<uint32_t>& GetUnimplementedCalls() const { return m_logged_unimpl; }
 
 private:
     Ps1BiosHle() = default;

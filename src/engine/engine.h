@@ -100,6 +100,16 @@ public:
 
     trace::ITraceSink* GetTraceSink() const { return m_trace; }
 
+    /// Scripted pad input (boot harness): `mask` (digital pad bits, psx-spx "Controllers": bit 0 Select,
+    /// 3 Start, 4-7 Up/Right/Down/Left, 8-11 L2/R2/L1/R1, 12-15 Triangle/Circle/Cross/Square) is held
+    /// during frames [frame, frame + frames). Merged with the InputManager state.
+    struct PadPress { uint16_t mask = 0; uint64_t frame = 0, frames = 5; };
+    void SetPadScript(std::vector<PadPress> script) { m_pad_script = std::move(script); }
+    /// "<button>@<frame>[+<frames>]", e.g. "start@300" or "cross@600+10". False on bad syntax.
+    static bool ParsePadPress(const std::string& text, PadPress& out);
+    /// Buttons held by the script at the current frame (bit set = pressed).
+    uint16_t ScriptedButtons() const;
+
     const std::vector<uint8_t>& GetRam() const { return m_ram; }
     void SetRam(const std::vector<uint8_t>& ram) { m_ram = ram; }
     const std::vector<uint8_t>& GetScratchpad() const { return m_scratchpad; }
@@ -186,6 +196,7 @@ private:
     float m_speed_multiplier = 1.0f;
     uint32_t m_joy_step = 0;
     std::vector<uint8_t> m_joy_rx_fifo;
+    std::vector<PadPress> m_pad_script;
 
     uint64_t m_frame_counter = 0;
 

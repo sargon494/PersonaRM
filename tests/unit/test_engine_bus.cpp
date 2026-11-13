@@ -147,6 +147,29 @@ static void TestSystemCnfStack() {
     CHECK(ParseSystemCnfStack("STACK = zz\r\n", 7) == 7);
 }
 
+// Scripted pad (boot harness --press): psx-spx "Controllers" digital pad, buttons active low.
+static void TestPadScript(Engine& e) {
+    Engine::PadPress p{};
+    CHECK(Engine::ParsePadPress("start@10", p) && p.mask == 0x0008 && p.frame == 10 && p.frames == 5);
+    CHECK(Engine::ParsePadPress("cross@3+2", p) && p.mask == 0x4000 && p.frame == 3 && p.frames == 2);
+    CHECK(!Engine::ParsePadPress("start", p) && !Engine::ParsePadPress("jump@1", p) && !Engine::ParsePadPress("up@x", p));
+    auto poll = [&] {
+        uint32_t b[5];
+        const uint32_t tx[5] = {0x01, 0x42, 0, 0, 0};
+        for (int i = 0; i < 5; ++i) { e.Write(0x1F801040, tx[i], 1); b[i] = e.Read(0x1F801040, 1); }
+        CHECK(b[1] == 0x41 && b[2] == 0x5A);
+        return b[3] | b[4] << 8;
+    };
+    e.SetPadScript({p, {0x0010, 4, 1}});  // cross frames 3-4, up frame 4
+    e.SetFrameCount(2);
+    CHECK(poll() == 0xFFFF);
+    e.SetFrameCount(4);
+    CHECK(poll() == 0xBFEF);
+    e.SetFrameCount(5);
+    CHECK(poll() == 0xFFFF);
+    e.SetPadScript({});
+}
+
 int main() {
     Engine& e = Boot();
     TestRamMirrors(e);
@@ -157,6 +180,7 @@ int main() {
     TestSpu(e);
     TestTimer1Hblank(e);
     TestSystemCnfStack();
+    TestPadScript(e);
     e.Shutdown();
     std::puts("unit_test_engine_bus: all checks passed");
     return 0;
