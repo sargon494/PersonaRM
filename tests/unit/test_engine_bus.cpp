@@ -156,7 +156,9 @@ static void TestPadScript(Engine& e) {
     auto poll = [&] {
         uint32_t b[5];
         const uint32_t tx[5] = {0x01, 0x42, 0, 0, 0};
+        e.Write(0x1F80104A, 0x0003, 2);  // TXEN + /JOY1 select
         for (int i = 0; i < 5; ++i) { e.Write(0x1F801040, tx[i], 1); b[i] = e.Read(0x1F801040, 1); }
+        e.Write(0x1F80104A, 0, 2);
         CHECK(b[1] == 0x41 && b[2] == 0x5A);
         return b[3] | b[4] << 8;
     };
@@ -170,6 +172,34 @@ static void TestPadScript(Engine& e) {
     e.SetPadScript({});
 }
 
+// SIO0 /ACK -> IRQ7 (libpad waits on it), JOY_CTRL acknowledge, and "no memory card" (0x81 unanswered).
+static void TestSio0AckAndNoCard(Engine& e) {
+    e.Write(0x1F801070, 0, 4);
+    e.Write(0x1F80104A, 0x1003, 2);  // select /JOY1, /ACK IRQ enabled
+    CHECK(e.Read(0x1F80104A, 2) == 0x1003);
+    e.Write(0x1F801040, 0x01, 1);
+    CHECK(e.Read(0x1F801044, 2) & 0x2);   // RX ready
+    CHECK(e.Read(0x1F801040, 1) == 0xFF);
+    e.RunFrame();
+    CHECK(e.Read(0x1F801044, 2) & 0x280);  // /ACK low + IRQ flag
+    CHECK(e.Read(0x1F801070, 4) & 0x80);   // IRQ7 in I_STAT
+    e.Write(0x1F80104A, 0x1013, 2);        // acknowledge
+    CHECK((e.Read(0x1F801044, 2) & 0x200) == 0);
+    e.Write(0x1F80104A, 0x1000, 2);        // deselect
+    e.Write(0x1F801070, 0, 4);
+    e.Write(0x1F80104A, 0x1003, 2);
+    e.Write(0x1F801040, 0x81, 1);          // memory card address: nobody answers
+    CHECK(e.Read(0x1F801040, 1) == 0xFF);
+    e.RunFrame();
+    CHECK((e.Read(0x1F801044, 2) & 0x280) == 0);
+    CHECK((e.Read(0x1F801070, 4) & 0x80) == 0);
+    e.Write(0x1F80104A, 0x2003, 2);        // /JOY2: empty port, the pad does not answer either
+    e.Write(0x1F801040, 0x01, 1);
+    CHECK(e.Read(0x1F801040, 1) == 0xFF);
+    e.Write(0x1F80104A, 0x0040, 2);        // reset
+    CHECK(e.Read(0x1F80104A, 2) == 0 && (e.Read(0x1F801044, 2) & 0x282) == 0);
+}
+
 int main() {
     Engine& e = Boot();
     TestRamMirrors(e);
@@ -181,6 +211,7 @@ int main() {
     TestTimer1Hblank(e);
     TestSystemCnfStack();
     TestPadScript(e);
+    TestSio0AckAndNoCard(e);
     e.Shutdown();
     std::puts("unit_test_engine_bus: all checks passed");
     return 0;
