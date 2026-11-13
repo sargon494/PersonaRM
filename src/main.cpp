@@ -73,7 +73,7 @@ static void PrintUsage(const char* prog) {
               << "                     --dump-ram-at-loads <dir>  RAM image at each load_file_by_id return\n"
               << "                     --dump-vram <png>      1024x512 VRAM at stop\n"
               << "                     --dump-frames <dir> --every N   display area PNG every N frames\n"
-              << "                     --dump-audio <wav>     CD XA audio, 16-bit stereo 44.1 kHz\n"
+              << "                     --dump-audio <wav>     SPU output (voices + CD/XA), 16-bit stereo 44.1 kHz\n"
               << "                     --press <btn>@<frame>[+<n>]     hold a pad button n frames (default 5)\n"
               << "                     --input-script <file>  presses from lines <frame> <btn> [<n>] (# comments)\n"
               << "                     --watch-pc <hex>       log the first 20 hits of a PC (repeatable)\n"
@@ -937,14 +937,15 @@ static int RunBootHarness(const std::string& disc_path, const BootOptions& opt) 
     std::set<uint32_t> disp_starts;
     std::vector<uint32_t> frame;
     uint32_t fw = 0, fh = 0;
-    std::vector<int16_t> audio;
-    bool seen_xa = false;
+    std::vector<int16_t> audio, chunk;
+    bool seen_sound = false;
     while (engine.GetFrameCount() < opt.max_frames && engine.GetState() == personarm::EngineState::Running) {
         engine.RunFrame();
         {
-            const std::vector<int16_t> xa = engine.TakeXaAudio();
-            if (!xa.empty() && !seen_xa) seen_xa = true, std::cout << stamp() << "first XA audio sector\n";
-            if (!opt.dump_audio.empty()) audio.insert(audio.end(), xa.begin(), xa.end());
+            engine.TakeAudio(chunk);
+            if (!seen_sound && std::any_of(chunk.begin(), chunk.end(), [](int16_t v) { return v != 0; }))
+                seen_sound = true, std::cout << stamp() << "first non-silent SPU audio\n";
+            if (!opt.dump_audio.empty()) audio.insert(audio.end(), chunk.begin(), chunk.end());
         }
         auto& gpu = engine.GetGpu();
         if (!seen_poly && gpu.GetPolygonCount()) {

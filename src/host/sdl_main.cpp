@@ -44,7 +44,7 @@ int main(int argc, char** argv) {
         SDL_Quit();
         return EXIT_FAILURE;
     }
-    // XA audio: 44.1 kHz stereo s16. No stream = run silent.
+    // SPU output: 44.1 kHz stereo s16. No stream = run silent.
     const SDL_AudioSpec spec{SDL_AUDIO_S16, 2, 44100};
     SDL_AudioStream* audio = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, nullptr, nullptr);
     if (audio) SDL_ResumeAudioStreamDevice(audio);
@@ -74,7 +74,8 @@ int main(int argc, char** argv) {
     SDL_Texture* texture = nullptr;
     int tex_w = 0, tex_h = 0;
     std::vector<uint32_t> rgba;
-    uint64_t xa_samples = 0, lit_frames = 0;
+    std::vector<int16_t> pcm;
+    uint64_t audio_samples = 0, lit_frames = 0;
     const uint64_t frame_ns = SDL_NS_PER_SECOND / 60;  // engine frame = 564480 cycles = 1/60 s
     uint64_t next = SDL_GetTicksNS();
     bool quit = false;
@@ -96,9 +97,7 @@ int main(int argc, char** argv) {
             }
         }
 
-        // Pad: the live mask is fed as a one-frame pad script (the only public path that carries all
-        // 16 buttons; InputManager's VirtualActions have no Start/Select/L2/R2).
-        uint16_t mask = 0;
+        uint16_t mask = 0;  // all 16 digital pad buttons
         const bool* ks = SDL_GetKeyboardState(nullptr);
         for (const KeyBit& k : keys)
             if (ks[k.code]) mask |= k.bit;
@@ -107,16 +106,16 @@ int main(int argc, char** argv) {
                 if (p.button != SDL_GAMEPAD_BUTTON_INVALID && SDL_GetGamepadButton(g, p.button)) mask |= p.bit;
                 if (p.axis != SDL_GAMEPAD_AXIS_INVALID && SDL_GetGamepadAxis(g, p.axis) > 16384) mask |= p.bit;
             }
-        engine.SetPadScript({Engine::PadPress{mask, engine.GetFrameCount(), 1}});
+        engine.SetPadButtons(mask);
 
         engine.RunFrame();
 
-        const std::vector<int16_t> xa = engine.TakeXaAudio();
-        xa_samples += xa.size();
-        if (audio && !xa.empty()) {
+        engine.TakeAudio(pcm);
+        audio_samples += pcm.size();
+        if (audio && !pcm.empty()) {
             // Keep latency bounded if the emulator ran ahead of the device clock (> 0.25 s queued).
             if (SDL_GetAudioStreamQueued(audio) > 44100 * 4 / 4) SDL_ClearAudioStream(audio);
-            SDL_PutAudioStreamData(audio, xa.data(), int(xa.size() * sizeof(int16_t)));
+            SDL_PutAudioStreamData(audio, pcm.data(), int(pcm.size() * sizeof(int16_t)));
         }
 
         Ps1Gpu& gpu = engine.GetGpu();
@@ -156,8 +155,8 @@ int main(int argc, char** argv) {
         else if (now - next > 6 * frame_ns) next = now;  // too far behind: drop the debt instead of racing
     }
 
-    std::printf("[SDL] frames=%llu non-black=%llu xa_samples=%llu\n", (unsigned long long)engine.GetFrameCount(),
-                (unsigned long long)lit_frames, (unsigned long long)xa_samples);
+    std::printf("[SDL] frames=%llu non-black=%llu audio_samples=%llu\n", (unsigned long long)engine.GetFrameCount(),
+                (unsigned long long)lit_frames, (unsigned long long)audio_samples);
     engine.Shutdown();
     for (SDL_Gamepad* g : gamepads) SDL_CloseGamepad(g);
     if (texture) SDL_DestroyTexture(texture);

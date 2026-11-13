@@ -54,6 +54,7 @@ void SpuEmulator::Reset() {
     // does not route SPU writes yet, so default to enabled+unmuted.
     m_spucnt = 0xC000;
     m_rev_cur = 0; m_rev_phase = false; m_rev_out_l = m_rev_out_r = 0;
+    m_cycle_acc = 0; m_out.clear(); m_cd_fifo.clear();
 }
 
 uint8_t SpuEmulator::ReadRam(uint32_t a) const { return m_spu_ram[a & (SPU_RAM_SIZE - 1)]; }
@@ -67,6 +68,11 @@ void SpuEmulator::UploadToRam(uint32_t dst, const uint8_t* data, size_t size) {
 
 void SpuEmulator::DmaWrite(const uint8_t* data, size_t size) {
     for (size_t i = 0; data && i < size; ++i) WriteRam(m_transfer_addr++, data[i]);
+    m_transfer_addr &= (SPU_RAM_SIZE - 1);
+}
+
+void SpuEmulator::DmaRead(uint8_t* out, size_t size) {
+    for (size_t i = 0; out && i < size; ++i) out[i] = ReadRam(m_transfer_addr++);
     m_transfer_addr &= (SPU_RAM_SIZE - 1);
 }
 
@@ -168,7 +174,11 @@ uint16_t SpuEmulator::Read16(uint32_t addr) const {
         case 0x19C: return (uint16_t)(m_endx & 0xFFFF);
         case 0x19E: return (uint16_t)(m_endx >> 16);
         case 0x1A6: return (uint16_t)(m_transfer_addr >> 3);
-        case 0x1AE: return m_spucnt & 0x3F; // SPUSTAT mirrors SPUCNT bits 0-5; busy/IRQ flags not modelled
+        case 0x1AE: { // SPUSTAT: bits 0-5 mirror SPUCNT; 7 = SPUCNT.5, 8/9 = DMA write/read request.
+            // Transfers complete instantly, so bit 10 (busy) stays 0. IRQ9 / capture-half bits not modelled.
+            const uint16_t mode = (m_spucnt >> 4) & 3;
+            return (uint16_t)((m_spucnt & 0x3F) | ((m_spucnt & 0x20) << 2) | (mode == 2 ? 0x100 : 0) | (mode == 3 ? 0x200 : 0));
+        }
         case 0x1B8: return (uint16_t)m_main_l;
         case 0x1BA: return (uint16_t)m_main_r;
     }
@@ -300,32 +310,67 @@ void SpuEmulator::ReverbTick(int32_t in_l, int32_t in_r) {
 
 void SpuEmulator::GenerateSamples(std::vector<int16_t>& out, size_t num_frames) {
     out.assign(num_frames * 2, 0);
+    for (size_t f = 0; f < num_frames; ++f) MixFrame(out[f * 2], out[f * 2 + 1]);
+}
+
+void SpuEmulator::Tick(uint32_t cycles) {
+    m_cycle_acc += cycles;
+    while (m_cycle_acc >= SPU_CYCLES_PER_SAMPLE) {
+        m_cycle_acc -= SPU_CYCLES_PER_SAMPLE;
+        int16_t l, r;
+        MixFrame(l, r);
+        m_out.push_back(l); m_out.push_back(r);
+    }
+}
+
+void SpuEmulator::TakeAudio(std::vector<int16_t>& out) {
+    out.clear();
+    out.swap(m_out);
+}
+
+void SpuEmulator::PushCdAudio(const int16_t* stereo, size_t frames) {
+    // shortcut: drops input past 1 s queued (feeder faster than 44.1 kHz); a real CD FIFO is tiny.
+    if (!stereo || m_cd_fifo.size() / 2 + frames > SPU_SAMPLE_RATE) return;
+    m_cd_fifo.insert(m_cd_fifo.end(), stereo, stereo + frames * 2);
+}
+
+void SpuEmulator::MixFrame(int16_t& out_l, int16_t& out_r) {
     const auto& gauss = GaussTable();
+    // psx-spx SPUCNT: bit 15 enable / bit 14 unmute do not affect CD audio; bit 0 enables CD audio.
     const bool enabled = (m_spucnt & 0x8000) != 0, unmuted = (m_spucnt & 0x4000) != 0;
     const uint32_t eon = G(0x198) | ((uint32_t)(G(0x19A) & 0xFF) << 16);
-    for (size_t f = 0; f < num_frames; ++f) {
-        int32_t sl = 0, sr = 0, rl = 0, rr = 0;
-        for (uint32_t i = 0; i < SPU_NUM_VOICES; ++i) {
-            SpuVoice& v = m_voices[i];
-            if (v.adsr_phase == AdsrPhase::Off) continue;
-            uint32_t ph = (v.pitch_counter >> 4) & 0xFF;
-            int32_t s = ((gauss[0x0FF - ph] * v.interp[0]) >> 15) + ((gauss[0x1FF - ph] * v.interp[1]) >> 15) +
-                        ((gauss[0x100 + ph] * v.interp[2]) >> 15) + ((gauss[0x000 + ph] * v.interp[3]) >> 15);
-            s = (Clamp16(s) * (int32_t)v.adsr_level) >> 15;
-            int32_t l = (s * v.volume_left) >> 15, r = (s * v.volume_right) >> 15;
-            sl += l; sr += r;
-            if (eon & (1u << i)) { rl += l; rr += r; }
-            StepEnvelope(v);
-            v.pitch_counter += std::min<uint32_t>(v.sample_rate_pitch, 0x3FFF); // psx-spx: max pitch 3FFFh
-            while (v.pitch_counter >= 0x1000) { v.pitch_counter -= 0x1000; PushSample(v); }
-        }
-        m_rev_phase = !m_rev_phase; // reverb runs at 22.05 kHz
-        if (m_rev_phase) ReverbTick(Clamp16(rl), Clamp16(rr));
-        if (!enabled || !unmuted) continue;
-        int32_t ol = ((Clamp16(sl) * m_main_l) >> 15) + (m_spucnt & 0x80 ? m_rev_out_l : 0);
-        int32_t or_ = ((Clamp16(sr) * m_main_r) >> 15) + (m_spucnt & 0x80 ? m_rev_out_r : 0);
-        out[f * 2] = Clamp16(ol); out[f * 2 + 1] = Clamp16(or_);
+    int32_t sl = 0, sr = 0, rl = 0, rr = 0;
+    for (uint32_t i = 0; i < SPU_NUM_VOICES; ++i) {
+        SpuVoice& v = m_voices[i];
+        if (v.adsr_phase == AdsrPhase::Off) continue;
+        uint32_t ph = (v.pitch_counter >> 4) & 0xFF;
+        int32_t s = ((gauss[0x0FF - ph] * v.interp[0]) >> 15) + ((gauss[0x1FF - ph] * v.interp[1]) >> 15) +
+                    ((gauss[0x100 + ph] * v.interp[2]) >> 15) + ((gauss[0x000 + ph] * v.interp[3]) >> 15);
+        s = (Clamp16(s) * (int32_t)v.adsr_level) >> 15;
+        int32_t l = (s * v.volume_left) >> 15, r = (s * v.volume_right) >> 15;
+        sl += l; sr += r;
+        if (eon & (1u << i)) { rl += l; rr += r; }
+        StepEnvelope(v);
+        v.pitch_counter += std::min<uint32_t>(v.sample_rate_pitch, 0x3FFF); // psx-spx: max pitch 3FFFh
+        while (v.pitch_counter >= 0x1000) { v.pitch_counter -= 0x1000; PushSample(v); }
     }
+    if (!enabled || !unmuted) sl = sr = 0;
+    int32_t cl = 0, cr = 0;
+    if (m_cd_fifo.size() >= 2) {
+        cl = m_cd_fifo[0]; cr = m_cd_fifo[1];
+        m_cd_fifo.pop_front(); m_cd_fifo.pop_front();
+    }
+    if (m_spucnt & 1) { // CD volume 1F801DB0h/B2h (-8000h..7FFFh); SPUCNT bit 2 feeds it to reverb
+        cl = (cl * (int16_t)G(0x1B0)) >> 15; cr = (cr * (int16_t)G(0x1B2)) >> 15;
+        sl += cl; sr += cr;
+        if (m_spucnt & 4) { rl += cl; rr += cr; }
+    }
+    m_rev_phase = !m_rev_phase; // reverb runs at 22.05 kHz
+    if (m_rev_phase) ReverbTick(Clamp16(rl), Clamp16(rr));
+    const bool rev_on = enabled && unmuted && (m_spucnt & 0x80);
+    const int32_t rev_l = rev_on ? m_rev_out_l : 0, rev_r = rev_on ? m_rev_out_r : 0;
+    out_l = Clamp16(((Clamp16(sl) * m_main_l) >> 15) + rev_l);
+    out_r = Clamp16(((Clamp16(sr) * m_main_r) >> 15) + rev_r);
 }
 
 } // namespace personarm

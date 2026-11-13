@@ -132,6 +132,26 @@ static void TestSpu(Engine& e) {
     e.Write(0x1F8010C4, 0x00010001, 4);
     e.Write(0x1F8010C8, 0x01000201, 4);
     CHECK(e.GetSpu().ReadRam(0x1000) == 0xAA && e.GetSpu().ReadRam(0x1003) == 0xDD);
+    // DMA4 SPU->RAM (CHCR bit 0 clear) reads sound RAM back from the transfer address.
+    e.GetDma().Tick(16);  // let the RAM->SPU transfer complete first
+    e.Write(0x80100300, 0, 4);
+    e.Write(0x1F801DA6, 0x1000 >> 3, 2);
+    e.Write(0x1F8010C0, 0x00100300, 4);
+    e.Write(0x1F8010C4, 0x00010001, 4);
+    e.Write(0x1F8010C8, 0x01000200, 4);
+    CHECK(e.Read(0x80100300, 4) == 0xDDCCBBAA);
+}
+
+// SPU runs on emulated time: every 768 CPU cycles yield exactly one stereo frame.
+static void TestSpuAudioPacing(Engine& e) {
+    std::vector<int16_t> pcm;
+    e.TakeAudio(pcm);
+    const uint64_t c0 = e.GetCycles();
+    size_t frames = 0;
+    for (int i = 0; i < 3; ++i) { e.RunFrame(); e.TakeAudio(pcm); frames += pcm.size() / 2; }
+    const uint64_t c1 = e.GetCycles();
+    CHECK(frames == c1 / 768 - c0 / 768);
+    CHECK(frames >= 3 * 735 && frames <= 3 * 735 + 1);
 }
 
 static void TestTimer1Hblank(Engine& e) {
@@ -201,6 +221,12 @@ static void TestPadScript(Engine& e) {
     e.SetFrameCount(5);
     CHECK(poll() == 0xFFFF);
     e.SetPadScript({});
+    e.SetPadButtons(0xFFFF);  // all 16 buttons incl. Select(0) Start(3) L2(8) R2(9)
+    CHECK(poll() == 0x0000);
+    e.SetPadButtons(0x0309);  // Select, Start, L2, R2
+    CHECK(poll() == 0xFCF6);
+    e.SetPadButtons(0);
+    CHECK(poll() == 0xFFFF);
 }
 
 // SIO0 /ACK -> IRQ7 (libpad waits on it), JOY_CTRL acknowledge, and "no memory card" (0x81 unanswered).
@@ -239,6 +265,7 @@ int main() {
     TestGpuPorts(e);
     TestCdRom(e);
     TestSpu(e);
+    TestSpuAudioPacing(e);
     TestTimer1Hblank(e);
     TestMdecDmaAndRamStall(e);
     TestSystemCnfStack();
