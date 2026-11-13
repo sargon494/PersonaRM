@@ -6,6 +6,7 @@
 #include <functional>
 #include <string>
 #include <memory>
+#include <unordered_map>
 #include <vector>
 
 #include "cpu/cpu_context.h"
@@ -21,6 +22,7 @@
 #include "hw/dma.h"
 #include "hw/mdec.h"
 #include "audio/xa_adpcm.h"
+#include "recomp/runtime/recomp_runtime.h"
 
 namespace personarm {
 
@@ -150,6 +152,33 @@ public:
     /// Write a PRMTRACE file; it is (re)created with its header at the next boot.
     void SetTraceOutput(const std::string& path) { m_trace_path = path; }
 
+    /// Recompiled code (roadmap step 4). At each boot, a module whose image hash matches RAM right
+    /// after the EXE load is activated: when the interpreter loop reaches one of its function
+    /// entries or resume points (call return sites, branch targets) at a clean boundary, the code
+    /// runs natively on the CPU state (copied in at entry, out when it hands back). A jump to an
+    /// HLE vector runs the same HLE in place; exceptions, IRQ delivery, overlays and code nobody
+    /// compiled stay in the interpreter. `quantum` = cycles between service points: 1 ticks devices
+    /// and checks IRQs after every instruction (the interpreter's timing exactly); larger runs
+    /// faster but delivers IRQs up to `quantum` cycles late (MMIO accesses still see devices up to date).
+    void SetRecompModules(std::vector<const recomp::Module*> modules, uint32_t quantum = 1) {
+        m_recomp_modules = std::move(modules);
+        m_recomp_quantum = quantum ? quantum : 1;
+    }
+    struct RecompStats {
+        uint64_t entries = 0;              // native runs started from the interpreter loop
+        uint64_t native_instructions = 0;  // instructions executed by generated code
+        uint64_t interp_resident = 0, interp_overlay = 0, interp_kernel = 0;  // interpreted, by PC region
+        uint64_t blocked = 0;              // entry reached with a load in flight or an IRQ due
+        uint64_t dispatch_misses = 0;      // native jumps to code nobody compiled (they unwind)
+        uint64_t stops = 0;                // service points that handed back (IRQ due, frame end)
+        uint64_t hle_calls = 0;            // HLE vectors run from native code without unwinding
+        std::unordered_map<uint32_t, uint64_t> exits;  // PC where native runs handed back, stops excluded
+        std::vector<uint64_t> interp_by_pc;            // interpreted steps per word of the active images
+        uint32_t map_base = 0;                         // address of interp_by_pc[0]
+        std::vector<std::string> active, rejected;     // module names at the last boot
+    };
+    const RecompStats& GetRecompStats() const { return m_recomp_stats; }
+
 private:
     Engine();
     ~Engine();
@@ -162,7 +191,13 @@ private:
 
     // Interrupt controller (psx-spx "Interrupt Control") and root counters (psx-spx "Timers").
     void RaiseIrq(uint32_t bit) { m_i_stat |= 1u << bit; UpdateIrqLine(); }
-    void UpdateIrqLine() { m_cpu.SetIrqLine((m_i_stat & m_i_mask) != 0); }
+    void UpdateIrqLine() {
+        m_cpu.SetIrqLine((m_i_stat & m_i_mask) != 0);
+        if (m_in_native) {  // generated code holds CAUSE: mirror IP2 and force a service point
+            m_native.cause = (m_native.cause & ~0x400u) | (m_cpu.GetRegisters().cp0_cause & 0x400u);
+            m_native.deadline = 0;
+        }
+    }
     void TickTimers(uint32_t cycles);
 
     struct RootCounter {
@@ -211,6 +246,33 @@ private:
     std::vector<int16_t> m_xa_pcm, m_xa_out;
     void OnXaSector(const uint8_t* raw2352);
     StepHook m_step_hook;
+
+    // Recompiled-code mode (SetRecompModules).
+    void RunHle();     // HLE vectors and kernel stubs until guest code is next (or the engine stops)
+    bool RunNative();  // false: nothing compiled at PC (or not enterable), the interpreter steps
+    void CpuToNative();
+    void NativeToCpu();
+    static bool NativeExternal(recomp::CpuState& s);
+    void ActivateRecomp();
+    void SyncDevices(uint64_t now) {
+        if (now == m_timer_cycles) return;  // never Tick(0): a DRQ-paced DMA would move early
+        TickDevices(static_cast<uint32_t>(now - m_timer_cycles));
+        m_timer_cycles = now;
+    }
+    static bool NativeService(recomp::CpuState& s);
+    static uint32_t NativeRead(void* engine, uint32_t address, uint32_t size);
+    static void NativeWrite(void* engine, uint32_t address, uint32_t value, uint32_t size);
+    std::vector<const recomp::Module*> m_recomp_modules;
+    std::vector<std::pair<uint32_t, uint32_t>> m_recomp_ranges;  // active images, physical [begin, end)
+    uint32_t m_recomp_quantum = 1;
+    bool m_recomp_on = false;
+    bool m_in_native = false;
+    recomp::Dispatcher m_recomp;  // function entries and resume points, for jumps inside native code
+    std::vector<recomp::RecompFn> m_native_map;  // same, by (pc - m_native_lo) / 4
+    uint32_t m_native_lo = 0;
+    recomp::CpuState m_native;
+    uint64_t m_frame_target = 0;
+    RecompStats m_recomp_stats;
     std::function<void(uint32_t)> m_kon_hook;
     uint32_t m_boot_sp = 0x801FFFF0; // SYSTEM.CNF STACK (BIOS default) when the EXE header has none
 

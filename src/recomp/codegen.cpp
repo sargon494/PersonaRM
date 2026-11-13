@@ -7,6 +7,7 @@
 
 #include "cfg.h"
 #include "mips_decode.h"
+#include "runtime/recomp_runtime.h"
 
 namespace personarm::recomp {
 
@@ -190,7 +191,8 @@ Func Analyze(const Image& img, uint32_t entry, const std::set<uint32_t>& entries
 
 class Emitter {
 public:
-    Emitter(const Image& img, const std::set<uint32_t>& generated, Func& f) : m_img(img), m_gen(generated), m_f(f) {}
+    Emitter(const Image& img, const std::set<uint32_t>& generated, Func& f)
+        : m_img(img), m_gen(generated), m_f(f), m_labels(f.labels) {}
 
     std::string Body() {
         std::ostringstream os;
@@ -210,9 +212,13 @@ public:
                 falls = Transfer(os, a);
             } else {
                 os << "    // " << Addr(a) << ": " << DescribeInsn(w) << "\n";
-                os << "    " << Stmt(a, false) << "\n";
                 const uint32_t fn = FunctOf(w);
-                if (OpOf(w) == 0 && (fn == 0x0C || fn == 0x0D)) falls = false;
+                if (OpOf(w) == 0 && (fn == 0x0C || fn == 0x0D)) {
+                    os << "    " << Stmt(a, false) << "\n";   // the exception counts its cycle
+                    falls = false;
+                } else {
+                    os << "    " << Timed(a, false, Hex(a + 4)) << "\n";
+                }
             }
             if (!falls) continue;
             if (m_f.starts.count(ft)) {
@@ -229,7 +235,36 @@ public:
 
 private:
     std::string Exc(uint32_t code, uint32_t a, bool bd) const {
-        return "{ RaiseException(s, " + Hex(code) + ", " + Hex(a) + ", " + (bd ? "true" : "false") + "); return; }";
+        return "{ RaiseException(s, " + Hex(code) + ", " + Hex(a) + ", " + (bd ? "true" : "false") + "); s.cycles += 1; return; }";
+    }
+    // After an instruction: its cycle, then the host's service point. `next` resumes there;
+    // `slot_next` nonzero when `next` is a delay slot (the branch then continues at slot_next).
+    static std::string Tick(const std::string& next, const std::string& slot_next = "") {
+        return "s.cycles += 1; if (s.cycles >= s.deadline && Stop(s, " + next + (slot_next.empty() ? "" : ", " + slot_next) + ")) return;";
+    }
+    // A non-transfer instruction and its Tick. After a delayed load (or MFC0/MFC2/CFC2) a stop hands
+    // the interpreter the state it would hold: old register value, the new one still in flight.
+    // A chain of loads into one register (LWL+LWR): the interpreter supersedes the in-flight load
+    // without writing it back, so the register keeps its value from before the first one.
+    std::string Timed(uint32_t a, bool bd, const std::string& next) const {
+        const uint32_t w = m_img.Word(a);
+        if (!RegUse(w).delayed) return Stmt(a, bd) + " " + Tick(next);
+        const std::string rt = std::to_string(RtOf(w));
+        const std::string stop = " s.cycles += 1; if (s.cycles >= s.deadline && StopLoad(s, " + next + ", " + rt + ", ";
+        if (Chained(a)) return "{ " + Stmt(a, bd) + stop + "s.pair_prev)) return; }";
+        const std::string save = Chained(a + 4) ? "s.pair_prev = s.gpr[" + rt + "]; " : "";
+        return "{ const uint32_t prev = s.gpr[" + rt + "]; " + save + Stmt(a, bd) + stop + "prev)) return; }";
+    }
+    // True when `x` is only ever reached right after `x - 4` and both are delayed loads into the
+    // same register (x - 4 a plain instruction, or the delay slot of a conditional branch).
+    bool Chained(uint32_t x) const {
+        if (!m_f.starts.count(x) || !m_f.starts.count(x - 4) || m_labels.count(x)) return false;
+        const uint32_t p = m_img.Word(x - 4);
+        if (OwnsDelaySlot(p)) return false;
+        if (m_f.starts.count(x - 8) && OwnsDelaySlot(m_img.Word(x - 8)) &&
+            Decode(m_img.Word(x - 8), x - 8).kind != InsnKind::Branch) return false;
+        const uint32_t d = RegUse(p).delayed;
+        return d != 0 && d == RegUse(m_img.Word(x)).delayed;
     }
     std::string Fn(uint32_t t) const { return "f_" + Addr(t); }
     std::string Call(uint32_t t) const { return m_gen.count(t) ? Fn(t) + "(s);" : "Dispatch(s, " + Hex(t) + ");"; }
@@ -244,14 +279,19 @@ private:
         const uint32_t w = m_img.Word(a), ds = m_img.Word(a + 4);
         const uint32_t op = OpOf(w), rs = RsOf(w), rt = RtOf(w), rd = RdOf(w), ret = a + 8;
         const Insn in = Decode(w, a);
-        const std::string delay = Stmt(a + 4, true);
+        const std::string after = "(taken ? " + Hex(in.target) + " : " + Hex(ret) + ")";
+        const std::string done = "if (s.pc != " + Hex(ret) + " || s.stopped) return;";
         os << "    // " << Addr(a) << ": " << DescribeInsn(w) << "\n";
         os << "    // " << Addr(a + 4) << ": " << DescribeInsn(ds) << "  (delay slot)\n";
         os << "    {\n";
         bool falls = true;
+        auto slot = [&](const std::string& next) {   // branch cycle, delay slot, its cycle
+            os << "        " << Tick(Hex(a + 4), next) << "\n";
+            os << "        " << Timed(a + 4, true, next) << "\n";
+        };
         auto cond = [&](const std::string& c) {
             os << "        const bool taken = " << c << ";\n";
-            os << "        " << delay << "\n";
+            slot(after);
             os << "        if (taken) " << JumpTo(in.target) << "\n";
         };
         const std::string S = "static_cast<int32_t>(" + R(rs) + ")";
@@ -260,12 +300,12 @@ private:
                 os << "        const uint32_t target = " << R(rs) << ";\n";
                 if (FunctOf(w) == 0x09) {                      // jalr
                     os << "        " << Set(rd ? rd : 31, Hex(ret)) << "\n";
-                    os << "        " << delay << "\n";
+                    slot("target");
                     os << "        Dispatch(s, target);\n";
-                    os << "        if (s.pc != " << Hex(ret) << ") return;\n";
+                    os << "        " << done << "\n";
                     break;
                 }
-                os << "        " << delay << "\n";          // jr
+                slot("target");                               // jr
                 falls = false;
                 if (m_f.tables.count(a)) {
                     os << "        switch (target) {\n";
@@ -279,18 +319,20 @@ private:
                 if (rt == 0x00 || rt == 0x01) { cond(S + (rt ? " >= 0" : " < 0")); break; }
                 os << "        const bool taken = " << S << (rt == 0x11 ? " >= 0" : " < 0") << ";\n";
                 os << "        s.gpr[31] = " << Hex(ret) << ";\n";
-                os << "        " << delay << "\n";
+                slot(after);
                 os << "        if (taken) {\n            " << Call(in.target) << "\n";
-                os << "            if (s.pc != " << Hex(ret) << ") return;\n        }\n";
+                os << "            " << done << "\n        }\n";
                 break;
             case 0x02:
-                os << "        " << delay << "\n        " << JumpTo(in.target) << "\n";
+                slot(Hex(in.target));
+                os << "        " << JumpTo(in.target) << "\n";
                 falls = false;
                 break;
             case 0x03:
                 os << "        s.gpr[31] = " << Hex(ret) << ";\n";
-                os << "        " << delay << "\n        " << Call(in.target) << "\n";
-                os << "        if (s.pc != " << Hex(ret) << ") return;\n";
+                slot(Hex(in.target));
+                os << "        " << Call(in.target) << "\n";
+                os << "        " << done << "\n";
                 break;
             case 0x04: cond(R(rs) + " == " + R(rt)); break;
             case 0x05: cond(R(rs) + " != " + R(rt)); break;
@@ -364,12 +406,13 @@ private:
                     return "/* mfc0 of an unmodelled register: rt keeps its value */";
                 }
                 if (rs == 0x04) {
-                    if (rd == 12) return "s.sr = " + RT + ";";
-                    if (rd == 13) return "s.cause = (s.cause & ~0x300u) | (" + RT + " & 0x300u);";
+                    // SR/CAUSE writes can unmask a pending IRQ: deadline 0 forces the service point.
+                    if (rd == 12) return "s.sr = " + RT + "; s.deadline = 0;";
+                    if (rd == 13) return "s.cause = (s.cause & ~0x300u) | (" + RT + " & 0x300u); s.deadline = 0;";
                     if (rd == 14) return "s.epc = " + RT + ";";
                     return "/* mtc0 to an unmodelled register */";
                 }
-                if (fn == 0x10 && (w & 0x02000000u)) return "s.sr = (s.sr & ~0x0Fu) | ((s.sr >> 2) & 0x0Fu);  // rfe";
+                if (fn == 0x10 && (w & 0x02000000u)) return "s.sr = (s.sr & ~0x0Fu) | ((s.sr >> 2) & 0x0Fu); s.deadline = 0; /* rfe */";
                 return "/* cop0: no-op in the interpreter */";
             case 0x12:                                                     // COP2 (GTE)
                 if (w & 0x02000000u) return "s.gte->ExecuteCommand(" + Hex(w) + ");";
@@ -404,19 +447,23 @@ private:
     const Image& m_img;
     const std::set<uint32_t>& m_gen;
     Func& m_f;
+    const std::set<uint32_t> m_labels;   // branch targets and resume points, before Body() adds gotos
 };
 
 } // namespace
 
 CodegenResult GenerateCpp(const uint8_t* image, size_t size, uint32_t base,
-                          const std::vector<uint32_t>& entries, const std::string& module) {
+                          const std::vector<uint32_t>& entries, const std::string& module,
+                          const std::vector<uint32_t>& exclude) {
     const Image img{image, size, base};
+    const std::set<uint32_t> excluded(exclude.begin(), exclude.end());
     const std::set<uint32_t> entry_set(entries.begin(), entries.end());
 
     std::vector<Func> funcs;
     std::set<uint32_t> generated;
     for (uint32_t e : entry_set) {
         funcs.push_back(Analyze(img, e, entry_set));
+        if (excluded.count(e)) { funcs.back().ok = false; funcs.back().reason = "excluded"; }
         if (funcs.back().ok) generated.insert(e);
     }
 
@@ -430,20 +477,58 @@ CodegenResult GenerateCpp(const uint8_t* image, size_t size, uint32_t base,
     }
     os << "\n#include \"recomp/runtime/recomp_runtime.h\"\n\nnamespace {\n\nusing namespace personarm::recomp;\n\n";
     for (uint32_t e : generated) os << "void f_" << Addr(e) << "(CpuState& s);\n";
+    std::vector<std::pair<uint32_t, uint32_t>> resume_table;   // (address, function entry)
     for (Func& f : funcs) {
         GeneratedFunction g;
         g.entry = f.entry;
         g.generated = f.ok;
         g.reason = f.reason;
         g.instructions = static_cast<uint32_t>(f.starts.size());
+        if (!f.ok) { res.functions.push_back(g); continue; }
+        // Resume points: where the interpreter lands after this function was unwound (a call's
+        // return address) or inside its loops (branch targets), so it can re-enter native code
+        // mid-function instead of interpreting the rest of it.
+        std::set<uint32_t> resume = f.labels;
+        for (uint32_t a : f.starts) {
+            const uint32_t w = img.Word(a);
+            const bool call = OpOf(w) == 0x03 || (OpOf(w) == 0 && FunctOf(w) == 0x09) || (OpOf(w) == 0x01 && (RtOf(w) & 0x10));
+            if (call) resume.insert(a + 8);
+        }
+        for (auto it = resume.begin(); it != resume.end();) {
+            if (*it == f.entry || !f.starts.count(*it)) it = resume.erase(it);
+            else ++it;
+        }
+        f.labels.insert(resume.begin(), resume.end());
+        g.resume_points = static_cast<uint32_t>(resume.size());
         res.functions.push_back(g);
-        if (!f.ok) continue;
-        os << "\nvoid f_" << Addr(f.entry) << "(CpuState& s) {\n" << Emitter(img, generated, f).Body() << "}\n";
+        const std::string F = Addr(f.entry);
+        const std::string body = Emitter(img, generated, f).Body();
+        if (resume.empty()) {
+            os << "\nvoid f_" << F << "(CpuState& s) {\n" << body << "}\n";
+            continue;
+        }
+        os << "\nstatic void b_" << F << "(CpuState& s, uint32_t at) {\n    switch (at) {\n";
+        for (uint32_t r : resume) {
+            os << "        case " << Hex(r) << ": goto L_" << Addr(r) << ";\n";
+            resume_table.push_back({r, f.entry});
+        }
+        os << "        default: break;\n    }\n" << body << "}\n";
+        os << "void f_" << F << "(CpuState& s) { b_" << F << "(s, 0); }\n";
+        os << "void r_" << F << "(CpuState& s) { b_" << F << "(s, s.pc); }\n";
     }
     os << "\n} // namespace\n\nextern const personarm::recomp::FunctionEntry kRecomp_" << module << "[] = {\n";
     for (uint32_t e : generated) os << "    {" << Hex(e) << ", f_" << Addr(e) << "},\n";
     if (generated.empty()) os << "    {0u, nullptr},\n";
     os << "};\nextern const size_t kRecomp_" << module << "_count = " << generated.size() << ";\n";
+    os << "extern const personarm::recomp::FunctionEntry kRecomp_" << module << "_resume[] = {\n";
+    for (const auto& r : resume_table) os << "    {" << Hex(r.first) << ", r_" << Addr(r.second) << "},\n";
+    if (resume_table.empty()) os << "    {0u, nullptr},\n";
+    os << "};\n";
+    char hash[24];
+    std::snprintf(hash, sizeof hash, "0x%016llXull", static_cast<unsigned long long>(Fnv1a64(image, size)));
+    os << "extern const personarm::recomp::Module kRecompModule_" << module << " = {\"" << module << "\", " << Hex(base)
+       << ", " << size << "u, " << hash << ", kRecomp_" << module << ", " << generated.size() << ", kRecomp_" << module
+       << "_resume, " << resume_table.size() << "};\n";
     res.source = os.str();
     return res;
 }

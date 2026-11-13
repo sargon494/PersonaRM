@@ -63,6 +63,17 @@ public:
     const CpuRegisters& GetRegisters() const { return m_regs; }
     void SetRegisters(const CpuRegisters& regs) { m_regs = regs; m_next_pc = regs.pc + 4; m_prev_was_branch = false; }
 
+    // Native (recompiled) execution hand-over, see Engine::RunNative.
+    /// True at a plain instruction boundary: no load in its delay and not inside a delay slot.
+    bool AtCleanBoundary() const { return m_load_delay_reg == 0 && !m_prev_was_branch && m_next_pc == m_regs.pc + 4; }
+    /// Resume inside a delay slot: `slot` runs next, then the branch target `next`.
+    void SetPCInDelaySlot(uint32_t slot, uint32_t next) { m_regs.pc = slot; m_next_pc = next; m_prev_was_branch = true; }
+    void AddCycles(uint64_t n) { m_cycles += n; }
+    /// A load issued by the previous instruction, written back after the next one (load delay).
+    void SetPendingLoad(uint32_t reg, uint32_t value) { m_load_delay_reg = reg; m_load_delay_val = value; }
+    uint32_t GetBadVaddr() const { return m_cp0_badvaddr; }
+    void SetBadVaddr(uint32_t v) { m_cp0_badvaddr = v; }
+
     // Coprocessor 2 (GTE) Access
     Gte& GetGTE() { return m_gte; }
     const Gte& GetGTE() const { return m_gte; }

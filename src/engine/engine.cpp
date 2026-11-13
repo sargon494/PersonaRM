@@ -69,6 +69,7 @@ void Engine::Reset() {
     m_timers = {};
     m_timer_cycles = 0;
     m_stall_cycles = 0;
+    m_in_native = false;
     WireDevices();
     m_state = EngineState::Idle;
 }
@@ -497,6 +498,7 @@ bool Engine::BootExecutable(const uint8_t* exe_buffer, size_t exe_size) {
         m_cpu.SetGPR(29, m_boot_sp);
         m_cpu.SetGPR(30, m_boot_sp);
     }
+    ActivateRecomp();
 
     m_state = EngineState::Running;
     PRM_LOG_INFO("ENGINE", "Boot sequence completed. Engine state: RUNNING. Entry Point: 0x" +
@@ -519,33 +521,35 @@ void Engine::RunFrame() {
     uint64_t start_cycles = GetCycles();
     uint64_t target_cycles = start_cycles +
         static_cast<uint64_t>(PS1_CYCLES_PER_FRAME_NTSC * effective_multiplier);
+    m_frame_target = target_cycles;
 
     while (GetCycles() < target_cycles && m_state == EngineState::Running) {
         // HLE: intercept the exception vector, the A0/B0/C0 call vectors and the kernel stubs before the
         // CPU fetches them. One HLE step can land on another HLE address (a stub returning to the
         // kernel trampoline), so loop until guest code is next.
         if (m_config.enable_bios_hle) {
-            for (int guard = 0; Ps1BiosHle::IsHleAddress(m_cpu.GetPC() & 0x1FFFFFFF); ++guard) {
-                if (guard == 4096) {
-                    PRM_LOG_ERROR("ENGINE", "HLE kernel did not return to guest code");
-                    m_state = EngineState::Stopped;
-                    break;
-                }
-                if (m_trace && (m_cpu.GetPC() & 0x1FFFFFFF) == 0x80 &&
-                    ((m_cpu.GetRegisters().cp0_cause >> 2) & 0x1Fu) == 0) {
-                    const uint32_t pend = m_i_stat & m_i_mask;
-                    const char* src = (pend & 1u) ? "vblank" : (pend & 4u) ? "cd" : (pend & 8u) ? "dma"
-                                    : (pend & 0x70u) ? "timer" : "other";
-                    m_trace->OnIrq(src, m_cpu.GetRegisters().cp0_epc);
-                }
-                if (!m_bios.HandleBiosHook(m_cpu, m_ram.data(), m_ram.size())) break;
-            }
+            RunHle();
             if (m_state != EngineState::Running) break;
         }
 
         if (m_step_hook && !m_step_hook(m_cpu)) {
             m_state = EngineState::Stopped;
             break;
+        }
+        if (m_recomp_on) {
+            if (RunNative()) {
+                SyncDevices(GetCycles());
+                continue;
+            }
+            const uint32_t pc = m_cpu.GetPC(), p = pc & 0x1FFFFFFFu;
+            if (p < 0x10000u || p >= 0x1FC00000u) ++m_recomp_stats.interp_kernel;
+            else if (std::any_of(m_recomp_ranges.begin(), m_recomp_ranges.end(),
+                                 [p](const auto& r) { return p >= r.first && p < r.second; })) {
+                ++m_recomp_stats.interp_resident;
+                if (pc - m_native_lo < m_native_map.size() * 4) ++m_recomp_stats.interp_by_pc[(pc - m_native_lo) / 4];
+            } else {
+                ++m_recomp_stats.interp_overlay;
+            }
         }
         m_cpu.Step();
         uint64_t now = GetCycles();
@@ -570,6 +574,177 @@ void Engine::RunFrame() {
                               trace::HashBytes(m_scratchpad.data(), m_scratchpad.size()),
                               trace::HashBytes(reinterpret_cast<const uint8_t*>(vram.data()), vram.size() * 2));
     }
+}
+
+void Engine::RunHle() {
+    for (int guard = 0; Ps1BiosHle::IsHleAddress(m_cpu.GetPC() & 0x1FFFFFFF); ++guard) {
+        if (guard == 4096) {
+            PRM_LOG_ERROR("ENGINE", "HLE kernel did not return to guest code");
+            m_state = EngineState::Stopped;
+            break;
+        }
+        if (m_trace && (m_cpu.GetPC() & 0x1FFFFFFF) == 0x80 &&
+            ((m_cpu.GetRegisters().cp0_cause >> 2) & 0x1Fu) == 0) {
+            const uint32_t pend = m_i_stat & m_i_mask;
+            const char* src = (pend & 1u) ? "vblank" : (pend & 4u) ? "cd" : (pend & 8u) ? "dma"
+                            : (pend & 0x70u) ? "timer" : "other";
+            m_trace->OnIrq(src, m_cpu.GetRegisters().cp0_epc);
+        }
+        if (!m_bios.HandleBiosHook(m_cpu, m_ram.data(), m_ram.size())) break;
+    }
+}
+
+void Engine::ActivateRecomp() {
+    m_recomp = recomp::Dispatcher();
+    m_recomp_ranges.clear();
+    m_native_map.clear();
+    m_recomp_stats = RecompStats{};
+    std::vector<const recomp::Module*> active;
+    for (const recomp::Module* m : m_recomp_modules) {
+        const uint32_t off = m->base & 0x1FFFFFu;
+        const bool fits = (m->base & 0x1FFFFFFFu) < 0x200000u && static_cast<size_t>(off) + m->size <= m_ram.size();
+        if (!fits || recomp::Fnv1a64(m_ram.data() + off, m->size) != m->hash) {
+            // The code was generated from another image: running it would execute the wrong program.
+            m_recomp_stats.rejected.push_back(m->name);
+            PRM_LOG_WARN("RECOMP", std::string("module ") + m->name + " does not match RAM at boot; interpreter only");
+            continue;
+        }
+        m_recomp.Add(m->entries, m->count);
+        m_recomp.Add(m->resume, m->resume_count);
+        m_recomp_ranges.push_back({m->base & 0x1FFFFFFFu, (m->base & 0x1FFFFFFFu) + m->size});
+        m_recomp_stats.active.push_back(m->name);
+        active.push_back(m);
+    }
+    m_recomp_on = !active.empty();
+    if (!m_recomp_on) return;
+    // Flat PC -> code map over the active images (the interpreter loop asks at every instruction).
+    // Only the exact addresses the code was generated for (KSEG0): a mirror would link other $ra values.
+    m_native_lo = ~0u;
+    uint32_t hi = 0;
+    for (const recomp::Module* m : active) {
+        m_native_lo = std::min(m_native_lo, m->base);
+        hi = std::max(hi, m->base + m->size);
+    }
+    m_native_map.assign((hi - m_native_lo) / 4, nullptr);
+    m_recomp_stats.interp_by_pc.assign(m_native_map.size(), 0);
+    m_recomp_stats.map_base = m_native_lo;
+    for (const recomp::Module* m : active) {
+        for (size_t i = 0; i < m->resume_count; ++i) m_native_map[(m->resume[i].address - m_native_lo) / 4] = m->resume[i].fn;
+        for (size_t i = 0; i < m->count; ++i) m_native_map[(m->entries[i].address - m_native_lo) / 4] = m->entries[i].fn;
+    }
+}
+
+bool Engine::RunNative() {
+    const uint32_t pc = m_cpu.GetPC();
+    const uint32_t off = pc - m_native_lo;
+    if ((off & 3u) || off / 4 >= m_native_map.size()) return false;
+    const recomp::RecompFn fn = m_native_map[off / 4];
+    if (!fn) return false;
+    const CpuRegisters& r = m_cpu.GetRegisters();
+    // An IRQ due at this boundary is the interpreter's to take; a load in flight would land after
+    // the first instruction there but at once in generated code.
+    if (!m_cpu.AtCleanBoundary() || ((r.cp0_status & 1u) && (r.cp0_status & r.cp0_cause & 0xFF00u))) {
+        ++m_recomp_stats.blocked;
+        return false;
+    }
+    recomp::CpuState& s = m_native;
+    CpuToNative();
+    s.gte = &m_cpu.GetGTE();
+    s.mem = this; s.host = this;
+    s.read = NativeRead; s.write = NativeWrite; s.service = NativeService; s.external = NativeExternal;
+    s.ram = m_ram.data(); s.scratch = m_scratchpad.data(); s.ram_stall = kRamLoadStallCycles;
+    s.dispatcher = &m_recomp;
+    s.fallbacks = 0; s.stalls = 0; s.stopped = false; s.next_pc = 0; s.load_reg = 0;
+    const uint64_t start = GetCycles();
+    s.cycles = start;
+    s.deadline = std::min(m_frame_target, start + m_recomp_quantum);
+
+    m_in_native = true;
+    fn(s);
+    m_in_native = false;
+
+    NativeToCpu();
+    if (s.next_pc) m_cpu.SetPCInDelaySlot(s.pc, s.next_pc);
+    if (s.load_reg) m_cpu.SetPendingLoad(s.load_reg, s.load_val);
+    // Same split as the interpreter: instructions in the CPU counter, RAM load stalls in the engine's.
+    m_cpu.AddCycles(s.cycles - start - s.stalls);
+    m_stall_cycles += s.stalls;
+
+    ++m_recomp_stats.entries;
+    m_recomp_stats.native_instructions += s.cycles - start - s.stalls;
+    m_recomp_stats.dispatch_misses += s.fallbacks;
+    if (s.stopped) ++m_recomp_stats.stops;
+    else ++m_recomp_stats.exits[s.pc];
+    return true;
+}
+
+void Engine::CpuToNative() {
+    const CpuRegisters& r = m_cpu.GetRegisters();
+    recomp::CpuState& s = m_native;
+    std::copy(r.gpr.begin(), r.gpr.end(), s.gpr);
+    s.hi = r.hi; s.lo = r.lo; s.pc = r.pc;
+    s.sr = r.cp0_status; s.cause = r.cp0_cause; s.epc = r.cp0_epc; s.badvaddr = m_cpu.GetBadVaddr();
+}
+
+void Engine::NativeToCpu() {
+    const recomp::CpuState& s = m_native;
+    CpuRegisters out = m_cpu.GetRegisters();
+    std::copy(s.gpr, s.gpr + 32, out.gpr.begin());
+    out.gpr[0] = 0;
+    out.hi = s.hi; out.lo = s.lo; out.pc = s.pc;
+    out.cp0_status = s.sr; out.cp0_cause = s.cause; out.cp0_epc = s.epc;
+    m_cpu.SetRegisters(out);
+    m_cpu.SetBadVaddr(s.badvaddr);
+}
+
+// A native jump to an HLE vector (A0/B0/C0 call, kernel stub): the same HLE the interpreter loop
+// runs between two instructions (0 cycles), then native code continues where it returns.
+bool Engine::NativeExternal(recomp::CpuState& s) {
+    Engine& e = *static_cast<Engine*>(s.host);
+    if (!e.m_config.enable_bios_hle || !Ps1BiosHle::IsHleAddress(s.pc & 0x1FFFFFFF)) return false;
+    if (e.m_recomp_quantum > 1) e.SyncDevices(s.cycles);  // quantum 1: the last service point did it
+    e.m_in_native = false;
+    e.NativeToCpu();
+    const uint64_t stall_before = e.m_stall_cycles;
+    e.RunHle();
+    // HLE reads of RAM through the bus stall like guest loads: fold them into native time, which
+    // RunNative adds to the engine counters on exit.
+    const uint64_t hle_stall = e.m_stall_cycles - stall_before;
+    e.m_stall_cycles = stall_before;
+    s.cycles += hle_stall;
+    s.stalls += hle_stall;
+    e.CpuToNative();
+    e.m_in_native = true;
+    ++e.m_recomp_stats.hle_calls;
+    // The interpreter would check for an IRQ before the next instruction: hand back to it.
+    if (e.m_state != EngineState::Running || ((s.sr & 1u) && (s.sr & s.cause & 0xFF00u))) s.stopped = true;
+    return true;
+}
+
+bool Engine::NativeService(recomp::CpuState& s) {
+    Engine& e = *static_cast<Engine*>(s.host);
+    e.SyncDevices(s.cycles);
+    if (s.cycles >= e.m_frame_target) return true;
+    if ((s.sr & 1u) && (s.sr & s.cause & 0xFF00u)) return true;  // the interpreter delivers it
+    s.deadline = std::min(e.m_frame_target, s.cycles + e.m_recomp_quantum);
+    return false;
+}
+
+// Generated code reaches here only for addresses outside RAM and the scratchpad (its fast paths).
+// With quantum 1 the service point after every instruction already ticked the devices exactly as
+// the interpreter loop does; stall cycles charged outside an instruction (a host Read() between
+// frames, HLE bus reads) stay unticked until the next instruction ends there too, so no catch-up
+// here. With a larger quantum the devices first catch up to this instruction.
+uint32_t Engine::NativeRead(void* engine, uint32_t address, uint32_t size) {
+    Engine& e = *static_cast<Engine*>(engine);
+    if (e.m_recomp_quantum > 1) e.SyncDevices(e.m_native.cycles);
+    return e.ReadBus(address, size);
+}
+
+void Engine::NativeWrite(void* engine, uint32_t address, uint32_t value, uint32_t size) {
+    Engine& e = *static_cast<Engine*>(engine);
+    if (e.m_recomp_quantum > 1) e.SyncDevices(e.m_native.cycles);
+    e.WriteBus(address, value, size);
 }
 
 void Engine::TickTimers(uint32_t cycles) {

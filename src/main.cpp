@@ -38,6 +38,7 @@
 #include "loader/png_codec.h"
 #include "loader/str_demuxer.h"
 #include "engine/engine.h"
+#include "recomp/runtime/generated_modules.h"
 #include "rendering/window_context.h"
 #include "rendering/gl_renderer.h"
 #include "rendering/mdec_decoder.h"
@@ -77,6 +78,10 @@ static void PrintUsage(const char* prog) {
               << "                     --press <btn>@<frame>[+<n>]     hold a pad button n frames (default 5)\n"
               << "                     --input-script <file>  presses from lines <frame> <btn> [<n>] (# comments)\n"
               << "                     --watch-pc <hex>       log the first 20 hits of a PC (repeatable)\n"
+              << "                     --recomp               run recompiled code linked into this build (local\n"
+              << "                                            -DPRM_RECOMP_GENERATED_DIR builds) and report counters\n"
+              << "                     --recomp-quantum <n>   cycles between service points (default 1 = exact\n"
+              << "                                            interpreter timing; larger = faster, IRQs late)\n"
               << "  --config           Open interactive settings menu\n"
               << "  --scan [dir]       Scan directory for legal game disc images (.iso/.bin/.cue)\n"
               << "  --diagnostics      Run full diagnostic suite\n"
@@ -801,6 +806,8 @@ struct BootOptions {
     bool stop_at_first_load = false;
     std::vector<personarm::Engine::PadPress> presses;
     std::vector<uint32_t> watch_pcs; // --watch-pc: log the first hits of these PCs (debugging aid)
+    bool recomp = false;             // --recomp: run the linked recompiled modules natively
+    uint32_t recomp_quantum = 1;     // --recomp-quantum: cycles between service points
 };
 
 // Overlay slots (OVERLAY_MAP OV-010, discs 1 and 2): code loaded above the resident EXE text.
@@ -857,6 +864,15 @@ static int RunBootHarness(const std::string& disc_path, const BootOptions& opt) 
     personarm::EngineBootConfig config;
     config.enable_bios_hle = true;
     engine.Initialize(config);
+    if (opt.recomp) {
+        const auto modules = personarm::recomp::GeneratedModules();
+        if (modules.empty()) {
+            std::cerr << "[BOOT] --recomp: this build has no recompiled code (configure with "
+                         "-DPRM_RECOMP_GENERATED_DIR=<dir outside the repo>)\n";
+            return EXIT_FAILURE;
+        }
+        engine.SetRecompModules(modules, opt.recomp_quantum);
+    }
     if (!engine.BootFromDisc(disc_path)) {
         std::cerr << "[BOOT] cannot boot " << disc_path << "\n";
         return EXIT_FAILURE;
@@ -939,6 +955,8 @@ static int RunBootHarness(const std::string& disc_path, const BootOptions& opt) 
     uint32_t fw = 0, fh = 0;
     std::vector<int16_t> audio, chunk;
     bool seen_sound = false;
+    const auto wall_start = std::chrono::steady_clock::now();
+    const uint64_t first_frame = engine.GetFrameCount();
     while (engine.GetFrameCount() < opt.max_frames && engine.GetState() == personarm::EngineState::Running) {
         engine.RunFrame();
         {
@@ -997,8 +1015,49 @@ static int RunBootHarness(const std::string& disc_path, const BootOptions& opt) 
             last_calls = calls;
         }
     }
+    const double wall = std::chrono::duration<double>(std::chrono::steady_clock::now() - wall_start).count();
     engine.SetStepHook(nullptr);
     engine.SetSpuKeyOnHook(nullptr);
+    std::printf("%swall %.2f s, %.1f frames/s\n", stamp().c_str(), wall,
+                wall > 0 ? double(engine.GetFrameCount() - first_frame) / wall : 0.0);
+    if (opt.recomp) {
+        const auto& st = engine.GetRecompStats();
+        auto join = [](const std::vector<std::string>& v) {
+            std::string r;
+            for (const auto& x : v) r += (r.empty() ? "" : ",") + x;
+            return r.empty() ? std::string("none") : r;
+        };
+        const uint64_t interp = st.interp_resident + st.interp_overlay + st.interp_kernel;
+        const double total = double(st.native_instructions + interp);
+        auto pct = [&](uint64_t v) { return total > 0 ? 100.0 * double(v) / total : 0.0; };
+        std::printf("[RECOMP] modules active: %s, rejected: %s, quantum %u\n", join(st.active).c_str(),
+                    join(st.rejected).c_str(), opt.recomp_quantum);
+        std::printf("[RECOMP] native entries %llu, service stops %llu, hand-backs %llu, dispatch misses %llu, "
+                    "blocked entries %llu, HLE calls from native %llu\n", (unsigned long long)st.entries,
+                    (unsigned long long)st.stops, (unsigned long long)(st.entries - st.stops),
+                    (unsigned long long)st.dispatch_misses, (unsigned long long)st.blocked,
+                    (unsigned long long)st.hle_calls);
+        std::printf("[RECOMP] instructions: native %llu (%.1f%%), interpreted resident %llu (%.1f%%), "
+                    "overlay/other %llu (%.1f%%), kernel %llu (%.1f%%)\n",
+                    (unsigned long long)st.native_instructions, pct(st.native_instructions),
+                    (unsigned long long)st.interp_resident, pct(st.interp_resident),
+                    (unsigned long long)st.interp_overlay, pct(st.interp_overlay),
+                    (unsigned long long)st.interp_kernel, pct(st.interp_kernel));
+        std::vector<std::pair<uint32_t, uint64_t>> top(st.exits.begin(), st.exits.end());
+        std::sort(top.begin(), top.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
+        std::string line;
+        for (size_t i = 0; i < top.size() && i < 12; ++i)
+            line += " " + hex(top[i].first) + "x" + std::to_string(top[i].second);
+        std::printf("[RECOMP] top hand-back PCs (fallback targets):%s\n", line.empty() ? " none" : line.c_str());
+        top.clear();
+        for (size_t i = 0; i < st.interp_by_pc.size(); ++i)
+            if (st.interp_by_pc[i]) top.push_back({st.map_base + 4 * static_cast<uint32_t>(i), st.interp_by_pc[i]});
+        std::sort(top.begin(), top.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
+        line.clear();
+        for (size_t i = 0; i < top.size() && i < 12; ++i)
+            line += " " + hex(top[i].first) + "x" + std::to_string(top[i].second);
+        std::printf("[RECOMP] hottest interpreted resident PCs:%s\n", line.empty() ? " none" : line.c_str());
+    }
     if (!opt.dump_ram.empty()) { // debugging aid: raw 2 MB RAM image at stop (keep it out of the repo)
         std::ofstream f(opt.dump_ram, std::ios::binary);
         f.write(reinterpret_cast<const char*>(engine.GetRam().data()), static_cast<std::streamsize>(engine.GetRam().size()));
@@ -1062,6 +1121,7 @@ int main(int argc, char* argv[]) {
                 BootOptions opt;
                 for (int k = 1; k < argc; ++k) {
                     if (std::strcmp(argv[k], "--stop-at-first-load") == 0) opt.stop_at_first_load = true;
+                    if (std::strcmp(argv[k], "--recomp") == 0) opt.recomp = true;
                     if (k + 1 >= argc) continue;
                     if (std::strcmp(argv[k], "--max-frames") == 0) opt.max_frames = std::strtoull(argv[k + 1], nullptr, 10);
                     if (std::strcmp(argv[k], "--every") == 0) opt.every = std::strtoull(argv[k + 1], nullptr, 10);
@@ -1071,6 +1131,8 @@ int main(int argc, char* argv[]) {
                     if (std::strcmp(argv[k], "--dump-frames") == 0) opt.dump_frames = argv[k + 1];
                     if (std::strcmp(argv[k], "--dump-audio") == 0) opt.dump_audio = argv[k + 1];
                     if (std::strcmp(argv[k], "--watch-pc") == 0) opt.watch_pcs.push_back(std::strtoul(argv[k + 1], nullptr, 16));
+                    if (std::strcmp(argv[k], "--recomp-quantum") == 0)
+                        opt.recomp_quantum = static_cast<uint32_t>(std::strtoul(argv[k + 1], nullptr, 10));
                     if (std::strcmp(argv[k], "--trace-out") == 0)
                         personarm::Engine::Instance().SetTraceOutput(argv[k + 1]);
                     if (std::strcmp(argv[k], "--input-script") == 0) {
@@ -1094,12 +1156,12 @@ int main(int argc, char* argv[]) {
                 }
                 return RunBootHarness(disc, opt);
             }
-            if (std::strcmp(argv[i], "--stop-at-first-load") == 0) continue; // read by --boot
+            if (std::strcmp(argv[i], "--stop-at-first-load") == 0 || std::strcmp(argv[i], "--recomp") == 0) continue; // read by --boot
             if (std::strcmp(argv[i], "--max-frames") == 0 || std::strcmp(argv[i], "--dump-ram") == 0 ||
                 std::strcmp(argv[i], "--dump-vram") == 0 || std::strcmp(argv[i], "--dump-frames") == 0 || std::strcmp(argv[i], "--dump-audio") == 0 ||
                 std::strcmp(argv[i], "--every") == 0 || std::strcmp(argv[i], "--press") == 0 ||
                 std::strcmp(argv[i], "--input-script") == 0 ||
-                std::strcmp(argv[i], "--watch-pc") == 0) { ++i; continue; } // read by --boot
+                std::strcmp(argv[i], "--watch-pc") == 0 || std::strcmp(argv[i], "--recomp-quantum") == 0) { ++i; continue; } // read by --boot
             if (std::strcmp(argv[i], "--launch") == 0) {
                 return launcher.LaunchGame();
             }

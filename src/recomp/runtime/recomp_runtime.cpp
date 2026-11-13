@@ -27,7 +27,7 @@ void RaiseException(CpuState& s, uint32_t exc_code, uint32_t pc, bool delay_slot
 void Dispatch(CpuState& s, uint32_t target) {
     s.pc = target;
     if (RecompFn fn = s.dispatcher ? s.dispatcher->Find(target) : nullptr) fn(s);
-    else ++s.fallbacks;
+    else if (!s.external || !s.external(s)) ++s.fallbacks;
 }
 
 } // namespace personarm::recomp
