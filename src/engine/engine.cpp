@@ -60,6 +60,9 @@ void Engine::Reset() {
     m_frame_counter = 0;
     m_joy_step = 0;
     m_joy_rx_fifo.clear();
+    m_joy_ctrl = m_joy_mode = m_joy_baud = 0;
+    m_joy_ack_low = m_joy_irq = false;
+    m_joy_ack_timer = 0;
     m_i_stat = 0;
     m_i_mask = 0;
     m_timers = {};
@@ -96,6 +99,7 @@ void Engine::WireDevices() {
 
 void Engine::TickDevices(uint32_t cycles) {
     TickTimers(cycles);
+    TickJoy(cycles);
     m_cdrom->Tick(cycles);
     m_dma->Tick(cycles);
 }
@@ -184,14 +188,17 @@ uint32_t Engine::ReadBus(uint32_t address, uint32_t size) {
         return 0xFF;
     }
     if (physical == 0x1F801044) {
-        // Bit 0: TX Ready (1), Bit 1: RX FIFO Not Empty, Bit 2: TX Empty (1), Bit 7: ACK
+        // psx-spx "Controller and Memory Card I/O Ports": bit 0/2 TX ready, 1 RX FIFO not empty,
+        // 7 /ACK input low, 9 IRQ7 request. shortcut: baud timer (bits 11-31) reads 0.
         uint32_t stat = 0x05;
-        if (!m_joy_rx_fifo.empty()) {
-            stat |= 0x02; // RX FIFO has data
-            stat |= 0x80; // ACK flag
-        }
+        if (!m_joy_rx_fifo.empty()) stat |= 0x02;
+        if (m_joy_ack_low) stat |= 0x80;
+        if (m_joy_irq) stat |= 0x200;
         return stat;
     }
+    if (physical == 0x1F801048) return m_joy_mode;
+    if (physical == 0x1F80104A) return m_joy_ctrl;
+    if (physical == 0x1F80104E) return m_joy_baud;
 
     // Interrupt controller (psx-spx "Interrupt Control")
     if (physical == 0x1F801070) return m_i_stat;
@@ -280,41 +287,35 @@ void Engine::WriteBus(uint32_t address, uint32_t value, uint32_t size) {
         return;
     }
 
-    // 3. Controller Port JOY_DATA (0x1F801040)
+    // 3. SIO0 (psx-spx "Controller and Memory Card I/O Ports" / "Controllers - Communication Sequence"):
+    // a digital pad on /JOY1, nothing on /JOY2, no memory card (0x81 gets no /ACK -> "no card").
     if (physical == 0x1F801040) {
-        uint8_t tx = static_cast<uint8_t>(value & 0xFF);
-        if (tx == 0x01) {
-            m_joy_step = 1;
-            m_joy_rx_fifo.push_back(0xFF);
-        } else if (tx == 0x42 && m_joy_step == 1) {
-            m_joy_step = 2;
-            m_joy_rx_fifo.push_back(0x41); // Standard Digital Controller ID
-        } else if (m_joy_step == 2) {
-            m_joy_step = 3;
-            m_joy_rx_fifo.push_back(0x5A); // Header end marker
-        } else if (m_joy_step == 3) {
-            // Buttons Byte 1 (active low 0=pressed)
-            uint8_t b1 = 0xFF;
-            if (m_input.IsActionPressed(VirtualAction::MoveUp))    b1 &= ~(1 << 4);
-            if (m_input.IsActionPressed(VirtualAction::MoveRight)) b1 &= ~(1 << 5);
-            if (m_input.IsActionPressed(VirtualAction::MoveDown))  b1 &= ~(1 << 6);
-            if (m_input.IsActionPressed(VirtualAction::MoveLeft))  b1 &= ~(1 << 7);
-            m_joy_step = 4;
-            m_joy_rx_fifo.push_back(b1);
-        } else if (m_joy_step == 4) {
-            // Buttons Byte 2 (active low 0=pressed)
-            uint8_t b2 = 0xFF;
-            if (m_input.IsActionPressed(VirtualAction::CameraRotateLeft))  b2 &= ~(1 << 2); // L1
-            if (m_input.IsActionPressed(VirtualAction::CameraRotateRight)) b2 &= ~(1 << 3); // R1
-            if (m_input.IsActionPressed(VirtualAction::Menu))              b2 &= ~(1 << 4); // Triangle
-            if (m_input.IsActionPressed(VirtualAction::Cancel))            b2 &= ~(1 << 5); // Circle
-            if (m_input.IsActionPressed(VirtualAction::Confirm))           b2 &= ~(1 << 6); // Cross
-            if (m_input.IsActionPressed(VirtualAction::Map))               b2 &= ~(1 << 7); // Square
-            m_joy_step = 0;
-            m_joy_rx_fifo.push_back(b2);
+        const uint8_t tx = static_cast<uint8_t>(value & 0xFF);
+        uint8_t rx = 0xFF;
+        bool ack = false;
+        m_joy_ack_low = false;
+        if ((m_joy_ctrl & 0x2002) == 0x0002) {  // /JOY1 selected
+            switch (m_joy_step) {
+            case 0: ack = tx == 0x01; m_joy_step = ack ? 1 : 5; break;  // pad address; others ignored
+            case 1: ack = tx == 0x42; rx = ack ? 0x41 : 0xFF; m_joy_step = ack ? 2 : 5; break;  // read: ID lo
+            case 2: rx = 0x5A; ack = true; m_joy_step = 3; break;                     // ID hi
+            case 3: rx = static_cast<uint8_t>(~PadButtons()); ack = true; m_joy_step = 4; break;
+            case 4: rx = static_cast<uint8_t>(~PadButtons() >> 8); m_joy_step = 5; break;  // last byte: no /ACK
+            default: break;
+            }
         }
+        if (m_joy_rx_fifo.size() < 8) m_joy_rx_fifo.push_back(rx);
+        // shortcut: RX is ready at once; /ACK follows one 8-bit transfer at the usual baud (0x88 * 8) plus a delay.
+        m_joy_ack_timer = ack ? kJoyAckCycles : 0;
         return;
     }
+    if (physical == 0x1F801048) {
+        m_joy_mode = value & 0xFFFF;
+        if (size == 4) WriteJoyCtrl(static_cast<uint16_t>(value >> 16));
+        return;
+    }
+    if (physical == 0x1F80104A) { WriteJoyCtrl(static_cast<uint16_t>(value)); return; }
+    if (physical == 0x1F80104E) { m_joy_baud = value & 0xFFFF; return; }
 
     // Interrupt controller: writing 0 to an I_STAT bit acknowledges it; I_MASK has 11 sources.
     if (physical == 0x1F801070) { m_i_stat &= value; UpdateIrqLine(); return; }
@@ -569,6 +570,73 @@ void Engine::TickTimers(uint32_t cycles) {
             if (!(t.mode & 0x80u)) t.mode |= 0x400u;
         }
     }
+}
+
+bool Engine::ParsePadPress(const std::string& text, PadPress& out) {
+    static const char* const kNames[16] = {"select", "l3", "r3", "start", "up", "right", "down", "left",
+                                           "l2", "r2", "l1", "r1", "triangle", "circle", "cross", "square"};
+    const size_t at = text.find('@');
+    if (at == std::string::npos) return false;
+    const std::string name = text.substr(0, at);
+    const auto it = std::find(std::begin(kNames), std::end(kNames), name);
+    if (it == std::end(kNames)) return false;
+    char* end = nullptr;
+    const char* p = text.c_str() + at + 1;
+    PadPress r;
+    r.mask = static_cast<uint16_t>(1u << (it - std::begin(kNames)));
+    r.frame = std::strtoull(p, &end, 10);
+    if (end == p) return false;
+    if (*end == '+') {
+        p = end + 1;
+        r.frames = std::strtoull(p, &end, 10);
+        if (end == p) return false;
+    }
+    if (*end != 0) return false;
+    out = r;
+    return true;
+}
+
+uint16_t Engine::PadButtons() const {
+    uint16_t held = ScriptedButtons();
+    static const std::pair<VirtualAction, uint16_t> kMap[] = {
+        {VirtualAction::MoveUp, 1u << 4}, {VirtualAction::MoveRight, 1u << 5}, {VirtualAction::MoveDown, 1u << 6},
+        {VirtualAction::MoveLeft, 1u << 7}, {VirtualAction::CameraRotateLeft, 1u << 10},
+        {VirtualAction::CameraRotateRight, 1u << 11}, {VirtualAction::Menu, 1u << 12},
+        {VirtualAction::Cancel, 1u << 13}, {VirtualAction::Confirm, 1u << 14}, {VirtualAction::Map, 1u << 15}};
+    for (const auto& m : kMap)
+        if (m_input.IsActionPressed(m.first)) held |= m.second;
+    return held;
+}
+
+// JOY_CTRL: bit 1 /JOYn select, 4 acknowledge (clears IRQ), 6 reset, 12 /ACK IRQ enable, 13 slot.
+void Engine::WriteJoyCtrl(uint16_t v) {
+    if (v & 0x40) {
+        m_joy_rx_fifo.clear();
+        m_joy_mode = m_joy_baud = 0;
+        m_joy_ack_low = m_joy_irq = false;
+        m_joy_ack_timer = 0;
+    }
+    if (v & 0x10) m_joy_irq = false;
+    if (!(v & 0x2) || ((v ^ m_joy_ctrl) & 0x2000)) m_joy_step = 0;  // deselect / slot change ends the exchange
+    m_joy_ctrl = v & ~0x50u;
+}
+
+void Engine::TickJoy(uint32_t cycles) {
+    if (!m_joy_ack_timer) return;
+    if (m_joy_ack_timer > cycles) { m_joy_ack_timer -= cycles; return; }
+    m_joy_ack_timer = 0;
+    m_joy_ack_low = true;
+    if ((m_joy_ctrl & 0x1000) && !m_joy_irq) {
+        m_joy_irq = true;
+        RaiseIrq(7);
+    }
+}
+
+uint16_t Engine::ScriptedButtons() const {
+    uint16_t held = 0;
+    for (const PadPress& p : m_pad_script)
+        if (m_frame_counter >= p.frame && m_frame_counter < p.frame + p.frames) held |= p.mask;
+    return held;
 }
 
 void Engine::GetCurrentFrame(std::vector<uint32_t>& out_rgba, uint32_t& out_w, uint32_t& out_h) {

@@ -147,6 +147,59 @@ static void TestSystemCnfStack() {
     CHECK(ParseSystemCnfStack("STACK = zz\r\n", 7) == 7);
 }
 
+// Scripted pad (boot harness --press): psx-spx "Controllers" digital pad, buttons active low.
+static void TestPadScript(Engine& e) {
+    Engine::PadPress p{};
+    CHECK(Engine::ParsePadPress("start@10", p) && p.mask == 0x0008 && p.frame == 10 && p.frames == 5);
+    CHECK(Engine::ParsePadPress("cross@3+2", p) && p.mask == 0x4000 && p.frame == 3 && p.frames == 2);
+    CHECK(!Engine::ParsePadPress("start", p) && !Engine::ParsePadPress("jump@1", p) && !Engine::ParsePadPress("up@x", p));
+    auto poll = [&] {
+        uint32_t b[5];
+        const uint32_t tx[5] = {0x01, 0x42, 0, 0, 0};
+        e.Write(0x1F80104A, 0x0003, 2);  // TXEN + /JOY1 select
+        for (int i = 0; i < 5; ++i) { e.Write(0x1F801040, tx[i], 1); b[i] = e.Read(0x1F801040, 1); }
+        e.Write(0x1F80104A, 0, 2);
+        CHECK(b[1] == 0x41 && b[2] == 0x5A);
+        return b[3] | b[4] << 8;
+    };
+    e.SetPadScript({p, {0x0010, 4, 1}});  // cross frames 3-4, up frame 4
+    e.SetFrameCount(2);
+    CHECK(poll() == 0xFFFF);
+    e.SetFrameCount(4);
+    CHECK(poll() == 0xBFEF);
+    e.SetFrameCount(5);
+    CHECK(poll() == 0xFFFF);
+    e.SetPadScript({});
+}
+
+// SIO0 /ACK -> IRQ7 (libpad waits on it), JOY_CTRL acknowledge, and "no memory card" (0x81 unanswered).
+static void TestSio0AckAndNoCard(Engine& e) {
+    e.Write(0x1F801070, 0, 4);
+    e.Write(0x1F80104A, 0x1003, 2);  // select /JOY1, /ACK IRQ enabled
+    CHECK(e.Read(0x1F80104A, 2) == 0x1003);
+    e.Write(0x1F801040, 0x01, 1);
+    CHECK(e.Read(0x1F801044, 2) & 0x2);   // RX ready
+    CHECK(e.Read(0x1F801040, 1) == 0xFF);
+    e.RunFrame();
+    CHECK(e.Read(0x1F801044, 2) & 0x280);  // /ACK low + IRQ flag
+    CHECK(e.Read(0x1F801070, 4) & 0x80);   // IRQ7 in I_STAT
+    e.Write(0x1F80104A, 0x1013, 2);        // acknowledge
+    CHECK((e.Read(0x1F801044, 2) & 0x200) == 0);
+    e.Write(0x1F80104A, 0x1000, 2);        // deselect
+    e.Write(0x1F801070, 0, 4);
+    e.Write(0x1F80104A, 0x1003, 2);
+    e.Write(0x1F801040, 0x81, 1);          // memory card address: nobody answers
+    CHECK(e.Read(0x1F801040, 1) == 0xFF);
+    e.RunFrame();
+    CHECK((e.Read(0x1F801044, 2) & 0x280) == 0);
+    CHECK((e.Read(0x1F801070, 4) & 0x80) == 0);
+    e.Write(0x1F80104A, 0x2003, 2);        // /JOY2: empty port, the pad does not answer either
+    e.Write(0x1F801040, 0x01, 1);
+    CHECK(e.Read(0x1F801040, 1) == 0xFF);
+    e.Write(0x1F80104A, 0x0040, 2);        // reset
+    CHECK(e.Read(0x1F80104A, 2) == 0 && (e.Read(0x1F801044, 2) & 0x282) == 0);
+}
+
 int main() {
     Engine& e = Boot();
     TestRamMirrors(e);
@@ -157,6 +210,8 @@ int main() {
     TestSpu(e);
     TestTimer1Hblank(e);
     TestSystemCnfStack();
+    TestPadScript(e);
+    TestSio0AckAndNoCard(e);
     e.Shutdown();
     std::puts("unit_test_engine_bus: all checks passed");
     return 0;

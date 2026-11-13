@@ -810,8 +810,9 @@ int main() {
         std::vector<uint8_t>& ram = const_cast<std::vector<uint8_t>&>(engine.GetRam());
         std::memcpy(&ram[0x1000], pad_code.data(), pad_code.size() * sizeof(uint32_t));
 
-        // Set $2 = 0x1F801040 (JOY_DATA)
+        // Set $2 = 0x1F801040 (JOY_DATA); JOY_CTRL selects /JOY1 (TXEN + select)
         engine.GetCpu().SetGPR(2, 0x1F801040);
+        engine.Write(0x1F80104A, 0x0003, 2);
 
         // Step 1: Send 0x01 (Device select) -> responds 0xFF
         engine.GetCpu().SetGPR(1, 0x01);

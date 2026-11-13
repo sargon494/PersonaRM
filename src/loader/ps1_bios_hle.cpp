@@ -56,6 +56,7 @@ std::string Hex(uint32_t v) { std::ostringstream o; o << std::hex << v; return o
 // psx-spx "BIOS Event Functions": EvCB +00h class, +04h status, +08h spec, +0Ch mode, +10h func.
 constexpr uint32_t kEvFree = 0, kEvDisabled = 0x1000, kEvBusy = 0x2000, kEvReady = 0x4000;
 constexpr uint32_t kEvModeCallback = 0x1000, kEvModeReady = 0x2000;
+constexpr uint32_t kHwCard = 0xF0000011, kSwCard = 0xF4000001, kEvSpTimeout = 0x0100;
 } // namespace
 
 Ps1BiosHle& Ps1BiosHle::Instance() {
@@ -366,6 +367,13 @@ uint32_t Ps1BiosHle::DeliverEvent(uint32_t cls, uint32_t spec, uint8_t* ram, siz
     return 0;
 }
 
+// Memory card with no card inserted (psx-spx "Memory Card BIOS Functions"): every request ends with
+// EvSpTIMOUT on SwCARD (_card_info/_card_load) or HwCARD (_card_read/_card_write).
+// shortcut: delivered during the call instead of from the card IRQ some time later.
+void Ps1BiosHle::CardNoCard(uint32_t cls, uint8_t* ram, size_t n, std::vector<uint32_t>& callbacks) {
+    DeliverEvent(cls, kEvSpTimeout, ram, n, callbacks);
+}
+
 uint32_t Ps1BiosHle::EventCall(uint32_t fn, CpuContext& cpu, uint8_t* ram, size_t n, bool& blocked) {
     uint32_t a0 = cpu.GetGPR(4);
     if (fn == 0x08) { // OpenEvent(class, spec, mode, func) -> F10000xxh, or -1 when the table is full
@@ -415,8 +423,8 @@ bool Ps1BiosHle::ExecuteCall(BiosVector vec, uint32_t func_code, CpuContext& cpu
 
 // Function numbers per psx-spx "BIOS Function Summary". Implemented: what Persona 2 EP calls
 // (FUNCTION_CATALOG "Stubs BIOS": 7 A0, 26 B0, 3 C0 + B(56h)/B(57h)) for events, interrupts,
-// tables, heap and files, plus the existing memcpy/memset/puts. Memory card (A70/AB/AC,
-// B4A-50, B42/43) is logged as unimplemented.
+// tables, heap and files, plus the existing memcpy/memset/puts. Memory card (A70/AB/AC, B4A-50)
+// behaves as "no card inserted"; B42/43 (firstfile/nextfile) are logged as unimplemented.
 bool Ps1BiosHle::ExecuteCall(BiosVector vec, uint32_t func_code, CpuContext& cpu, uint8_t* ram, size_t ram_size) {
     m_intercept_count++;
     std::vector<uint32_t> callbacks;
@@ -438,6 +446,11 @@ bool Ps1BiosHle::ExecuteCall(BiosVector vec, uint32_t func_code, CpuContext& cpu
                 cpu.SetGPR(2, 0);
                 break;
             case 0x72: cpu.SetGPR(2, 0); break;                     // _96_remove: no BIOS CD driver to remove
+            case 0x70: cpu.SetGPR(2, 0); break;                     // _bu_init
+            case 0xAB: case 0xAC:                                   // _card_info(port) / _card_load(port)
+                CardNoCard(kSwCard, ram, ram_size, callbacks);
+                cpu.SetGPR(2, 1);
+                break;
             default: LogUnimplemented(vec, func_code); cpu.SetGPR(2, 0); break;
         }
     } else if (vec == BiosVector::VectorB) {
@@ -477,6 +490,12 @@ bool Ps1BiosHle::ExecuteCall(BiosVector vec, uint32_t func_code, CpuContext& cpu
             case 0x35: HandleFileWrite(cpu, ram, ram_size); break;
             case 0x36: HandleFileClose(cpu); break;
             case 0x3F: HandleStdPuts(cpu, ram, ram_size); break;
+            case 0x4A: case 0x4B: case 0x4C: cpu.SetGPR(2, 0); break; // InitCARD2 / StartCARD / StopCARD
+            case 0x4E: case 0x4F:                     // _card_write / _card_read(port, sector, buf)
+                CardNoCard(kHwCard, ram, ram_size, callbacks);
+                cpu.SetGPR(2, 1);
+                break;
+            case 0x50: cpu.SetGPR(2, 0); break;       // _new_card
             case 0x56: cpu.SetGPR(2, kCTable); break; // GetC0Table
             case 0x57: cpu.SetGPR(2, kBTable); break; // GetB0Table
             case 0x5B: // ChangeClearPad(flag)

@@ -8,12 +8,15 @@
  * - Command-line automation & CI testing
  */
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <set>
 #include <string>
+#include <vector>
 #include <chrono>
 
 // Project headers
@@ -32,6 +35,7 @@
 #include "audio/spu_emulator.h"
 #include "cpu/gte.h"
 #include "loader/exe_loader.h"
+#include "loader/png_codec.h"
 #include "loader/str_demuxer.h"
 #include "engine/engine.h"
 #include "rendering/window_context.h"
@@ -61,10 +65,15 @@ static void PrintUsage(const char* prog) {
               << "  --verify-disc <f>  Inspect and display technical details of any disc image\n"
               << "  --trace-out <file> Write a PRMTRACE v1 execution trace (docs/TRACE_FORMAT.md)\n"
               << "  --boot <disc.cue>  Headless boot harness: run the disc's BOOT EXE with the HLE BIOS and\n"
-              << "                     log milestones (main, scene loop, load_file_by_id, cd_read_start,\n"
-              << "                     first GP0 polygon, first SPU key-on); stops at the first\n"
-              << "                     load_file_by_id return or after --max-frames N (default 600);\n"
-              << "                     --dump-ram <file> writes the 2 MB RAM image at stop\n"
+              << "                     log milestones (main, scene loop, load_file_by_id/cd_read_start, overlay\n"
+              << "                     entries, scene changes, GP1 display mode, first polygon / image, SPU\n"
+              << "                     key-on, unimplemented BIOS calls) for --max-frames N (default 600).\n"
+              << "                     --stop-at-first-load   stop when the first load_file_by_id returns\n"
+              << "                     --dump-ram <file>      2 MB RAM image at stop\n"
+              << "                     --dump-vram <png>      1024x512 VRAM at stop\n"
+              << "                     --dump-frames <dir> --every N   display area PNG every N frames\n"
+              << "                     --press <btn>@<frame>[+<n>]     hold a pad button n frames (default 5)\n"
+              << "                     --watch-pc <hex>       log the first 20 hits of a PC (repeatable)\n"
               << "  --config           Open interactive settings menu\n"
               << "  --scan [dir]       Scan directory for legal game disc images (.iso/.bin/.cue)\n"
               << "  --diagnostics      Run full diagnostic suite\n"
@@ -779,9 +788,52 @@ static int RunPortalSelfTest() {
 // ── Boot harness (gate G1 attempt, RECOMPILATION_STRATEGY) ───────────────────
 // Milestone PCs from docs/research/OVERLAY_MAP.md / FUNCTION_CATALOG.md (disc 1 confirmed;
 // disc 2 only the loader entry points are known, 0 = not instrumented).
-struct BootMilestones { uint32_t main, scene_loop, load_file, cd_read_start; };
+struct BootMilestones { uint32_t main, scene_loop, load_file, cd_read_start, scene_mode, scene_req; };
 
-static int RunBootHarness(const std::string& disc_path, uint64_t max_frames, const std::string& dump_ram) {
+struct BootOptions {
+    uint64_t max_frames = 600;
+    std::string dump_ram, dump_vram, dump_frames;
+    uint64_t every = 60;
+    bool stop_at_first_load = false;
+    std::vector<personarm::Engine::PadPress> presses;
+    std::vector<uint32_t> watch_pcs; // --watch-pc: log the first hits of these PCs (debugging aid)
+};
+
+// Overlay slots (OVERLAY_MAP OV-010, discs 1 and 2): code loaded above the resident EXE text.
+static bool InOverlaySlot(uint32_t pc) {
+    return (pc >= 0x80093000 && pc < 0x80160000) || (pc >= 0x80189000 && pc < 0x801CE800);
+}
+
+static bool WritePng(const std::string& path, uint32_t w, uint32_t h, const std::vector<uint32_t>& rgba) {
+    const bool ok = personarm::PngCodec::EncodeToFile(path, w, h, reinterpret_cast<const uint8_t*>(rgba.data()));
+    if (!ok) std::cerr << "[BOOT] cannot write " << path << "\n";
+    return ok;
+}
+
+// Display area as RGBA bytes. Unlike Ps1Gpu::OutputFrameToRGBA this honours 24bpp mode (FMV frames):
+// each row holds width*3 bytes packed into 16-bit VRAM words (psx-spx "GPU Display Control").
+static void DisplayToRgba(const personarm::Ps1Gpu& gpu, std::vector<uint32_t>& out, uint32_t& w, uint32_t& h) {
+    const auto& d = gpu.GetDisplayArea();
+    if (!d.is_24bit) {
+        gpu.OutputFrameToRGBA(out, w, h);
+        return;
+    }
+    w = d.width;
+    h = d.height;
+    out.assign(size_t(w) * h, 0xFF000000u);
+    if ((gpu.ReadGPUSTAT() >> 23) & 1) return; // display disabled
+    for (uint32_t y = 0; y < h; ++y) {
+        const uint32_t vy = (d.y + y) & (personarm::PS1_VRAM_HEIGHT - 1);
+        auto byte_at = [&](uint32_t i) {
+            const uint16_t px = gpu.ReadVram((d.x + i / 2) & (personarm::PS1_VRAM_WIDTH - 1), vy);
+            return uint32_t(i & 1 ? px >> 8 : px & 0xFF);
+        };
+        for (uint32_t x = 0; x < w; ++x)
+            out[size_t(y) * w + x] = 0xFF000000u | byte_at(3 * x) | byte_at(3 * x + 1) << 8 | byte_at(3 * x + 2) << 16;
+    }
+}
+
+static int RunBootHarness(const std::string& disc_path, const BootOptions& opt) {
     using personarm::Engine;
     auto& engine = Engine::Instance();
     personarm::EngineBootConfig config;
@@ -791,11 +843,13 @@ static int RunBootHarness(const std::string& disc_path, uint64_t max_frames, con
         std::cerr << "[BOOT] cannot boot " << disc_path << "\n";
         return EXIT_FAILURE;
     }
+    engine.SetPadScript(opt.presses);
     personarm::DiscReader probe;
     probe.Open(disc_path);
     const auto disc = personarm::DiscReader::IdentifyPersona2(probe.DetectBootExecutable());
-    const BootMilestones ms = disc.disc_number == 2 ? BootMilestones{0, 0, 0x800254E0, 0x8002541C}
-                                                    : BootMilestones{0x80024760, 0x80023590, 0x800272D0, 0x8002724C};
+    const BootMilestones ms = disc.disc_number == 2
+        ? BootMilestones{0, 0, 0x800254E0, 0x8002541C, 0, 0x8007A80C}
+        : BootMilestones{0x80024760, 0x80023590, 0x800272D0, 0x8002724C, 0x8007E298, 0x8007E2AC};
     auto hex = [](uint32_t v) { char b[16]; std::snprintf(b, sizeof b, "0x%08X", v); return std::string(b); };
     auto stamp = [&]() {
         return "[BOOT f=" + std::to_string(engine.GetFrameCount()) + " cyc=" +
@@ -804,16 +858,24 @@ static int RunBootHarness(const std::string& disc_path, uint64_t max_frames, con
     std::cout << stamp() << "disc " << (disc.recognized ? disc.product_id : std::string("unknown"))
               << " entry pc=" << hex(engine.GetCpu().GetPC()) << " sp=" << hex(engine.GetCpu().GetGPR(29)) << "\n";
 
+    struct PendingLoad { uint32_t ra, sp, id; };
+    std::vector<PendingLoad> pending;
+    std::set<uint32_t> entries_seen; // overlay entry targets since the last load
     bool seen_main = false, seen_loop = false, done = false;
-    uint32_t load_ret = 0, load_sp = 0, load_id = 0, loads = 0, reads = 0;
+    uint32_t loads = 0, reads = 0, prev_pc = 0;
+    std::vector<uint32_t> watch_hits(opt.watch_pcs.size());
     engine.SetStepHook([&](personarm::CpuContext& cpu) {
-        const uint32_t pc = cpu.GetPC();
-        if (load_ret && pc == load_ret && cpu.GetGPR(29) >= load_sp) {
-            std::cout << stamp() << "load_file_by_id(" << load_id << ") returned v0=" << hex(cpu.GetGPR(2))
-                      << " -> stop (first overlay load complete)\n";
-            done = true;
-            return false;
+        const uint32_t pc = cpu.GetPC(), last = prev_pc;
+        prev_pc = pc;
+        if (!pending.empty() && pc == pending.back().ra && cpu.GetGPR(29) >= pending.back().sp) {
+            std::cout << stamp() << "load_file_by_id(" << pending.back().id << ") returned v0=" << hex(cpu.GetGPR(2)) << "\n";
+            pending.pop_back();
+            if (opt.stop_at_first_load) { done = true; return false; }
         }
+        for (size_t w = 0; w < opt.watch_pcs.size(); ++w)
+            if (pc == opt.watch_pcs[w] && watch_hits[w]++ < 20)
+                std::cout << stamp() << "watch " << hex(pc) << " ra=" << hex(cpu.GetGPR(31)) << " a0=" << hex(cpu.GetGPR(4))
+                          << " a1=" << hex(cpu.GetGPR(5)) << " v0=" << hex(cpu.GetGPR(2)) << "\n";
         if (pc == ms.main && !seen_main) { seen_main = true; std::cout << stamp() << "reached main " << hex(pc) << "\n"; }
         if (pc == ms.scene_loop && !seen_loop) { seen_loop = true; std::cout << stamp() << "reached game_scene_loop " << hex(pc) << "\n"; }
         if (pc == ms.load_file) {
@@ -821,7 +883,8 @@ static int RunBootHarness(const std::string& disc_path, uint64_t max_frames, con
             std::cout << stamp() << "load_file_by_id(id=" << a0 << " / F" << a0 << ", dest=" << hex(a1)
                       << ") ra=" << hex(ra) << "\n";
             if (auto* t = engine.GetTraceSink()) t->OnLoadFile(a0, a1, ra);
-            if (!load_ret) { load_ret = ra; load_sp = cpu.GetGPR(29); load_id = a0; }
+            pending.push_back({ra, cpu.GetGPR(29), a0});
+            entries_seen.clear();
             ++loads;
         }
         if (pc == ms.cd_read_start) {
@@ -829,8 +892,13 @@ static int RunBootHarness(const std::string& disc_path, uint64_t max_frames, con
             std::cout << stamp() << "cd_read_start(lba=" << lba << ", size=" << size << ", dest=" << hex(dest)
                       << ") ra=" << hex(cpu.GetGPR(31)) << "\n";
             if (auto* t = engine.GetTraceSink()) t->OnCdRead(lba, (size + 2047) / 2048, dest);
+            entries_seen.clear();
             ++reads;
         }
+        // Call from resident code into an overlay slot: the previous instruction was the delay slot
+        // of the jal/jalr, so ra = delay slot + 4.
+        if (InOverlaySlot(pc) && !InOverlaySlot(last) && cpu.GetGPR(31) == last + 4 && entries_seen.insert(pc).second)
+            std::cout << stamp() << "overlay entry " << hex(pc) << " from " << hex(last - 4) << "\n";
         return true;
     });
     bool seen_kon = false;
@@ -838,35 +906,94 @@ static int RunBootHarness(const std::string& disc_path, uint64_t max_frames, con
         if (!seen_kon) { seen_kon = true; std::cout << stamp() << "first SPU key-on mask=" << hex(mask) << "\n"; }
     });
 
-    bool seen_poly = false;
+    bool seen_poly = false, seen_image = false;
     uint64_t last_calls = 0;
-    while (engine.GetFrameCount() < max_frames && engine.GetState() == personarm::EngineState::Running) {
+    uint32_t scene_mode = 0xDEADBEEF, scene_req = 0xDEADBEEF;
+    personarm::GpuDisplayArea disp{};
+    uint32_t disp_off = 2;
+    std::set<uint32_t> disp_starts;
+    std::vector<uint32_t> frame;
+    uint32_t fw = 0, fh = 0;
+    while (engine.GetFrameCount() < opt.max_frames && engine.GetState() == personarm::EngineState::Running) {
         engine.RunFrame();
-        if (!seen_poly && engine.GetGpu().GetPolygonCount()) {
+        auto& gpu = engine.GetGpu();
+        if (!seen_poly && gpu.GetPolygonCount()) {
             seen_poly = true;
             std::cout << stamp() << "first GP0 polygon drawn\n";
+        }
+        if (ms.scene_mode) {
+            const uint32_t m = engine.Read(ms.scene_mode, 4);
+            if (m != scene_mode) { std::cout << stamp() << "scene mode " << hex(scene_mode) << " -> " << hex(m) << "\n"; scene_mode = m; }
+        }
+        const uint32_t rq = engine.Read(ms.scene_req, 4);
+        if (rq != scene_req) {
+            std::cout << stamp() << "scene request id " << hex(scene_req) << " -> " << hex(rq)
+                      << " entry=" << hex(engine.Read(ms.scene_req + 4, 4)) << "\n";
+            scene_req = rq;
+        }
+        const auto& d = gpu.GetDisplayArea();
+        const uint32_t off = (gpu.ReadGPUSTAT() >> 23) & 1;
+        // Double buffering flips the start every frame: log mode changes and start positions not seen in this mode.
+        const bool mode_changed = off != disp_off || d.width != disp.width || d.height != disp.height ||
+                                  d.is_24bit != disp.is_24bit || d.is_interlaced != disp.is_interlaced || d.is_pal != disp.is_pal;
+        if (mode_changed) disp_starts.clear();
+        if (disp_starts.insert(d.x | uint32_t(d.y) << 16).second) {
+            std::cout << stamp() << "display " << (off ? "off" : "on") << " start=(" << d.x << "," << d.y << ") "
+                      << d.width << "x" << d.height << (d.is_24bit ? " 24bpp" : " 15bpp")
+                      << (d.is_interlaced ? " interlaced" : "") << (d.is_pal ? " PAL" : " NTSC") << "\n";
+        }
+        disp = d;
+        disp_off = off;
+        const bool want_dump = !opt.dump_frames.empty() && opt.every && engine.GetFrameCount() % opt.every == 0;
+        if (!seen_image || want_dump) {
+            DisplayToRgba(gpu, frame, fw, fh);
+            if (!seen_image && !off && std::any_of(frame.begin(), frame.end(), [](uint32_t p) { return (p & 0xFFFFFFu) != 0; })) {
+                seen_image = true;
+                std::cout << stamp() << "first non-black display area (" << fw << "x" << fh << ")\n";
+            }
+            if (want_dump) {
+                char name[32];
+                std::snprintf(name, sizeof name, "/frame_%06llu.png", static_cast<unsigned long long>(engine.GetFrameCount()));
+                WritePng(opt.dump_frames + name, fw, fh, frame);
+            }
         }
         const auto& r = engine.GetCpu().GetRegisters();
         const uint64_t calls = engine.GetBios().GetInterceptedCallCount();
         if (engine.GetFrameCount() % 60 == 0 || engine.GetState() != personarm::EngineState::Running) {
             std::cout << stamp() << "pc=" << hex(r.pc) << " ra=" << hex(r.gpr[31]) << " sr=" << hex(r.cp0_status)
                       << " istat=" << hex(engine.Read(0x1F801070, 4)) << " imask=" << hex(engine.Read(0x1F801074, 4))
-                      << " bios_calls=" << calls << " (+" << (calls - last_calls) << ")\n";
+                      << " bios_calls=" << calls << " (+" << (calls - last_calls) << ") polys=" << gpu.GetPolygonCount() << "\n";
             last_calls = calls;
         }
     }
     engine.SetStepHook(nullptr);
     engine.SetSpuKeyOnHook(nullptr);
-    if (!dump_ram.empty()) { // debugging aid: raw 2 MB RAM image at stop (keep it out of the repo)
-        std::ofstream f(dump_ram, std::ios::binary);
+    if (!opt.dump_ram.empty()) { // debugging aid: raw 2 MB RAM image at stop (keep it out of the repo)
+        std::ofstream f(opt.dump_ram, std::ios::binary);
         f.write(reinterpret_cast<const char*>(engine.GetRam().data()), static_cast<std::streamsize>(engine.GetRam().size()));
+    }
+    if (!opt.dump_vram.empty()) { // whole 1024x512 VRAM as 15-bit colour (keep it out of the repo)
+        const auto& vram = engine.GetGpu().GetVram();
+        std::vector<uint32_t> rgba(vram.size());
+        for (size_t i = 0; i < vram.size(); ++i) {
+            const uint32_t p = vram[i];
+            rgba[i] = 0xFF000000u | ((p >> 10 & 0x1Fu) << 19) | ((p >> 5 & 0x1Fu) << 11) | ((p & 0x1Fu) << 3);
+        }
+        WritePng(opt.dump_vram, personarm::PS1_VRAM_WIDTH, personarm::PS1_VRAM_HEIGHT, rgba);
+    }
+    std::string unimpl;
+    for (uint32_t k : engine.GetBios().GetUnimplementedCalls()) {
+        char b[16];
+        std::snprintf(b, sizeof b, " %c%02X", (k >> 8) == 0xA0 ? 'A' : (k >> 8) == 0xB0 ? 'B' : 'C', k & 0xFFu);
+        unimpl += b;
     }
     std::cout << stamp() << (done ? "STOP: first load_file_by_id completed" : "STOP: frame limit or engine stopped")
               << "; main=" << seen_main << " scene_loop=" << seen_loop << " load_file calls=" << loads
-              << " cd_read_start calls=" << reads << " polygon=" << seen_poly << " key-on=" << seen_kon
-              << " bios_calls=" << engine.GetBios().GetInterceptedCallCount() << "\n";
+              << " cd_read_start calls=" << reads << " polygon=" << seen_poly << " image=" << seen_image
+              << " key-on=" << seen_kon << " bios_calls=" << engine.GetBios().GetInterceptedCallCount()
+              << " unimplemented:" << (unimpl.empty() ? " none" : unimpl) << "\n";
     engine.Shutdown();
-    return done ? EXIT_SUCCESS : 2;
+    return done || !opt.stop_at_first_load ? EXIT_SUCCESS : 2;
 }
 
 int main(int argc, char* argv[]) {
@@ -900,17 +1027,35 @@ int main(int argc, char* argv[]) {
                     return EXIT_FAILURE;
                 }
                 std::string disc = argv[++i];
-                uint64_t frames = 600;
-                std::string dump_ram;
-                for (int k = 1; k + 1 < argc; ++k) {
-                    if (std::strcmp(argv[k], "--max-frames") == 0) frames = std::strtoull(argv[k + 1], nullptr, 10);
-                    if (std::strcmp(argv[k], "--dump-ram") == 0) dump_ram = argv[k + 1];
+                BootOptions opt;
+                for (int k = 1; k < argc; ++k) {
+                    if (std::strcmp(argv[k], "--stop-at-first-load") == 0) opt.stop_at_first_load = true;
+                    if (k + 1 >= argc) continue;
+                    if (std::strcmp(argv[k], "--max-frames") == 0) opt.max_frames = std::strtoull(argv[k + 1], nullptr, 10);
+                    if (std::strcmp(argv[k], "--every") == 0) opt.every = std::strtoull(argv[k + 1], nullptr, 10);
+                    if (std::strcmp(argv[k], "--dump-ram") == 0) opt.dump_ram = argv[k + 1];
+                    if (std::strcmp(argv[k], "--dump-vram") == 0) opt.dump_vram = argv[k + 1];
+                    if (std::strcmp(argv[k], "--dump-frames") == 0) opt.dump_frames = argv[k + 1];
+                    if (std::strcmp(argv[k], "--watch-pc") == 0) opt.watch_pcs.push_back(std::strtoul(argv[k + 1], nullptr, 16));
                     if (std::strcmp(argv[k], "--trace-out") == 0)
                         personarm::Engine::Instance().SetTraceOutput(argv[k + 1]);
+                    if (std::strcmp(argv[k], "--press") == 0) {
+                        personarm::Engine::PadPress p{};
+                        if (!personarm::Engine::ParsePadPress(argv[k + 1], p)) {
+                            std::cerr << "--press needs <button>@<frame>[+<frames>] (button: up down left right "
+                                         "cross circle square triangle l1 r1 l2 r2 start select)\n";
+                            return EXIT_FAILURE;
+                        }
+                        opt.presses.push_back(p);
+                    }
                 }
-                return RunBootHarness(disc, frames, dump_ram);
+                return RunBootHarness(disc, opt);
             }
-            if (std::strcmp(argv[i], "--max-frames") == 0 || std::strcmp(argv[i], "--dump-ram") == 0) { ++i; continue; } // read by --boot
+            if (std::strcmp(argv[i], "--stop-at-first-load") == 0) continue; // read by --boot
+            if (std::strcmp(argv[i], "--max-frames") == 0 || std::strcmp(argv[i], "--dump-ram") == 0 ||
+                std::strcmp(argv[i], "--dump-vram") == 0 || std::strcmp(argv[i], "--dump-frames") == 0 ||
+                std::strcmp(argv[i], "--every") == 0 || std::strcmp(argv[i], "--press") == 0 ||
+                std::strcmp(argv[i], "--watch-pc") == 0) { ++i; continue; } // read by --boot
             if (std::strcmp(argv[i], "--launch") == 0) {
                 return launcher.LaunchGame();
             }

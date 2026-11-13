@@ -254,6 +254,41 @@ static void TestEventSemantics() {
     CHECK_EQ("lseek bad fd", call(0xA0, 0x01, 7, 0, 0), 0xFFFFFFFF);
 }
 
+// Memory card "no card inserted": requests end with EvSpTIMOUT (psx-spx "Memory Card BIOS Functions").
+static void TestMemoryCardNoCard() {
+    auto& bios = Ps1BiosHle::Instance();
+    bios.Initialize();
+    bios.SetIoHooks(nullptr, nullptr);
+    std::vector<uint8_t> ram(2 * 1024 * 1024, 0);
+    bios.InstallKernel(ram.data(), ram.size());
+    CpuContext cpu;
+    auto call = [&](uint32_t vec, uint32_t fn, uint32_t x0 = 0, uint32_t x1 = 0, uint32_t x2 = 0, uint32_t x3 = 0) {
+        cpu.SetGPR(9, fn);
+        cpu.SetGPR(4, x0); cpu.SetGPR(5, x1); cpu.SetGPR(6, x2); cpu.SetGPR(7, x3);
+        cpu.SetGPR(31, 0x80001000);
+        cpu.SetPC(vec);
+        bios.HandleBiosHook(cpu, ram.data(), ram.size());
+        return cpu.GetGPR(2);
+    };
+    const uint32_t sw = 0xF4000001, hw = 0xF0000011, ioe = 0x0004, timeout = 0x0100;
+    const uint32_t sw_to = call(0xB0, 0x08, sw, timeout, 0x2000, 0), sw_ok = call(0xB0, 0x08, sw, ioe, 0x2000, 0);
+    const uint32_t hw_to = call(0xB0, 0x08, hw, timeout, 0x2000, 0);
+    for (uint32_t ev : {sw_to, sw_ok, hw_to}) call(0xB0, 0x0C, ev);
+    CHECK_EQ("_bu_init", call(0xA0, 0x70), 0);
+    CHECK_EQ("InitCARD2", call(0xB0, 0x4A, 1), 0);
+    CHECK_EQ("StartCARD", call(0xB0, 0x4B), 0);
+    CHECK_EQ("_card_info accepted", call(0xA0, 0xAB, 0x00), 1);
+    CHECK_EQ("_card_info -> SwCARD timeout", call(0xB0, 0x0B, sw_to), 1);
+    CHECK_EQ("_card_info no IOE", call(0xB0, 0x0B, sw_ok), 0);
+    CHECK_EQ("_card_read accepted", call(0xB0, 0x4F, 0x00, 0, 0x80100000), 1);
+    CHECK_EQ("_card_read -> HwCARD timeout", call(0xB0, 0x0B, hw_to), 1);
+    // libmcrd registers callback-mode events: the callback runs before returning to the caller.
+    const uint32_t cb = call(0xB0, 0x08, sw, timeout, 0x1000, 0x80012340);
+    call(0xB0, 0x0C, cb);
+    call(0xA0, 0xAB, 0x10);
+    CHECK_EQ("_card_info runs the SwCARD timeout callback", cpu.GetPC(), 0x80012340);
+}
+
 static std::string TraceRun() {
     std::ostringstream out;
     {
@@ -285,6 +320,7 @@ static void TestTraceDeterminism() {
 int main() {
     std::printf("[UNIT TEST] HLE kernel events / IRQ chain / tables / trace\n");
     TestEventSemantics();
+    TestMemoryCardNoCard();
     TestVsyncChain();
     TestWaitEvent();
     TestCriticalSection();
