@@ -4,16 +4,8 @@
 // Decode math lives in rendering/mdec_decoder (mdec::BlockDecoder/Idct/YuvToRgb).
 // FMV code is in overlay F0000; the resident EXE never touches these registers.
 //
-// WIRING (Engine, later change):
-//   1. Own a `hw::Mdec mdec;`.
-//   2. Bus: for addr in [Mdec::kBase, kBase+7] route Read32/Write32 with offset = addr - kBase
-//      (0 = command/data, 4 = control/status; MDEC is a 32-bit-only port).
-//   3. DMA: dma.SetPort(Dma::kMdecIn,  {nullptr, [&](uint32_t w){ mdec.DmaIn(w); }});
-//           dma.SetPort(Dma::kMdecOut, {[&]{ return mdec.DmaOut(); }, nullptr});
-//      Caveat: hw::Dma moves a whole block at start. PsyQ starts DMA1 (out) before DMA0 (in),
-//      so DMA1 would drain an empty FIFO; DMA1 must wait for DataOutRequest() (DRQ pacing)
-//      or be retried after DMA0 completes.
-//   4. Call mdec.Tick(cycles) every step/batch (no-op today). MDEC raises no IRQ.
+// WIRING: done in Engine::WireDevices (bus 1F801820h..27h, DMA0/DMA1 ports paced by
+// DataInRequest/DataOutRequest via DmaPort::request). MDEC raises no IRQ; Tick is a no-op.
 #include <cstdint>
 #include <deque>
 
@@ -36,14 +28,18 @@ public:
     /// DMA1 (MDEC -> RAM): pops one word of decoded output (0 when empty).
     uint32_t DmaOut() { return Read32(0); }
 
-    // shortcut: decoding is instant (output is ready as soon as a block's last halfword arrives);
-    // real hw takes cycles per block. Add a cycle budget here if FMV timing ever matters.
-    void Tick(uint32_t /*cycles*/) {}
+    // Decoded output only becomes readable kCyclesPerBlock per 8x8 block later (sequentially).
+    // FMV code relies on it: it LoadImages strip N from the DMA1-done callback while the MDEC
+    // still decodes strip N+1 into the other buffer; instant output overwrote buffers early.
+    // unverified: 448 cycles/block is the DuckStation figure, not measured on hardware.
+    static constexpr uint32_t kCyclesPerBlock = 448;
+    void Tick(uint32_t cycles);
 
     void Reset();
     uint32_t Status() const;
     bool DataInRequest() const { return (Status() >> 28) & 1; }
     bool DataOutRequest() const { return (Status() >> 27) & 1; }
+    size_t ReadyWords() const { return m_ready; }
 
 private:
     void Command(uint32_t word);
@@ -51,7 +47,7 @@ private:
     void DecodeHalfword(uint16_t n);
     void EmitColor();
     void EmitMono(const int16_t y[64]);
-    void PushBytes(const uint8_t* bytes, size_t n);
+    void PushBytes(const uint8_t* bytes, size_t n, uint32_t blocks);
 
     uint32_t m_cmd = 0;          // current command word
     uint32_t m_left = 0;         // parameter words still expected
@@ -66,7 +62,10 @@ private:
     mdec::BlockDecoder m_dec;
     int m_block = 0;  // index in Cr,Cb,Y1..Y4 (color) or 0 (mono)
     int16_t m_blocks[6][64] = {};
-    std::deque<uint32_t> m_out;
+    std::deque<uint32_t> m_out;  // decoded words; the first m_ready are readable
+    size_t m_ready = 0;
+    struct Pending { uint32_t words, cycles; };
+    std::deque<Pending> m_pending;  // still "decoding", front counts down
 };
 
 } // namespace personarm::hw

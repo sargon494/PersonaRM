@@ -67,6 +67,7 @@ void Engine::Reset() {
     m_i_mask = 0;
     m_timers = {};
     m_timer_cycles = 0;
+    m_stall_cycles = 0;
     WireDevices();
     m_state = EngineState::Idle;
 }
@@ -94,13 +95,39 @@ void Engine::WireDevices() {
         const uint8_t b[4] = {uint8_t(w), uint8_t(w >> 8), uint8_t(w >> 16), uint8_t(w >> 24)};
         m_spu.DmaWrite(b, 4);
     }});
-    // MDEC (DMA0/1) stays an empty port until the MDEC gets a word interface.
+    m_mdec = std::make_unique<hw::Mdec>();
+    // MDEC DMA is paced by its DRQs: PsyQ starts DMA1 (out) before DMA0 (in).
+    m_dma->SetPort(hw::Dma::kMdecIn, {nullptr, [this](uint32_t w) { m_mdec->DmaIn(w); },
+                                      [this] { return m_mdec->DataInRequest(); }});
+    m_dma->SetPort(hw::Dma::kMdecOut, {[this] { return m_mdec->DmaOut(); }, nullptr,
+                                       [this] { return m_mdec->DataOutRequest(); }});
+    m_xa.Reset();
+    m_xa_resampler.Reset();
+    m_xa_audio.clear();
+    m_cdrom->SetXaCallback([this](const uint8_t* raw) { OnXaSector(raw); });
+}
+
+void Engine::OnXaSector(const uint8_t* raw) {
+    m_xa_pcm.clear();
+    if (!m_xa.DecodeRawSector(raw, m_xa_pcm)) return;
+    const XaFormat fmt = XaFormat::FromCodingInfo(raw[0x13]);
+    const int ch = fmt.stereo ? 2 : 1;
+    m_xa_out.clear();
+    m_xa_resampler.Process(m_xa_pcm.data(), m_xa_pcm.size() / ch, ch, fmt.rate, m_xa_out);
+    const bool on = m_spu.Read16(0x1F801DAA) & 1;
+    const int32_t vl = on ? static_cast<int16_t>(m_spu.Read16(0x1F801DB0)) : 0;
+    const int32_t vr = on ? static_cast<int16_t>(m_spu.Read16(0x1F801DB2)) : 0;
+    for (size_t i = 0; i < m_xa_out.size(); i += ch) {
+        m_xa_audio.push_back(static_cast<int16_t>(m_xa_out[i] * vl / 0x8000));
+        m_xa_audio.push_back(static_cast<int16_t>(m_xa_out[i + ch - 1] * vr / 0x8000));
+    }
 }
 
 void Engine::TickDevices(uint32_t cycles) {
     TickTimers(cycles);
     TickJoy(cycles);
     m_cdrom->Tick(cycles);
+    m_mdec->Tick(cycles);
     m_dma->Tick(cycles);
 }
 
@@ -151,6 +178,7 @@ uint32_t Engine::ReadBus(uint32_t address, uint32_t size) {
     // 1. Main RAM (2 MB, mirrored across first 8 MB)
     if (physical < 0x00800000) {
         uint32_t ram_offset = physical & (PS1_MAIN_RAM_SIZE - 1);
+        if (address != m_cpu.GetPC()) m_stall_cycles += kRamLoadStallCycles;  // data load, not a fetch
         if (size == 1) return m_ram[ram_offset];
         if (size == 2) {
             return m_ram[ram_offset] | (static_cast<uint32_t>(m_ram[(ram_offset + 1) & (PS1_MAIN_RAM_SIZE - 1)]) << 8);
@@ -220,6 +248,8 @@ uint32_t Engine::ReadBus(uint32_t address, uint32_t size) {
         const uint32_t off = physical - hw::Dma::kBase;
         return size == 1 ? m_dma->Read8(off) : size == 2 ? m_dma->Read16(off) : m_dma->Read32(off);
     }
+    if (physical >= hw::Mdec::kBase && physical < hw::Mdec::kBase + 8)  // 32-bit-only port
+        return m_mdec->Read32(physical - hw::Mdec::kBase);
     // CD-ROM controller 1F801800h..1F801803h
     if (physical >= hw::CdRom::kBase && physical < hw::CdRom::kBase + 4) {
         const uint32_t off = physical - hw::CdRom::kBase;
@@ -337,6 +367,10 @@ void Engine::WriteBus(uint32_t address, uint32_t value, uint32_t size) {
         if (size == 1) m_dma->Write8(off, static_cast<uint8_t>(value));
         else if (size == 2) m_dma->Write16(off, static_cast<uint16_t>(value));
         else m_dma->Write32(off, value);
+        return;
+    }
+    if (physical >= hw::Mdec::kBase && physical < hw::Mdec::kBase + 8) {
+        m_mdec->Write32(physical - hw::Mdec::kBase, value);
         return;
     }
     if (physical >= hw::CdRom::kBase && physical < hw::CdRom::kBase + 4) {
@@ -479,11 +513,11 @@ void Engine::RunFrame() {
     }
 
     // Emulate scaled CPU clock cycles (~564,480 at 1x 60 Hz NTSC)
-    uint64_t start_cycles = m_cpu.GetCycleCount();
+    uint64_t start_cycles = GetCycles();
     uint64_t target_cycles = start_cycles +
         static_cast<uint64_t>(PS1_CYCLES_PER_FRAME_NTSC * effective_multiplier);
 
-    while (m_cpu.GetCycleCount() < target_cycles && m_state == EngineState::Running) {
+    while (GetCycles() < target_cycles && m_state == EngineState::Running) {
         // HLE: intercept the exception vector, the A0/B0/C0 call vectors and the kernel stubs before the
         // CPU fetches them. One HLE step can land on another HLE address (a stub returning to the
         // kernel trampoline), so loop until guest code is next.
@@ -511,7 +545,7 @@ void Engine::RunFrame() {
             break;
         }
         m_cpu.Step();
-        uint64_t now = m_cpu.GetCycleCount();
+        uint64_t now = GetCycles();
         TickDevices(static_cast<uint32_t>(now - m_timer_cycles));
         m_timer_cycles = now;
     }

@@ -10,7 +10,7 @@
 //   3. Ports: dma.SetPort(Dma::kGpu,   {gpuread_fn, gp0_write_fn});
 //             dma.SetPort(Dma::kCdrom, {[&]{ return cd.DmaRead32(); }, nullptr});
 //             dma.SetPort(Dma::kSpu,   {spu_fifo_read_fn, spu_fifo_write_fn});
-//      (MDEC 0/1 the same way once the MDEC has a word interface.)
+//             dma.SetPort(Dma::kMdecIn/kMdecOut, {..., ..., drq_fn});  // DRQ-paced
 //   4. dma.SetIrqCallback([&]{ i_stat |= 1u << 3; });  // IRQ3 = DMA in I_STAT
 //   5. Call dma.Tick(cycles) every CPU step/batch (completion delays live there).
 #include <cstdint>
@@ -27,9 +27,12 @@ public:
 };
 
 /// Device side of a channel: `read` = device->RAM, `write` = RAM->device. Either may be empty.
+/// `request` (optional, sync mode 1 only) is the device DRQ: when set, blocks move one at a time
+/// from Tick() while it returns true, instead of all at once at start (MDEC DMA0/DMA1).
 struct DmaPort {
     std::function<uint32_t()> read;
     std::function<void(uint32_t)> write;
+    std::function<bool()> request;
 };
 
 class Dma {
@@ -37,7 +40,8 @@ public:
     static constexpr uint32_t kBase = 0x1F801080;
     enum Channel { kMdecIn = 0, kMdecOut, kGpu, kCdrom, kSpu, kPio, kOtc, kNumChannels };
     // shortcut: transfers run instantly at start; completion (busy clear, DICR flag, IRQ3)
-    // fires after words*kCyclesPerWord cycles. Real DMA steals CPU cycles and is paced by device DRQ.
+    // fires after words*kCyclesPerWord cycles (ports with a `request` DRQ move block by block instead).
+    // Real DMA steals CPU cycles.
     static constexpr uint32_t kCyclesPerWord = 1;
     static constexpr uint32_t kLinkedListGuard = 0x100000;  // max nodes before aborting a looped list
 
@@ -70,12 +74,14 @@ private:
         uint32_t madr = 0, bcr = 0, chcr = 0;
         uint32_t pending = 0;  // cycles until completion; 0 = idle
         bool running = false;
+        bool paced = false;  // DRQ-paced sync-1 transfer in progress (blocks left in BCR bits 16-31)
         DmaPort port;
     };
 
     void WriteMasked(uint32_t offset, uint32_t value, uint32_t mask);
     void TryStart(int ch);
     uint32_t Transfer(int ch);  // returns words moved
+    uint32_t MoveWords(int ch, uint32_t addr, uint32_t n);  // returns the address after the last word
     void Complete(int ch);
     void UpdateMaster();
 
