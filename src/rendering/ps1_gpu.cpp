@@ -143,6 +143,21 @@ void Ps1Gpu::ExecuteGP1Command(uint32_t word) {
             m_gpustat = (m_gpustat & ~(3 << 29)) | ((word & 3) << 29);
             break;
 
+        case 0x10: case 0x11: case 0x12: case 0x13: case 0x14: case 0x15: case 0x16: case 0x17:
+        case 0x18: case 0x19: case 0x1A: case 0x1B: case 0x1C: case 0x1D: case 0x1E: case 0x1F:
+            // Get GPU Info (psx-spx "GPU Status Register / GP1(10h)"): latched into GPUREAD; indices
+            // 0-1, 6, 9-F leave the previous value. Index bits 0-3 (new 208-pin GPU).
+            switch (word & 0xF) {
+                case 2: m_gpuread_latch = m_texwindow; break;
+                case 3: m_gpuread_latch = uint32_t(m_drawing.x1 | (m_drawing.y1 << 10)); break;
+                case 4: m_gpuread_latch = uint32_t(m_drawing.x2 | (m_drawing.y2 << 10)); break;
+                case 5: m_gpuread_latch = (uint32_t(m_drawing.offset_x) & 0x7FF) | ((uint32_t(m_drawing.offset_y) & 0x7FF) << 11); break;
+                case 7: m_gpuread_latch = 2; break;  // GPU type
+                case 8: m_gpuread_latch = 0; break;
+                default: break;
+            }
+            break;
+
         case 0x05: // Start of Display Area in VRAM
             m_display.x = word & 0x3FF;
             m_display.y = (word >> 10) & 0x1FF;

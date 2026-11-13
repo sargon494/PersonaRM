@@ -262,6 +262,20 @@ static void TestGpuRead() {
     // E1h bits 0-10 mirror into GPUSTAT.
     Send(gpu, {0xE10002AA});
     CHECK_EQ("GPUSTAT E1", gpu.ReadGPUSTAT() & 0x7FF, 0x2AA);
+    // GP1(10h) Get GPU Info latches E2-E5 / GPU type into GPUREAD; index 0 keeps the old value.
+    Send(gpu, {0xE2012345, 0xE3000000 | 0x0400 | 0x10, 0xE4000000 | (239 << 10) | 319, 0xE5000000 | (0x7FF << 11) | 8});
+    gpu.WriteGP1(0x10000002);
+    CHECK_EQ("info E2", gpu.ReadGP0(), 0x12345);
+    gpu.WriteGP1(0x10000003);
+    CHECK_EQ("info E3", gpu.ReadGP0(), 0x0410);
+    gpu.WriteGP1(0x10000004);
+    CHECK_EQ("info E4", gpu.ReadGP0(), 0x03BD3F);
+    gpu.WriteGP1(0x10000005);
+    CHECK_EQ("info E5", gpu.ReadGP0(), 0x3FF808);
+    gpu.WriteGP1(0x10000000);
+    CHECK_EQ("info keep", gpu.ReadGP0(), 0x3FF808);
+    gpu.WriteGP1(0x1F000007);
+    CHECK_EQ("info type", gpu.ReadGP0(), 2);
 }
 
 int main() {
