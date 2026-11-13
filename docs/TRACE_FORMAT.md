@@ -80,6 +80,13 @@ All hashes are **FNV-1a 64** (offset `0xCBF29CE484222325`, prime `0x100000001B3`
 5. Divergence = first position where (a) event type differs, (b) a shared field differs, or (c) one stream
    is shorter. The result carries the index, a reason naming the field, and +-`context` (default 5) raw events
    from each side.
+6. `CompareOptions::ignore_fields` drops fields from comparison and from `call` run identity (e.g. `a3`:
+   argument registers a BIOS function does not read keep whatever the real BIOS or the HLE left there).
+7. `CompareTracesBySegment(a, b, "load_file")` re-synchronises: both streams are cut before every
+   `load_file`, and segment i of A is compared with segment i of B (one verdict per segment).
+CLI: `trace_compare <A> <B> [--resync load_file] [--ignore-ev vsync,ckpt] [--ignore-field a3] [--context N]`
+(exit 0 = equal, 1 = divergence). The boot harness flag `--dump-ram-at-loads <dir>` writes the RAM image at
+every `load_file_by_id` return, to compare loaded overlays byte for byte against the reference.
 Accepted divergences (HLE BIOS vs real, kernel RAM, IRQ timing) are handled by masks and ignored events, and
 must be recorded with evidence in `tests/diff/accepted_divergences.md` (VALIDATION_STRATEGY 10).
 

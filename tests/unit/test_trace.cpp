@@ -146,6 +146,28 @@ int main() {
     // A different call after the run still diverges.
     CHECK(CompareTraces(c5, Parse(polls(5, false, 1))).found);
 
+    // ignore_fields: a differing a3 (leftover register) is not compared and does not split a run.
+    auto seg = [&](const std::vector<std::pair<uint32_t, uint32_t>>& calls_then_load, uint32_t a3) {
+        std::ostringstream os;
+        TraceWriter w(os, Hdr("x"));
+        for (auto [fn, id] : calls_then_load) {
+            if (fn) w.OnBiosCall(0xB0, fn, {1, 2, 3, a3}, 0x80010010);
+            else w.OnLoadFile(id, 0x80100000, 0x80010030);
+        }
+        return Parse(os.str());
+    };
+    TraceFile s1 = seg({{0x0B, 0}, {0, 1}, {0x0B, 0}, {0, 2}, {0x0C, 0}}, 0);
+    TraceFile s2 = seg({{0x0B, 0}, {0, 1}, {0x0D, 0}, {0, 2}, {0x0C, 0}}, 0x2A);
+    CHECK(CompareTraces(s1, s2).reason.find("a3") != std::string::npos);
+    CompareOptions noa3;
+    noa3.ignore_fields = {"a3"};
+    Divergence d1 = CompareTraces(s1, s2, noa3);
+    CHECK(d1.found && d1.index == 2 && d1.reason.find("fn") != std::string::npos);
+    // Re-synchronising on load_file: only segment 1 (between the two loads) diverges.
+    auto segs = CompareTracesBySegment(s1, s2, "load_file", noa3);
+    CHECK(segs.size() == 3 && !segs[0].found && segs[1].found && segs[1].index == 1 && !segs[2].found);
+    CHECK(CompareTracesBySegment(s1, seg({{0x0B, 0}}, 0), "load_file", noa3).size() == 3);
+
     std::puts("unit_test_trace: all checks passed");
     return 0;
 }

@@ -10,6 +10,10 @@ target_compile_features(psx_analyzer PUBLIC cxx_std_17)
 add_executable(psx_analyze psx_analyze/main.cpp)
 target_link_libraries(psx_analyze PRIVATE psx_analyzer)
 
+add_executable(trace_compare trace_compare/main.cpp)
+target_link_libraries(trace_compare PRIVATE personarm_core)
+target_compile_features(trace_compare PRIVATE cxx_std_17)
+
 if(MSVC)
     target_compile_options(psx_analyzer PRIVATE /W4)
     target_compile_definitions(psx_analyzer PUBLIC _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_WARNINGS NOMINMAX)

@@ -70,6 +70,7 @@ static void PrintUsage(const char* prog) {
               << "                     key-on, unimplemented BIOS calls) for --max-frames N (default 600).\n"
               << "                     --stop-at-first-load   stop when the first load_file_by_id returns\n"
               << "                     --dump-ram <file>      2 MB RAM image at stop\n"
+              << "                     --dump-ram-at-loads <dir>  RAM image at each load_file_by_id return\n"
               << "                     --dump-vram <png>      1024x512 VRAM at stop\n"
               << "                     --dump-frames <dir> --every N   display area PNG every N frames\n"
               << "                     --dump-audio <wav>     CD XA audio, 16-bit stereo 44.1 kHz\n"
@@ -794,6 +795,7 @@ struct BootMilestones { uint32_t main, scene_loop, load_file, cd_read_start, sce
 struct BootOptions {
     uint64_t max_frames = 600;
     std::string dump_ram, dump_vram, dump_frames, dump_audio;
+    std::string dump_ram_at_loads; // dir: RAM image at each load_file_by_id return (G1 reference comparison)
     uint64_t every = 60;
     bool stop_at_first_load = false;
     std::vector<personarm::Engine::PadPress> presses;
@@ -884,6 +886,11 @@ static int RunBootHarness(const std::string& disc_path, const BootOptions& opt) 
         prev_pc = pc;
         if (!pending.empty() && pc == pending.back().ra && cpu.GetGPR(29) >= pending.back().sp) {
             std::cout << stamp() << "load_file_by_id(" << pending.back().id << ") returned v0=" << hex(cpu.GetGPR(2)) << "\n";
+            if (!opt.dump_ram_at_loads.empty()) { // keep it out of the repo
+                std::ofstream f(opt.dump_ram_at_loads + "/load_" + std::to_string(loads) + "_F" +
+                                std::to_string(pending.back().id) + ".bin", std::ios::binary);
+                f.write(reinterpret_cast<const char*>(engine.GetRam().data()), static_cast<std::streamsize>(engine.GetRam().size()));
+            }
             pending.pop_back();
             if (opt.stop_at_first_load) { done = true; return false; }
         }
@@ -1057,6 +1064,7 @@ int main(int argc, char* argv[]) {
                     if (std::strcmp(argv[k], "--max-frames") == 0) opt.max_frames = std::strtoull(argv[k + 1], nullptr, 10);
                     if (std::strcmp(argv[k], "--every") == 0) opt.every = std::strtoull(argv[k + 1], nullptr, 10);
                     if (std::strcmp(argv[k], "--dump-ram") == 0) opt.dump_ram = argv[k + 1];
+                    if (std::strcmp(argv[k], "--dump-ram-at-loads") == 0) opt.dump_ram_at_loads = argv[k + 1];
                     if (std::strcmp(argv[k], "--dump-vram") == 0) opt.dump_vram = argv[k + 1];
                     if (std::strcmp(argv[k], "--dump-frames") == 0) opt.dump_frames = argv[k + 1];
                     if (std::strcmp(argv[k], "--dump-audio") == 0) opt.dump_audio = argv[k + 1];
