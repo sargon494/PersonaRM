@@ -1,5 +1,8 @@
 #include "host/host_logic.h"
 
+#include <cstdlib>
+#include <cstring>
+
 namespace personarm::host {
 
 namespace {
@@ -68,6 +71,38 @@ uint16_t PadBitForName(const std::vector<NamedBit>& map, const std::string& name
     for (const NamedBit& m : map)
         if (name == m.name) return m.bit;
     return 0;
+}
+
+bool ParseHostArgs(int argc, const char* const* argv, HostOptions& o) {
+    o = HostOptions{};
+    for (int i = 1; i < argc; ++i) {
+        const char* a = argv[i];
+        const char* v = i + 1 < argc ? argv[i + 1] : nullptr;
+        auto is = [&](const char* name) { return !std::strcmp(a, name); };
+        if (is("--stats")) o.stats = true;
+        else if (is("--unthrottled")) o.unthrottled = true;
+        else if (is("--hidden")) o.hidden = true;
+        else if (is("--recomp")) o.recomp = true;
+        else if (a[0] != '-') {
+            if (!o.disc.empty()) return false;
+            o.disc = a;
+        } else {
+            if (!v) return false;  // every other option takes a value
+            ++i;
+            if (is("--frames")) o.max_frames = std::strtoull(v, nullptr, 10);
+            else if (is("--screenshot")) o.screenshot = v;
+            else if (is("--input-script")) o.input_script = v;
+            else if (is("--interp")) o.interp_hz = std::atoi(v);
+            else if (is("--dump-dir")) o.dump_dir = v;
+            else if (is("--dump-from")) o.dump_from = std::strtoull(v, nullptr, 10);
+            else if (is("--dump-to")) o.dump_to = std::strtoull(v, nullptr, 10);
+            else if (is("--memcard1")) o.memcard[0] = v;
+            else if (is("--memcard2")) o.memcard[1] = v;
+            else if (is("--recomp-quantum")) o.recomp_quantum = uint32_t(std::strtoul(v, nullptr, 10));
+            else return false;
+        }
+    }
+    return !o.disc.empty() && o.interp_hz >= 0 && o.interp_hz % 60 == 0 && o.recomp_quantum > 0;
 }
 
 } // namespace personarm::host

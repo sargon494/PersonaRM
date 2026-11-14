@@ -26,4 +26,17 @@ const std::vector<NamedBit>& GamepadMap();
 /// Pad bit for one name of the tables above, 0 = unmapped.
 uint16_t PadBitForName(const std::vector<NamedBit>& map, const std::string& name);
 
+/// personarm_sdl command line.
+struct HostOptions {
+    std::string disc, screenshot, input_script, dump_dir;
+    std::string memcard[2];         // --memcard1/2: raw .mcd per slot, empty = no card
+    uint64_t max_frames = 0, dump_from = 0, dump_to = 0;
+    int interp_hz = 0;
+    bool recomp = false;            // --recomp: run the recompiled code linked into this build
+    uint32_t recomp_quantum = 1;    // --recomp-quantum
+    bool stats = false, unthrottled = false, hidden = false;
+};
+/// False on an unknown option, a missing value, no disc, or --interp not a multiple of 60.
+bool ParseHostArgs(int argc, const char* const* argv, HostOptions& out);
+
 } // namespace personarm::host
