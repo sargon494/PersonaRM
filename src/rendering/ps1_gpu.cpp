@@ -158,10 +158,23 @@ void Ps1Gpu::ExecuteGP1Command(uint32_t word) {
             }
             break;
 
-        case 0x05: // Start of Display Area in VRAM
-            m_display.x = word & 0x3FF;
-            m_display.y = (word >> 10) & 0x1FF;
+        case 0x05: { // Start of Display Area in VRAM
+            const uint16_t x = word & 0x3FF, y = (word >> 10) & 0x1FF;
+            if (m_cmd_log && (x != m_display.x || y != m_display.y)) {
+                const uint32_t state[] = {
+                    0xE1000000u | m_texpage, 0xE2000000u | m_texwindow,
+                    0xE3000000u | uint32_t(m_drawing.x1) | uint32_t(m_drawing.y1) << 10,
+                    0xE4000000u | uint32_t(m_drawing.x2) | uint32_t(m_drawing.y2) << 10,
+                    0xE5000000u | (uint32_t(m_drawing.offset_x) & 0x7FF) | (uint32_t(m_drawing.offset_y) & 0x7FF) << 11,
+                    0xE6000000u | (m_mask_set ? 1u : 0u) | (m_mask_check ? 2u : 0u)};
+                m_cmd_log->push_back(0);
+                m_cmd_log->push_back(uint32_t(x) | uint32_t(y) << 16);
+                for (uint32_t w : state) LogWords(&w, 1);
+            }
+            m_display.x = x;
+            m_display.y = y;
             break;
+        }
 
         case 0x06: // Horizontal Display Range
             break;
@@ -236,6 +249,7 @@ void Ps1Gpu::WriteGP0(uint32_t word) {
     }
 
     if (m_in_polyline) {
+        if (m_cmd_log) LogWords(&word, 1);
         // psx-spx "GPU Render Line Commands": polylines run until a 5xxx5xxxh terminator word.
         // unverified: terminator is only tested where a new vertex (or its gouraud color) starts.
         if ((word & 0xF000F000u) == 0x50005000u && !(m_polyline_gouraud && m_polyline_have_color)) {
@@ -277,6 +291,7 @@ void Ps1Gpu::ExecuteGP0Command() {
     if (m_gp0_packet.empty()) return;
     uint32_t w0 = m_gp0_packet[0];
     uint8_t cmd = (w0 >> 24) & 0xFF;
+    if (m_cmd_log && !(cmd >= 0xA0 && cmd <= 0xDF)) LogWords(m_gp0_packet.data(), m_gp0_packet.size());
 
     if (cmd >= 0x20 && cmd <= 0x3F) { DrawPolygon(cmd); return; }
     if (cmd >= 0x40 && cmd <= 0x5F) { DrawLineCommand(cmd); return; }
