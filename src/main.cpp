@@ -799,8 +799,8 @@ static int RunPortalSelfTest() {
 }
 
 // ── Boot harness (gate G1 attempt, RECOMPILATION_STRATEGY) ───────────────────
-// Milestone PCs from docs/research/OVERLAY_MAP.md / FUNCTION_CATALOG.md (disc 1 confirmed;
-// disc 2 only the loader entry points are known, 0 = not instrumented).
+// Milestone PCs from docs/research/OVERLAY_MAP.md / FUNCTION_CATALOG.md (0 = not instrumented).
+// Disc 2: main from the crt0, scene loop OV-002, mode word = lw 0x8007A7F8 at 0x80021174.
 struct BootMilestones { uint32_t main, scene_loop, load_file, cd_read_start, scene_mode, scene_req; };
 
 struct BootOptions {
@@ -900,7 +900,7 @@ static int RunBootHarness(const std::string& disc_path, const BootOptions& opt) 
     probe.Open(disc_path);
     const auto disc = personarm::DiscReader::IdentifyPersona2(probe.DetectBootExecutable());
     const BootMilestones ms = disc.disc_number == 2
-        ? BootMilestones{0, 0, 0x800254E0, 0x8002541C, 0, 0x8007A80C}
+        ? BootMilestones{0x80022F10, 0x8002113C, 0x800254E0, 0x8002541C, 0x8007A7F8, 0x8007A80C}
         : BootMilestones{0x80024760, 0x80023590, 0x800272D0, 0x8002724C, 0x8007E298, 0x8007E2AC};
     auto hex = [](uint32_t v) { char b[16]; std::snprintf(b, sizeof b, "0x%08X", v); return std::string(b); };
     auto stamp = [&]() {
