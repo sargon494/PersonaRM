@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <algorithm>
+#include <map>
 #include <sstream>
 
 namespace personarm {
@@ -68,24 +69,37 @@ void Engine::Reset() {
     m_i_mask = 0;
     m_timers = {};
     m_timer_cycles = 0;
+    m_due = m_next_event = 0;
+    m_lag_at = ~0ull;
     m_stall_cycles = 0;
     m_in_native = false;
+    m_recomp_on = false;   // ActivateRecomp rebuilds the registry once the EXE is in RAM
+    m_mods.clear();
+    m_watch.clear();
+    m_native_map.clear();
+    m_cand_at.clear();
+    m_cand.clear();
     WireDevices();
     m_state = EngineState::Idle;
 }
 
 uint32_t Engine::RamDma::ReadWord(uint32_t a) {
     a &= PS1_MAIN_RAM_SIZE - 4;
+    const auto& ram = engine.m_ram;
     return ram[a] | (ram[a + 1] << 8) | (ram[a + 2] << 16) | (uint32_t(ram[a + 3]) << 24);
 }
 void Engine::RamDma::WriteWord(uint32_t a, uint32_t v) {
     a &= PS1_MAIN_RAM_SIZE - 4;
-    for (int i = 0; i < 4; ++i) ram[a + i] = static_cast<uint8_t>(v >> (8 * i));
+    for (int i = 0; i < 4; ++i) engine.m_ram[a + i] = static_cast<uint8_t>(v >> (8 * i));
+    if (!engine.m_watch.empty()) {
+        ++engine.m_epoch;   // CD/MDEC data may be new code: modules that did not match may now
+        engine.OnCodeWrite(a);
+    }
 }
 
 // Wiring per the hw/cdrom.h and hw/dma.h header notes. Rebuilt on every Reset (fresh device state).
 void Engine::WireDevices() {
-    m_dma_mem = std::make_unique<RamDma>(m_ram);
+    m_dma_mem = std::make_unique<RamDma>(*this);
     m_cdrom = std::make_unique<hw::CdRom>(&m_cd_source);
     m_dma = std::make_unique<hw::Dma>(*m_dma_mem);
     m_cdrom->SetIrqCallback([this] { RaiseIrq(2); });
@@ -210,6 +224,14 @@ uint32_t Engine::ReadBus(uint32_t address, uint32_t size) {
         }
     }
 
+    // Devices first catch up with the CPU (lazy device time), and may plan a new event afterwards.
+    CatchUp();
+    const uint32_t v = ReadIo(physical, size);
+    ScheduleDevices();
+    return v;
+}
+
+uint32_t Engine::ReadIo(uint32_t physical, uint32_t size) {
     // 3. Controller / Memory Card Ports (0x1F801040: JOY_DATA, 0x1F801044: JOY_STAT)
     if (physical == 0x1F801040) {
         if (!m_joy_rx_fifo.empty()) {
@@ -301,6 +323,7 @@ void Engine::WriteBus(uint32_t address, uint32_t value, uint32_t size) {
             m_ram[(ram_offset + 2) & (PS1_MAIN_RAM_SIZE - 1)] = static_cast<uint8_t>((value >> 16) & 0xFF);
             m_ram[(ram_offset + 3) & (PS1_MAIN_RAM_SIZE - 1)] = static_cast<uint8_t>((value >> 24) & 0xFF);
         }
+        OnRamWord(ram_offset);
         return;
     }
 
@@ -321,6 +344,12 @@ void Engine::WriteBus(uint32_t address, uint32_t value, uint32_t size) {
         return;
     }
 
+    CatchUp();
+    WriteIo(physical, value, size);
+    ScheduleDevices();
+}
+
+void Engine::WriteIo(uint32_t physical, uint32_t value, uint32_t size) {
     // 3. SIO0 (psx-spx "Controller and Memory Card I/O Ports" / "Controllers - Communication Sequence"):
     // a digital pad on /JOY1, nothing on /JOY2, no memory card (0x81 gets no /ACK -> "no card").
     if (physical == 0x1F801040) {
@@ -538,24 +567,23 @@ void Engine::RunFrame() {
         }
         if (m_recomp_on) {
             if (RunNative()) {
-                SyncDevices(GetCycles());
+                if (m_due >= m_next_event) SyncDevices(m_due);
                 continue;
             }
             const uint32_t pc = m_cpu.GetPC(), p = pc & 0x1FFFFFFFu;
             if (p < 0x10000u || p >= 0x1FC00000u) ++m_recomp_stats.interp_kernel;
             else if (std::any_of(m_recomp_ranges.begin(), m_recomp_ranges.end(),
-                                 [p](const auto& r) { return p >= r.first && p < r.second; })) {
+                                 [p](const auto& r) { return p >= r.first && p < r.second; }))
                 ++m_recomp_stats.interp_resident;
-                if (pc - m_native_lo < m_native_map.size() * 4) ++m_recomp_stats.interp_by_pc[(pc - m_native_lo) / 4];
-            } else {
+            else
                 ++m_recomp_stats.interp_overlay;
-            }
+            if (pc - kNativeLo < m_native_map.size() * 4) ++m_recomp_stats.interp_by_pc[(pc - kNativeLo) / 4];
         }
         m_cpu.Step();
-        uint64_t now = GetCycles();
-        TickDevices(static_cast<uint32_t>(now - m_timer_cycles));
-        m_timer_cycles = now;
+        m_due = GetCycles();
+        if (m_due >= m_next_event) SyncDevices(m_due);
     }
+    SyncDevices(m_due);  // frame end: devices where ticking after every instruction leaves them
 
     // VBlank IRQ0 once per frame. shortcut: raised at the end of the frame's cycle budget rather
     // than at scanline 240 of 263, and GPUSTAT bit 31 (interlace field) does not toggle;
@@ -590,56 +618,156 @@ void Engine::RunHle() {
                             : (pend & 0x70u) ? "timer" : "other";
             m_trace->OnIrq(src, m_cpu.GetRegisters().cp0_epc);
         }
+        // A0:02 read / 2A memcpy / 2B memset write guest RAM straight through the pointer: they may
+        // load or overwrite code. shortcut: other HLE writes are kernel tables, never code.
+        const uint32_t fn = m_cpu.GetGPR(9);
+        const bool copies = !m_watch.empty() && (m_cpu.GetPC() & 0x1FFFFFFF) == 0xA0 && (fn == 0x02 || fn == 0x2A || fn == 0x2B);
+        const uint32_t dst = m_cpu.GetGPR(fn == 0x02 ? 5 : 4), len = m_cpu.GetGPR(6);
         if (!m_bios.HandleBiosHook(m_cpu, m_ram.data(), m_ram.size())) break;
+        if (copies) OnRamRangeWritten(dst, len);
     }
 }
 
+void Engine::OnRamRangeWritten(uint32_t addr, uint32_t len) {
+    const uint32_t p = addr & 0x1FFFFFFFu;
+    if (m_watch.empty() || p >= PS1_MAIN_RAM_SIZE || len == 0) return;
+    ++m_epoch;
+    const uint32_t end = static_cast<uint32_t>(std::min<uint64_t>(PS1_MAIN_RAM_SIZE, uint64_t(p) + len));
+    for (uint32_t o = p & ~3u; o < end; o += 4) OnCodeWrite(o);
+}
+
 void Engine::ActivateRecomp() {
-    m_recomp = recomp::Dispatcher();
     m_recomp_ranges.clear();
-    m_native_map.clear();
     m_recomp_stats = RecompStats{};
-    std::vector<const recomp::Module*> active;
+    m_mods.clear();
+    m_cand.clear();
+    m_cand_at.clear();
+    m_watch.clear();
+    m_native_map.clear();
+    m_code_changed = false;
+    m_recomp_on = !m_recomp_modules.empty();
+    if (!m_recomp_on) return;
+    // Flat maps over KSEG0 main RAM (the interpreter loop asks at every instruction). Only the exact
+    // addresses the code was generated for: a mirror would link other $ra values.
+    const size_t words = PS1_MAIN_RAM_SIZE / 4;
+    m_native_map.assign(words, nullptr);
+    m_watch.assign(words / 32, 0);
+    m_cand_at.assign(words, 0);
+    m_recomp_stats.interp_by_pc.assign(words, 0);
+    m_recomp_stats.map_base = kNativeLo;
+    std::map<uint32_t, std::vector<Candidate>> at;  // RAM word -> modules with an entry or resume point there
     for (const recomp::Module* m : m_recomp_modules) {
-        const uint32_t off = m->base & 0x1FFFFFu;
-        const bool fits = (m->base & 0x1FFFFFFFu) < 0x200000u && static_cast<size_t>(off) + m->size <= m_ram.size();
-        if (!fits || recomp::Fnv1a64(m_ram.data() + off, m->size) != m->hash) {
-            // The code was generated from another image: running it would execute the wrong program.
+        const uint32_t lo = m->base - kNativeLo;
+        if (m->base < kNativeLo || lo >= PS1_MAIN_RAM_SIZE || m->size > PS1_MAIN_RAM_SIZE - lo || !m->code_count) {
             m_recomp_stats.rejected.push_back(m->name);
-            PRM_LOG_WARN("RECOMP", std::string("module ") + m->name + " does not match RAM at boot; interpreter only");
+            PRM_LOG_WARN("RECOMP", std::string("module ") + m->name + " is not a KSEG0 RAM image; interpreter only");
             continue;
         }
-        m_recomp.Add(m->entries, m->count);
-        m_recomp.Add(m->resume, m->resume_count);
-        m_recomp_ranges.push_back({m->base & 0x1FFFFFFFu, (m->base & 0x1FFFFFFFu) + m->size});
-        m_recomp_stats.active.push_back(m->name);
-        active.push_back(m);
+        const uint32_t index = static_cast<uint32_t>(m_mods.size());
+        m_mods.push_back({m, lo, lo + m->size});
+        std::vector<uint32_t> addrs;
+        for (size_t i = 0; i < m->count; ++i) addrs.push_back(m->entries[i].address);
+        for (size_t i = 0; i < m->resume_count; ++i) addrs.push_back(m->resume[i].address);
+        std::sort(addrs.begin(), addrs.end());
+        addrs.erase(std::unique(addrs.begin(), addrs.end()), addrs.end());
+        size_t r = 0, first = 0;  // code range, index in m->words of its first word
+        for (uint32_t a : addrs) {
+            while (r < m->code_count && a >= m->code[2 * r + 1]) first += (m->code[2 * r + 1] - m->code[2 * r]) / 4, ++r;
+            if (r == m->code_count || a < m->code[2 * r]) continue;  // not a translated word: never entered
+            at[(a - kNativeLo) / 4].push_back({index, m->words[first + (a - m->code[2 * r]) / 4]});
+        }
     }
-    m_recomp_on = !active.empty();
-    if (!m_recomp_on) return;
-    // Flat PC -> code map over the active images (the interpreter loop asks at every instruction).
-    // Only the exact addresses the code was generated for (KSEG0): a mirror would link other $ra values.
-    m_native_lo = ~0u;
-    uint32_t hi = 0;
-    for (const recomp::Module* m : active) {
-        m_native_lo = std::min(m_native_lo, m->base);
-        hi = std::max(hi, m->base + m->size);
+    for (const auto& w : at) {
+        m_cand_at[w.first] = static_cast<uint32_t>(m_cand.size()) + 1;
+        m_cand.insert(m_cand.end(), w.second.begin(), w.second.end());
+        m_cand.push_back({~0u, 0});
     }
-    m_native_map.assign((hi - m_native_lo) / 4, nullptr);
-    m_recomp_stats.interp_by_pc.assign(m_native_map.size(), 0);
-    m_recomp_stats.map_base = m_native_lo;
-    for (const recomp::Module* m : active) {
-        for (size_t i = 0; i < m->resume_count; ++i) m_native_map[(m->resume[i].address - m_native_lo) / 4] = m->resume[i].fn;
-        for (size_t i = 0; i < m->count; ++i) m_native_map[(m->entries[i].address - m_native_lo) / 4] = m->entries[i].fn;
+    // Modules whose code is in RAM at boot (the resident EXE) are live from the start; the others
+    // (overlays) wait until their code is loaded.
+    for (uint32_t i = 0; i < m_mods.size(); ++i) {
+        const LiveModule& lm = m_mods[i];
+        if (recomp::CodeHash(*lm.m, m_ram.data() + lm.lo) == lm.m->code_hash) {
+            SetLive(i);
+            m_recomp_ranges.push_back({lm.lo, lm.hi});
+            m_recomp_stats.active.push_back(lm.m->name);
+        } else {
+            m_recomp_stats.rejected.push_back(lm.m->name);
+        }
     }
+    PRM_LOG_INFO("RECOMP", std::to_string(m_recomp_stats.active.size()) + " module(s) live at boot, " +
+                           std::to_string(m_mods.size() - m_recomp_stats.active.size()) + " waiting for their code");
+}
+
+void Engine::SetLive(uint32_t index) {
+    LiveModule& lm = m_mods[index];
+    const recomp::Module& m = *lm.m;
+    for (size_t r = 0; r < m.code_count; ++r)
+        for (uint32_t o = m.code[2 * r] - kNativeLo; o < m.code[2 * r + 1] - kNativeLo; o += 4) {
+            // A live module never shares a code word with another: that one's bytes are gone.
+            if ((m_watch[o >> 7] >> ((o >> 2) & 31u)) & 1u) RetireAt(o);
+            m_watch[o >> 7] |= 1u << ((o >> 2) & 31u);
+        }
+    for (size_t i = 0; i < m.resume_count; ++i) m_native_map[(m.resume[i].address - kNativeLo) / 4] = m.resume[i].fn;
+    for (size_t i = 0; i < m.count; ++i) m_native_map[(m.entries[i].address - kNativeLo) / 4] = m.entries[i].fn;
+    lm.live = true;
+    lm.failed_epoch = ~0ull;
+}
+
+void Engine::Retire(uint32_t index) {
+    LiveModule& lm = m_mods[index];
+    const recomp::Module& m = *lm.m;
+    for (size_t r = 0; r < m.code_count; ++r)
+        for (uint32_t o = m.code[2 * r] - kNativeLo; o < m.code[2 * r + 1] - kNativeLo; o += 4)
+            m_watch[o >> 7] &= ~(1u << ((o >> 2) & 31u));
+    for (size_t i = 0; i < m.resume_count; ++i) m_native_map[(m.resume[i].address - kNativeLo) / 4] = nullptr;
+    for (size_t i = 0; i < m.count; ++i) m_native_map[(m.entries[i].address - kNativeLo) / 4] = nullptr;
+    lm.live = false;
+}
+
+void Engine::RetireAt(uint32_t ram_offset) {
+    for (uint32_t i = 0; i < m_mods.size(); ++i) {
+        if (!m_mods[i].live || ram_offset < m_mods[i].lo || ram_offset >= m_mods[i].hi) continue;
+        Retire(i);
+        ++m_recomp_stats.invalidations;
+    }
+    ++m_epoch;
+    // Native code of the retired module may be on the native call stack: hand back at the next
+    // instruction boundary (exact: the interpreter takes over with the state native code had).
+    m_code_changed = true;
+    if (m_in_native) m_native.deadline = 0;
+}
+
+bool Engine::TryValidate(uint32_t pc) {
+    const uint32_t off = pc - kNativeLo;
+    if ((off & 3u) || off >= PS1_MAIN_RAM_SIZE || !m_cand_at[off / 4]) return false;
+    const uint32_t word = recomp::LoadLe(m_ram.data() + off, 4);
+    for (const Candidate* c = &m_cand[m_cand_at[off / 4] - 1]; c->module != ~0u; ++c) {
+        LiveModule& lm = m_mods[c->module];
+        // Cheap filter first (the word at pc), then the code hash; a mismatch is not rehashed until
+        // RAM may hold new code (shortcut: code copied by CPU stores alone does not move m_epoch).
+        if (lm.live || c->word != word || lm.failed_epoch == m_epoch) continue;
+        if (recomp::CodeHash(*lm.m, m_ram.data() + lm.lo) != lm.m->code_hash) {
+            lm.failed_epoch = m_epoch;
+            ++m_recomp_stats.hash_mismatches;
+            continue;
+        }
+        SetLive(c->module);
+        ++m_recomp_stats.validations;
+        ++m_recomp_stats.loads[lm.m->name];
+        return m_native_map[off / 4] != nullptr;
+    }
+    return false;
 }
 
 bool Engine::RunNative() {
     const uint32_t pc = m_cpu.GetPC();
-    const uint32_t off = pc - m_native_lo;
-    if ((off & 3u) || off / 4 >= m_native_map.size()) return false;
-    const recomp::RecompFn fn = m_native_map[off / 4];
-    if (!fn) return false;
+    const uint32_t off = pc - kNativeLo;
+    if ((off & 3u) || off >= PS1_MAIN_RAM_SIZE) return false;
+    recomp::RecompFn fn = m_native_map[off / 4];
+    if (!fn) {
+        if (!m_cand_at[off / 4] || !TryValidate(pc)) return false;
+        fn = m_native_map[off / 4];
+    }
     const CpuRegisters& r = m_cpu.GetRegisters();
     // An IRQ due at this boundary is the interpreter's to take; a load in flight would land after
     // the first instruction there but at once in generated code.
@@ -653,14 +781,19 @@ bool Engine::RunNative() {
     s.mem = this; s.host = this;
     s.read = NativeRead; s.write = NativeWrite; s.service = NativeService; s.external = NativeExternal;
     s.ram = m_ram.data(); s.scratch = m_scratchpad.data(); s.ram_stall = kRamLoadStallCycles;
-    s.dispatcher = &m_recomp;
+    s.dispatcher = nullptr;
+    s.map = m_native_map.data(); s.map_lo = kNativeLo; s.map_words = static_cast<uint32_t>(m_native_map.size());
+    s.watch = m_watch.data(); s.code_write = NativeCodeWrite;
     s.fallbacks = 0; s.stalls = 0; s.stopped = false; s.next_pc = 0; s.load_reg = 0;
     const uint64_t start = GetCycles();
     s.cycles = start;
-    s.deadline = std::min(m_frame_target, start + m_recomp_quantum);
+    m_lag_at = start;
+    m_code_changed = false;
+    s.deadline = std::min(m_frame_target, m_recomp_quantum > 1 ? start + m_recomp_quantum : m_next_event);
 
     m_in_native = true;
     fn(s);
+    m_due = DueTime();
     m_in_native = false;
 
     NativeToCpu();
@@ -697,54 +830,89 @@ void Engine::NativeToCpu() {
     m_cpu.SetBadVaddr(s.badvaddr);
 }
 
-// A native jump to an HLE vector (A0/B0/C0 call, kernel stub): the same HLE the interpreter loop
-// runs between two instructions (0 cycles), then native code continues where it returns.
+// A native jump nobody compiled at that address in the live map. An HLE vector (A0/B0/C0 call,
+// kernel stub) runs the same HLE the interpreter loop runs between two instructions (0 cycles),
+// then native code continues where it returns. Code of a module that just arrived in RAM (an
+// overlay called right after its load) becomes live and runs at once.
 bool Engine::NativeExternal(recomp::CpuState& s) {
     Engine& e = *static_cast<Engine*>(s.host);
-    if (!e.m_config.enable_bios_hle || !Ps1BiosHle::IsHleAddress(s.pc & 0x1FFFFFFF)) return false;
-    if (e.m_recomp_quantum > 1) e.SyncDevices(s.cycles);  // quantum 1: the last service point did it
+    if (!e.m_config.enable_bios_hle || !Ps1BiosHle::IsHleAddress(s.pc & 0x1FFFFFFF)) {
+        if (!e.TryValidate(s.pc)) return false;
+        e.m_native_map[(s.pc - kNativeLo) / 4](s);
+        return true;
+    }
+    e.m_due = e.DueTime();
     e.m_in_native = false;
     e.NativeToCpu();
     const uint64_t stall_before = e.m_stall_cycles;
     e.RunHle();
     // HLE reads of RAM through the bus stall like guest loads: fold them into native time, which
-    // RunNative adds to the engine counters on exit.
+    // RunNative adds to the engine counters on exit. They end no instruction: devices do not see
+    // them until the next one ends (m_lag_at), as in the interpreter loop.
     const uint64_t hle_stall = e.m_stall_cycles - stall_before;
     e.m_stall_cycles = stall_before;
     s.cycles += hle_stall;
     s.stalls += hle_stall;
+    e.m_lag_at = s.cycles;
     e.CpuToNative();
     e.m_in_native = true;
+    s.deadline = std::min(s.deadline, e.m_next_event);  // HLE I/O may have planned a device event
     ++e.m_recomp_stats.hle_calls;
     // The interpreter would check for an IRQ before the next instruction: hand back to it.
-    if (e.m_state != EngineState::Running || ((s.sr & 1u) && (s.sr & s.cause & 0xFF00u))) s.stopped = true;
+    if (e.m_state != EngineState::Running || e.m_code_changed || ((s.sr & 1u) && (s.sr & s.cause & 0xFF00u)))
+        s.stopped = true;
     return true;
 }
 
+// Called at the end of an instruction once s.cycles reaches the deadline: the next device event,
+// the frame end, an IRQ unmasked (deadline 0), code retired, or every `quantum` cycles.
 bool Engine::NativeService(recomp::CpuState& s) {
     Engine& e = *static_cast<Engine*>(s.host);
     e.SyncDevices(s.cycles);
-    if (s.cycles >= e.m_frame_target) return true;
+    if (e.m_code_changed || s.cycles >= e.m_frame_target) return true;
     if ((s.sr & 1u) && (s.sr & s.cause & 0xFF00u)) return true;  // the interpreter delivers it
-    s.deadline = std::min(e.m_frame_target, s.cycles + e.m_recomp_quantum);
+    s.deadline = std::min(e.m_frame_target, e.m_recomp_quantum > 1 ? s.cycles + e.m_recomp_quantum : e.m_next_event);
     return false;
 }
 
-// Generated code reaches here only for addresses outside RAM and the scratchpad (its fast paths).
-// With quantum 1 the service point after every instruction already ticked the devices exactly as
-// the interpreter loop does; stall cycles charged outside an instruction (a host Read() between
-// frames, HLE bus reads) stay unticked until the next instruction ends there too, so no catch-up
-// here. With a larger quantum the devices first catch up to this instruction.
+// Generated code reaches here only for addresses outside RAM and the scratchpad (its fast paths);
+// the bus brings the devices to the end of the last instruction first (CatchUp).
 uint32_t Engine::NativeRead(void* engine, uint32_t address, uint32_t size) {
-    Engine& e = *static_cast<Engine*>(engine);
-    if (e.m_recomp_quantum > 1) e.SyncDevices(e.m_native.cycles);
-    return e.ReadBus(address, size);
+    return static_cast<Engine*>(engine)->ReadBus(address, size);
 }
 
 void Engine::NativeWrite(void* engine, uint32_t address, uint32_t value, uint32_t size) {
-    Engine& e = *static_cast<Engine*>(engine);
-    if (e.m_recomp_quantum > 1) e.SyncDevices(e.m_native.cycles);
-    e.WriteBus(address, value, size);
+    static_cast<Engine*>(engine)->WriteBus(address, value, size);
+}
+
+void Engine::NativeCodeWrite(recomp::CpuState& s, uint32_t ram_offset) {
+    static_cast<Engine*>(s.host)->RetireAt(ram_offset);
+}
+
+uint64_t Engine::NextDeviceEvent() const {
+    uint64_t e = UINT64_MAX;
+    for (uint32_t i = 0; i < 3; ++i) {
+        const RootCounter& t = m_timers[i];
+        if (!(t.mode & 0x30u)) continue;  // no IRQ at target or at FFFFh: nothing to deliver
+        uint32_t div = 1;
+        if (i == 1 && (t.mode & 0x100u)) div = kCyclesPerHblank;
+        if (i == 2 && (t.mode & 0x200u)) div = 8;
+        // Increments until the counter next equals the target or FFFFh (checked after each one).
+        uint32_t dt = (t.target - t.value) & 0xFFFFu, df = (0xFFFFu - t.value) & 0xFFFFu;
+        const uint64_t ticks = std::min(dt ? dt : 0x10000u, df ? df : 0x10000u);
+        e = std::min(e, ticks * div - t.prescale);
+    }
+    if (m_joy_ack_timer) e = std::min<uint64_t>(e, m_joy_ack_timer);
+    e = std::min(e, m_cdrom->CyclesToNextEvent());
+    e = std::min(e, m_dma->CyclesToNextEvent());
+    // SPU (no IRQ modelled) and MDEC (no IRQ; its DRQs only matter to a paced DMA, which reports
+    // 1) change nothing the CPU sees except through their registers: they wait for CatchUp.
+    return e ? e : 1;
+}
+
+void Engine::ScheduleDevices() {
+    m_next_event = m_eager_devices ? m_timer_cycles + 1 : m_timer_cycles + std::min<uint64_t>(NextDeviceEvent(), 1ull << 40);
+    if (m_in_native) m_native.deadline = std::min(m_native.deadline, m_next_event);
 }
 
 void Engine::TickTimers(uint32_t cycles) {
@@ -763,8 +931,14 @@ void Engine::TickTimers(uint32_t cycles) {
         }
         // shortcut: Timer0 dotclock source (mode bit 8) and sync modes (bits 0-2) count as plain
         // sysclk; upgrade when the GPU exposes a dot clock.
-        while (ticks--) {
-            t.value = (t.value + 1) & 0xFFFFu;
+        while (ticks) {
+            // Increments that reach neither the target nor FFFFh change nothing else: take them at once
+            // (lazy device time hands over long batches).
+            const uint32_t dt = (t.target - t.value) & 0xFFFFu, df = (0xFFFFu - t.value) & 0xFFFFu;
+            const uint32_t d = std::min(dt ? dt : 0x10000u, df ? df : 0x10000u);
+            if (ticks < d) { t.value = (t.value + ticks) & 0xFFFFu; break; }
+            ticks -= d;
+            t.value = (t.value + d) & 0xFFFFu;
             bool irq = false;
             if (t.value == 0xFFFFu) { t.mode |= 0x1000u; irq |= (t.mode & 0x20u) != 0; }
             if (t.value == t.target) {

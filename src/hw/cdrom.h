@@ -68,6 +68,9 @@ public:
     void Write32(uint32_t offset, uint32_t value) { Write8(offset, static_cast<uint8_t>(value)); }
 
     void Tick(uint32_t cycles);
+    /// CPU cycles until Tick() may act on its own (deliver a response, read a sector); UINT64_MAX when
+    /// only a register access can start anything. A host may batch ticks up to (at least) this point.
+    uint64_t CyclesToNextEvent() const;
 
     /// DMA3 (CDROM -> RAM): pops 4 bytes from the data FIFO, little-endian.
     uint32_t DmaRead32();

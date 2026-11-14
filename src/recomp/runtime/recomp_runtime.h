@@ -31,8 +31,10 @@ struct FunctionEntry {
     RecompFn fn;
 };
 
-/// One generated image: `hash` (FNV-1a 64) of the `size` bytes it was generated from at `base`;
-/// the host checks it against RAM before using the code.
+/// One generated image: `hash` (FNV-1a 64) of the `size` bytes it was generated from at `base`.
+/// The code only depends on the words it translated (`code`: [begin, end) address pairs, delay
+/// slots included; `words`: their values, in order), so the host keys it by `code_hash`, the
+/// CodeHash of those words: data the program changes inside the image does not retire the code.
 struct Module {
     const char* name;
     uint32_t base, size;
@@ -41,11 +43,22 @@ struct Module {
     size_t count;
     const FunctionEntry* resume;    // mid-function resume points (r_*: continue at s.pc)
     size_t resume_count;
+    const uint32_t* code;           // translated words: code_count [begin, end) pairs
+    size_t code_count;
+    const uint32_t* words;          // the translated words as generated, range after range
+    uint64_t code_hash;
 };
 
-inline uint64_t Fnv1a64(const uint8_t* p, size_t n) {
-    uint64_t h = 0xCBF29CE484222325ull;
+inline uint64_t Fnv1a64(const uint8_t* p, size_t n, uint64_t h = 0xCBF29CE484222325ull) {
     for (size_t i = 0; i < n; ++i) { h ^= p[i]; h *= 0x100000001B3ull; }
+    return h;
+}
+
+/// FNV-1a 64 over the translated words of `m` as they are in `image` (loaded at m.base).
+inline uint64_t CodeHash(const Module& m, const uint8_t* image) {
+    uint64_t h = 0xCBF29CE484222325ull;
+    for (size_t i = 0; i < m.code_count; ++i)
+        h = Fnv1a64(image + (m.code[2 * i] - m.base), m.code[2 * i + 1] - m.code[2 * i], h);
     return h;
 }
 
@@ -71,12 +84,20 @@ struct CpuState {
     void (*write)(void* mem, uint32_t address, uint32_t value, uint32_t size) = nullptr;
 
     const Dispatcher* dispatcher = nullptr;
+    // Flat address -> code map (wins over `dispatcher`): map[(pc - map_lo) / 4] for map_words words.
+    // The host keeps it to the modules whose code is in RAM right now (overlays come and go).
+    const RecompFn* map = nullptr;
+    uint32_t map_lo = 0, map_words = 0;
     uint64_t fallbacks = 0;  // dispatches that found no compiled function
 
     // Fast paths (null = everything goes through read/write): 2 MB main RAM mirrored over the
     // first 8 MB of each segment, and the 1 KB scratchpad at 1F800000h.
     uint8_t* ram = nullptr;
     uint8_t* scratch = nullptr;
+    // One bit per RAM word (bit w & 31 of watch[w >> 5]): translated code of a live module. A store
+    // there calls code_write(offset) after it lands, so the host can retire that code.
+    const uint32_t* watch = nullptr;
+    void (*code_write)(CpuState& s, uint32_t ram_offset) = nullptr;
     uint32_t ram_stall = 0;   // extra cycles per data load from main RAM
     uint64_t stalls = 0;      // stall cycles added so far (part of `cycles`)
 
@@ -125,8 +146,16 @@ inline void Write(CpuState& s, uint32_t address, uint32_t value, uint32_t size) 
     const uint32_t p = address & 0x1FFFFFFFu;
     if (s.ram && p < 0x00800000u) {
         const uint32_t o = p & 0x1FFFFFu;
-        if (o + size <= 0x200000u) { StoreLe(s.ram + o, value, size); return; }
-        for (uint32_t i = 0; i < size; ++i) s.ram[(o + i) & 0x1FFFFFu] = static_cast<uint8_t>(value >> (8 * i));
+        if (o + size <= 0x200000u) {
+            StoreLe(s.ram + o, value, size);
+            if (s.watch && ((s.watch[o >> 7] >> ((o >> 2) & 31u)) & 1u)) s.code_write(s, o);
+            return;
+        }
+        for (uint32_t i = 0; i < size; ++i) {
+            const uint32_t b = (o + i) & 0x1FFFFFu;
+            s.ram[b] = static_cast<uint8_t>(value >> (8 * i));
+            if (s.watch && ((s.watch[b >> 7] >> ((b >> 2) & 31u)) & 1u)) s.code_write(s, b);
+        }
         return;
     }
     if (s.scratch && p - 0x1F800000u <= 0x400u - size) { StoreLe(s.scratch + (p & 0x3FFu), value, size); return; }
@@ -157,8 +186,8 @@ inline bool StopLoad(CpuState& s, uint32_t pc, uint32_t reg, uint32_t prev) {
 /// `pc` is the address of the faulting instruction; `delay_slot` when it sits in a delay slot.
 void RaiseException(CpuState& s, uint32_t exc_code, uint32_t pc, bool delay_slot);
 
-/// Continue at `target`: run its compiled function if there is one, otherwise leave `s.pc` there
-/// for the interpreter and count a fallback.
+/// Continue at `target`: run its compiled function if there is one (`map`, else `dispatcher`),
+/// otherwise offer it to `external`, else leave `s.pc` there for the interpreter and count a fallback.
 void Dispatch(CpuState& s, uint32_t target);
 
 /// DIV/DIVU with the R3000A results for the edge cases (no trap), as the interpreter computes them.

@@ -126,7 +126,7 @@ public:
     uint16_t ScriptedButtons() const;
 
     const std::vector<uint8_t>& GetRam() const { return m_ram; }
-    void SetRam(const std::vector<uint8_t>& ram) { m_ram = ram; }
+    void SetRam(const std::vector<uint8_t>& ram) { m_ram = ram; OnRamRangeWritten(0, PS1_MAIN_RAM_SIZE); }
     const std::vector<uint8_t>& GetScratchpad() const { return m_scratchpad; }
     void SetScratchpad(const std::vector<uint8_t>& sp) { m_scratchpad = sp; }
     void SetFrameCount(uint64_t count) { m_frame_counter = count; }
@@ -152,14 +152,18 @@ public:
     /// Write a PRMTRACE file; it is (re)created with its header at the next boot.
     void SetTraceOutput(const std::string& path) { m_trace_path = path; }
 
-    /// Recompiled code (roadmap step 4). At each boot, a module whose image hash matches RAM right
-    /// after the EXE load is activated: when the interpreter loop reaches one of its function
-    /// entries or resume points (call return sites, branch targets) at a clean boundary, the code
-    /// runs natively on the CPU state (copied in at entry, out when it hands back). A jump to an
-    /// HLE vector runs the same HLE in place; exceptions, IRQ delivery, overlays and code nobody
-    /// compiled stay in the interpreter. `quantum` = cycles between service points: 1 ticks devices
-    /// and checks IRQs after every instruction (the interpreter's timing exactly); larger runs
-    /// faster but delivers IRQs up to `quantum` cycles late (MMIO accesses still see devices up to date).
+    /// Recompiled code (roadmap step 4). Every module is keyed by (base, CodeHash of the words it
+    /// translated) and is live while RAM holds exactly those words: checked at boot (the resident
+    /// EXE), then lazily for overlays the first time the interpreter loop or a native jump reaches
+    /// one of its entries after their code was loaded; any write to a live module's code words (CPU
+    /// store, DMA, HLE copy) retires it until it is checked again. When the interpreter loop reaches
+    /// a live entry or resume point (call return sites, branch targets) at a clean boundary, the code
+    /// runs natively on the CPU state (copied in at entry, out when it hands back); native jumps go
+    /// through the same live map, so overlays and the resident code call each other natively. A jump
+    /// to an HLE vector runs the same HLE in place; exceptions, IRQ delivery and code nobody compiled
+    /// (or whose bytes differ) stay in the interpreter. `quantum` = cycles between service points:
+    /// 1 = the interpreter's timing exactly (devices are still advanced lazily, see
+    /// SetEagerDevices); larger runs faster but delivers IRQs up to `quantum` cycles late.
     void SetRecompModules(std::vector<const recomp::Module*> modules, uint32_t quantum = 1) {
         m_recomp_modules = std::move(modules);
         m_recomp_quantum = quantum ? quantum : 1;
@@ -170,14 +174,24 @@ public:
         uint64_t interp_resident = 0, interp_overlay = 0, interp_kernel = 0;  // interpreted, by PC region
         uint64_t blocked = 0;              // entry reached with a load in flight or an IRQ due
         uint64_t dispatch_misses = 0;      // native jumps to code nobody compiled (they unwind)
-        uint64_t stops = 0;                // service points that handed back (IRQ due, frame end)
+        uint64_t stops = 0;                // service points that handed back (IRQ due, frame end, code retired)
         uint64_t hle_calls = 0;            // HLE vectors run from native code without unwinding
+        uint64_t validations = 0;          // modules found in RAM after boot (overlay loads)
+        uint64_t hash_mismatches = 0;      // entry word matched but the code hash did not
+        uint64_t invalidations = 0;        // live modules retired by a write into their code
         std::unordered_map<uint32_t, uint64_t> exits;  // PC where native runs handed back, stops excluded
-        std::vector<uint64_t> interp_by_pc;            // interpreted steps per word of the active images
+        std::unordered_map<std::string, uint64_t> loads;  // validations per module name
+        std::vector<uint64_t> interp_by_pc;            // interpreted steps per RAM word (KSEG0)
         uint32_t map_base = 0;                         // address of interp_by_pc[0]
-        std::vector<std::string> active, rejected;     // module names at the last boot
+        std::vector<std::string> active, rejected;     // module names live / not in RAM at boot
     };
     const RecompStats& GetRecompStats() const { return m_recomp_stats; }
+
+    /// Devices (timers, SIO0, SPU, CD-ROM, MDEC, DMA) are advanced lazily: only when the CPU touches
+    /// MMIO, at the next cycle one of them could raise an IRQ or move data on its own, and at frame
+    /// end, always to the end of the last instruction, so every observation matches ticking after
+    /// each instruction. true = tick after every instruction (the reference for tests).
+    void SetEagerDevices(bool eager) { m_eager_devices = eager; }
 
 private:
     Engine();
@@ -188,6 +202,8 @@ private:
     // Memory read/write dispatchers mapped to MIPS address space
     uint32_t ReadBus(uint32_t address, uint32_t size);
     void WriteBus(uint32_t address, uint32_t value, uint32_t size);
+    uint32_t ReadIo(uint32_t physical, uint32_t size);   // everything but RAM and the scratchpad
+    void WriteIo(uint32_t physical, uint32_t value, uint32_t size);
 
     // Interrupt controller (psx-spx "Interrupt Control") and root counters (psx-spx "Timers").
     void RaiseIrq(uint32_t bit) { m_i_stat |= 1u << bit; UpdateIrqLine(); }
@@ -213,12 +229,26 @@ private:
 
     // DMA view of main RAM (word access, physical address masked to 2 MB).
     struct RamDma : hw::DmaMemory {
-        std::vector<uint8_t>& ram;
-        explicit RamDma(std::vector<uint8_t>& r) : ram(r) {}
+        Engine& engine;
+        explicit RamDma(Engine& e) : engine(e) {}
         uint32_t ReadWord(uint32_t a) override;
         void WriteWord(uint32_t a, uint32_t v) override;
     };
-    uint64_t m_timer_cycles = 0; // GetCycles() value the timers were last advanced to
+    uint64_t m_timer_cycles = 0; // GetCycles() value the devices were last advanced to
+    // Lazy device time. m_due = end of the last instruction (where ticking after every instruction
+    // would have the devices); m_next_event = earliest cycle a device may act on its own.
+    uint64_t m_due = 0, m_next_event = 0;
+    bool m_eager_devices = false;
+    uint64_t NextDeviceEvent() const;  // cycles from m_timer_cycles, >= 1
+    void ScheduleDevices();            // recompute m_next_event (and the native deadline)
+    uint64_t DueTime() const {
+        // Native code: the end of its last instruction is s.cycles, unless nothing ran since
+        // m_lag_at (entry, HLE call): then cycles counted outside instructions do not count yet.
+        if (!m_in_native) return m_due;
+        return m_native.cycles == m_lag_at ? m_due : m_native.cycles;
+    }
+    void CatchUp() { SyncDevices(DueTime()); }   // before any MMIO access
+    uint64_t m_lag_at = ~0ull;
     // CpuContext counts 1 cycle per instruction; main-RAM data loads stall the R3000 (no D-cache).
     // Without this, libetc VSync()'s spin timeout (n<<15 loop passes) expires before the next
     // VBlank and prints "VSync: timeout" during FMVs. Instruction fetches are taken as I-cache hits.
@@ -255,21 +285,50 @@ private:
     static bool NativeExternal(recomp::CpuState& s);
     void ActivateRecomp();
     void SyncDevices(uint64_t now) {
-        if (now == m_timer_cycles) return;  // never Tick(0): a DRQ-paced DMA would move early
-        TickDevices(static_cast<uint32_t>(now - m_timer_cycles));
-        m_timer_cycles = now;
+        if (now > m_timer_cycles) {  // never Tick(0): a DRQ-paced DMA would move early
+            TickDevices(static_cast<uint32_t>(now - m_timer_cycles));
+            m_timer_cycles = now;
+        }
+        ScheduleDevices();
     }
     static bool NativeService(recomp::CpuState& s);
     static uint32_t NativeRead(void* engine, uint32_t address, uint32_t size);
     static void NativeWrite(void* engine, uint32_t address, uint32_t value, uint32_t size);
+    static void NativeCodeWrite(recomp::CpuState& s, uint32_t ram_offset);
     std::vector<const recomp::Module*> m_recomp_modules;
-    std::vector<std::pair<uint32_t, uint32_t>> m_recomp_ranges;  // active images, physical [begin, end)
+    std::vector<std::pair<uint32_t, uint32_t>> m_recomp_ranges;  // images live at boot, physical [begin, end)
     uint32_t m_recomp_quantum = 1;
     bool m_recomp_on = false;
     bool m_in_native = false;
-    recomp::Dispatcher m_recomp;  // function entries and resume points, for jumps inside native code
-    std::vector<recomp::RecompFn> m_native_map;  // same, by (pc - m_native_lo) / 4
-    uint32_t m_native_lo = 0;
+
+    // Module registry. Live modules never share a code word; their code words are set in m_watch.
+    struct LiveModule {
+        const recomp::Module* m = nullptr;
+        uint32_t lo = 0, hi = 0;           // RAM offsets of the image, [lo, hi)
+        bool live = false;
+        uint64_t failed_epoch = ~0ull;     // hash mismatch seen at this m_epoch (no recheck until it moves)
+    };
+    struct Candidate { uint32_t module, word; };  // a module with an entry here, and its word there
+    std::vector<LiveModule> m_mods;
+    std::vector<uint32_t> m_cand_at;          // per RAM word: 1 + start in m_cand (0 = none)
+    std::vector<Candidate> m_cand;            // runs ended by module == ~0u
+    std::vector<uint32_t> m_watch;            // one bit per RAM word (recomp::CpuState::watch)
+    uint64_t m_epoch = 0;                     // bumped when RAM may hold new code (DMA, HLE copy, retire)
+    bool m_code_changed = false;              // a live module was retired: native code must hand back
+    bool TryValidate(uint32_t pc);            // a module with an entry at pc is in RAM: make it live
+    void SetLive(uint32_t index);
+    void Retire(uint32_t index);
+    void OnCodeWrite(uint32_t ram_offset) {   // a write landed on a watched word
+        if ((m_watch[ram_offset >> 7] >> ((ram_offset >> 2) & 31u)) & 1u) RetireAt(ram_offset);
+    }
+    void RetireAt(uint32_t ram_offset);
+    void OnRamRangeWritten(uint32_t addr, uint32_t len);  // HLE copies straight into RAM
+    void OnRamWord(uint32_t ram_offset) {     // every bus/DMA store to RAM
+        if (!m_watch.empty()) OnCodeWrite(ram_offset);
+    }
+
+    std::vector<recomp::RecompFn> m_native_map;  // live entries and resume points, by (pc - kNativeLo) / 4
+    static constexpr uint32_t kNativeLo = 0x80000000u;  // KSEG0 main RAM, the addresses code is generated for
     recomp::CpuState m_native;
     uint64_t m_frame_target = 0;
     RecompStats m_recomp_stats;

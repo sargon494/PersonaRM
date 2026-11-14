@@ -280,6 +280,16 @@ void CdRom::LoadDataFifo() {
     m_data_pos = 0;
 }
 
+uint64_t CdRom::CyclesToNextEvent() const {
+    uint64_t e = UINT64_MAX;
+    // The front response counts down even behind an unacknowledged interrupt, but only the
+    // acknowledge (a register write) can let it out then.
+    if (!m_events.empty() && (m_irq_flags & 7) == 0) e = std::max<uint64_t>(1, m_events.front().delay);
+    // While a sector waits for its INT1, reading resumes only in the tick that delivers it.
+    if (m_reading && !m_sector_waiting) e = std::min<uint64_t>(e, m_sector_timer > 0 ? uint64_t(m_sector_timer) : 1);
+    return e;
+}
+
 void CdRom::Tick(uint32_t cycles) {
     if (!m_events.empty()) {
         Event& e = m_events.front();

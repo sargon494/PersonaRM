@@ -18,7 +18,8 @@ enum Reg : uint32_t { zero, at, v0, v1, a0, a1, a2, a3, t0, t1, t2, t3, t4, t5, 
 
 class Asm {
 public:
-    uint32_t Here() const { return kBase + 4 * static_cast<uint32_t>(words.size()); }
+    explicit Asm(uint32_t at = kBase) : base(at) {}
+    uint32_t Here() const { return base + 4 * static_cast<uint32_t>(words.size()); }
     void Label(const std::string& n) { labels[n] = Here(); }
     void W(uint32_t w) { words.push_back(w); }
 
@@ -34,7 +35,7 @@ public:
 
     void Resolve() {
         for (auto& f : fix) {
-            const uint32_t at_addr = kBase + 4 * static_cast<uint32_t>(f.first);
+            const uint32_t at_addr = base + 4 * static_cast<uint32_t>(f.first);
             words[f.first] |= ((labels.at(f.second) - (at_addr + 4)) >> 2) & 0xFFFFu;
         }
         for (auto& f : jfix) words[f.first] |= (labels.at(f.second) >> 2) & 0x03FFFFFFu;
@@ -42,6 +43,7 @@ public:
         for (auto& f : lfix) words[f.first] |= labels.at(f.second) & 0xFFFFu;
     }
 
+    uint32_t base;
     std::vector<uint32_t> words;
     std::map<std::string, uint32_t> labels;
 

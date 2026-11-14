@@ -524,11 +524,39 @@ CodegenResult GenerateCpp(const uint8_t* image, size_t size, uint32_t base,
     for (const auto& r : resume_table) os << "    {" << Hex(r.first) << ", r_" << Addr(r.second) << "},\n";
     if (resume_table.empty()) os << "    {0u, nullptr},\n";
     os << "};\n";
-    char hash[24];
+    // Translated words (instructions and their delay slots) as ranges, with their values: the host
+    // keys the module by these alone (the image's data may change while the code stays valid).
+    std::set<uint32_t> code;
+    for (const Func& f : funcs) {
+        if (!f.ok) continue;
+        for (uint32_t a : f.starts) {
+            code.insert(a);
+            if (OwnsDelaySlot(img.Word(a))) code.insert(a + 4);
+        }
+    }
+    std::vector<uint32_t> ranges;
+    for (uint32_t a : code) {
+        if (!ranges.empty() && ranges.back() == a) ranges.back() = a + 4;
+        else { ranges.push_back(a); ranges.push_back(a + 4); }
+    }
+    os << "static const uint32_t kCode[] = {";
+    for (size_t i = 0; i < ranges.size(); ++i) os << (i % 8 ? " " : "\n    ") << Hex(ranges[i]) << ",";
+    if (ranges.empty()) os << "0u";
+    os << "\n};\nstatic const uint32_t kWords[] = {";
+    size_t n = 0;
+    for (uint32_t a : code) os << (n++ % 8 ? " " : "\n    ") << Hex(img.Word(a)) << ",";
+    if (code.empty()) os << "0u";
+    os << "\n};\n";
+    Module m{};
+    m.base = base;
+    m.code = ranges.data();
+    m.code_count = ranges.size() / 2;
+    char hash[24], code_hash[24];
     std::snprintf(hash, sizeof hash, "0x%016llXull", static_cast<unsigned long long>(Fnv1a64(image, size)));
+    std::snprintf(code_hash, sizeof code_hash, "0x%016llXull", static_cast<unsigned long long>(CodeHash(m, image)));
     os << "extern const personarm::recomp::Module kRecompModule_" << module << " = {\"" << module << "\", " << Hex(base)
        << ", " << size << "u, " << hash << ", kRecomp_" << module << ", " << generated.size() << ", kRecomp_" << module
-       << "_resume, " << resume_table.size() << "};\n";
+       << "_resume, " << resume_table.size() << ", kCode, " << m.code_count << ", kWords, " << code_hash << "};\n";
     res.source = os.str();
     return res;
 }
