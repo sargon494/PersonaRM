@@ -899,8 +899,11 @@ static int RunBootHarness(const std::string& disc_path, const BootOptions& opt) 
     personarm::DiscReader probe;
     probe.Open(disc_path);
     const auto disc = personarm::DiscReader::IdentifyPersona2(probe.DetectBootExecutable());
-    const BootMilestones ms = disc.disc_number == 2
+    // US disc 1 addresses: docs/research/DISC_US_FORENSICS.md (same functions as JP disc 1, shifted).
+    const BootMilestones ms = disc.product_id == "SLPS-02786"
         ? BootMilestones{0x80022F10, 0x8002113C, 0x800254E0, 0x8002541C, 0x8007A7F8, 0x8007A80C}
+        : disc.product_id == "SLUS-01158"
+        ? BootMilestones{0x80024A14, 0x80023844, 0x80027584, 0x80027500, 0x8007F9B8, 0x8007F9CC}
         : BootMilestones{0x80024760, 0x80023590, 0x800272D0, 0x8002724C, 0x8007E298, 0x8007E2AC};
     auto hex = [](uint32_t v) { char b[16]; std::snprintf(b, sizeof b, "0x%08X", v); return std::string(b); };
     auto stamp = [&]() {

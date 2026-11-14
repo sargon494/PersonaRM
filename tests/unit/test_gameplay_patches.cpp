@@ -64,6 +64,9 @@ int main() {
     CHECK(pf[0].trigger == 0x8007CF14u && pf[0].write.address == 0x8007CF14u && pf[0].only_if_nonzero);
     CHECK((pf[0].write.bytes == std::vector<uint8_t>{1, 0, 0, 0}) && (pi[0].write.bytes == std::vector<uint8_t>{0, 0, 0, 0}));
     CHECK(pf[0].expect.size() == 1 && pf[0].expect[0].address == 0x8001C6A0u);
+    const auto pu = BuildGamePatches("SLUS_011.58", fast);   // US disc 1: same code, shifted
+    CHECK(pu.size() == 1 && pu[0].trigger == 0x8007E634u && pu[0].expect[0].address == 0x8001C734u);
+    CHECK(BuildGamePatches("SLUS-01339", fast).empty());
 
     std::printf("test_gameplay_patches: %d failures\n", g_fail);
     return g_fail == 0 ? 0 : 1;

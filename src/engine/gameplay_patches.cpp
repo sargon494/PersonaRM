@@ -100,16 +100,23 @@ GameplayOptions LoadGameplayMods(const std::string& mods_dir, const std::string&
 
 std::vector<GamePatch> BuildGamePatches(const std::string& serial, const GameplayOptions& options) {
     std::vector<GamePatch> patches;
-    // Disc 1 (JP Deluxe Pack): text_init (0x8001C678) stores the per-glyph delay with `sw a2,0x74(a3)` at
-    // 0x8001C6A0 into the global 0x8007CF14, which msg_win_create copies into each window (+54) and
-    // that into each text node (docs/research/TEXT_SYSTEM.md TS-012). Overwrite it after every store.
-    if (Normalize(serial) == "SLPS02785" && options.text_speed != TextSpeed::Normal) {
+    // Disc 1: text_init stores the per-glyph delay with `sw a2,0x74(a3)` into a global, which
+    // msg_win_create copies into each window (+54) and that into each text node
+    // (docs/research/TEXT_SYSTEM.md TS-012). Overwrite it after every store. US addresses are the
+    // same code shifted (docs/research/DISC_US_FORENSICS.md).
+    struct TextSpeedSite { const char* serial; uint32_t store_pc, global; };
+    static const TextSpeedSite kSites[] = {
+        {"SLPS02785", 0x8001C6A0u, 0x8007CF14u},   // JP Deluxe Pack, text_init 0x8001C678
+        {"SLUS01158", 0x8001C734u, 0x8007E634u},   // US, text_init 0x8001C70C
+    };
+    for (const auto& site : kSites) {
+        if (Normalize(serial) != site.serial || options.text_speed == TextSpeed::Normal) continue;
         GamePatch g;
         g.name = std::string("text_speed=") + TextSpeedName(options.text_speed);
-        g.trigger = 0x8007CF14u;
+        g.trigger = site.global;
         g.only_if_nonzero = true;   // crt0 clears it to 0: leave that alone
-        g.expect.push_back({0x8001C6A0u, {0x74, 0x00, 0xE6, 0xAC}});  // sw a2,0x74(a3) of this EXE
-        g.write = {0x8007CF14u, Le32(options.text_speed == TextSpeed::Fast ? 1u : 0u)};
+        g.expect.push_back({site.store_pc, {0x74, 0x00, 0xE6, 0xAC}});  // sw a2,0x74(a3) of this EXE
+        g.write = {site.global, Le32(options.text_speed == TextSpeed::Fast ? 1u : 0u)};
         patches.push_back(std::move(g));
     }
     return patches;

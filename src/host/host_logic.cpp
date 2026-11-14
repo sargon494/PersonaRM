@@ -1,5 +1,6 @@
 #include "host/host_logic.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 
@@ -20,6 +21,16 @@ Rect Letterbox4x3(int win_w, int win_h) {
     r.x = (win_w - r.w) / 2;
     r.y = (win_h - r.h) / 2;
     return r;
+}
+
+Rect PresentRect(int win_w, int win_h, bool stretch, bool integer, int tex_h) {
+    if (win_w <= 0 || win_h <= 0) return {};
+    if (stretch) return {0, 0, win_w, win_h};
+    if (integer && tex_h > 0) {
+        const int bw = tex_h * 4 / 3, k = std::min(win_w / bw, win_h / tex_h);
+        if (k >= 1) return {(win_w - bw * k) / 2, (win_h - tex_h * k) / 2, bw * k, tex_h * k};
+    }
+    return Letterbox4x3(win_w, win_h);
 }
 
 void DisplayToRgba(const std::vector<uint16_t>& vram, uint32_t x, uint32_t y, uint32_t w, uint32_t h,
@@ -69,6 +80,16 @@ const std::vector<NamedBit>& GamepadMap() {
     return map;
 }
 
+const std::vector<NamedBit>& ActionNames() {
+    static const std::vector<NamedBit> map = {
+        {"up", kUp}, {"down", kDown}, {"left", kLeft}, {"right", kRight},
+        {"cross", kCross}, {"circle", kCircle}, {"square", kSquare}, {"triangle", kTriangle},
+        {"start", kStart}, {"select", kSelect},
+        {"l1", kL1}, {"r1", kR1}, {"l2", kL2}, {"r2", kR2},
+    };
+    return map;
+}
+
 uint16_t PadBitForName(const std::vector<NamedBit>& map, const std::string& name) {
     for (const NamedBit& m : map)
         if (name == m.name) return m.bit;
@@ -85,6 +106,8 @@ bool ParseHostArgs(int argc, const char* const* argv, HostOptions& o) {
         else if (is("--unthrottled")) o.unthrottled = true;
         else if (is("--hidden")) o.hidden = true;
         else if (is("--recomp")) o.recomp = true;
+        else if (is("--mute")) o.mute = true;
+        else if (is("--save-settings")) o.save_settings = true;
         else if (a[0] != '-') {
             if (!o.disc.empty()) return false;
             o.disc = a;
@@ -94,8 +117,15 @@ bool ParseHostArgs(int argc, const char* const* argv, HostOptions& o) {
             if (is("--frames")) o.max_frames = std::strtoull(v, nullptr, 10);
             else if (is("--screenshot")) o.screenshot = v;
             else if (is("--input-script")) o.input_script = v;
-            else if (is("--interp")) o.interp_hz = std::atoi(v);
-            else if (is("--resolution-scale")) o.resolution_scale = uint32_t(std::strtoul(v, nullptr, 10));
+            else if (is("--interp")) o.interp_hz = std::atoi(v), o.interp_given = true;
+            else if (is("--settings")) o.settings_path = v;
+            else if (is("--window-mode")) {
+                if (std::strcmp(v, "windowed") && std::strcmp(v, "fullscreen") && std::strcmp(v, "borderless")) return false;
+                o.window_mode = v;
+            }
+            else if (is("--window-scale")) { o.window_scale = std::atoi(v); if (o.window_scale < 1 || o.window_scale > 8) return false; }
+            else if (is("--volume")) { o.volume = std::atoi(v); if (o.volume < 0 || o.volume > 100) return false; }
+            else if (is("--resolution-scale")) o.resolution_scale = uint32_t(std::strtoul(v, nullptr, 10)), o.resolution_scale_given = true;
             else if (is("--dump-dir")) o.dump_dir = v;
             else if (is("--texture-dump")) o.texture_dump = v;
             else if (is("--mods")) o.mods = v;
