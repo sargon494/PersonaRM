@@ -38,7 +38,7 @@ static void Usage() {
                          "  --mods D             HD texture mods: D/<mod>/textures/<HASH>.png (+ manifest.json priority/serial)\n"
                          "  --text-speed S       dialogue speed: normal (game default), fast or instant; also set by a mod\n"
                          "                       manifest \"gameplay\": {\"text_speed\": ...} (this flag wins). Disc 1 only\n"
-                         "  --stats             per second: game flips, distinct pictures, interpolable pairs\n"
+                         "  --stats             per second: game flips, distinct pictures, interpolable pairs, ms per emulated frame\n"
                          "  --memcard1 F, --memcard2 F   memory card in slot 1/2: raw 128 KB .mcd, created and\n"
                          "                       formatted if missing, rewritten atomically when the game saves\n"
                          "  --recomp             run the recompiled code linked into this build (local\n"
@@ -157,7 +157,7 @@ int main(int argc, char** argv) {
     std::vector<uint32_t> cmd_log;
     if (interp_hz) engine.GetGpu().SetCommandLog(&cmd_log);
     const int sub = interp_hz ? interp_hz / 60 : 1;  // presents per emulated frame
-    uint64_t interp_ns = 0, interp_frames = 0, last_hash = 0;
+    uint64_t run_ns = 0, interp_ns = 0, interp_frames = 0, last_hash = 0;
     uint32_t flips = 0, changes = 0, pairs = 0, pairs_ok = 0, last_start = ~0u;
 
     while (!quit && engine.GetState() == EngineState::Running && (!max_frames || engine.GetFrameCount() < max_frames)) {
@@ -188,7 +188,9 @@ int main(int argc, char** argv) {
             }
         engine.SetPadButtons(mask);
 
-        engine.RunFrame();
+        const uint64_t run_t0 = SDL_GetTicksNS();
+        engine.RunFrame();  // with --resolution-scale this includes the scaled raster pass
+        run_ns += SDL_GetTicksNS() - run_t0;
 
         engine.TakeAudio(pcm);
         audio_samples += pcm.size();
@@ -216,11 +218,11 @@ int main(int argc, char** argv) {
             flips += start != last_start;
             last_start = start;
             if (frame % 60 == 0) {
-                std::printf("[stats] f=%llu flips/s=%u pictures/s=%u interp_pairs=%u/%u %ux%u%s\n",
+                std::printf("[stats] f=%llu flips/s=%u pictures/s=%u interp_pairs=%u/%u %ux%u%s frame_ms=%.2f\n",
                             (unsigned long long)frame, flips, changes, pairs_ok, pairs, d.width, d.height,
-                            d.is_24bit ? " 24bpp" : "");
+                            d.is_24bit ? " 24bpp" : "", double(run_ns) / 60e6);
                 std::fflush(stdout);
-                flips = changes = pairs_ok = pairs = 0;
+                flips = changes = pairs_ok = pairs = 0, run_ns = 0;
             }
         }
 

@@ -33,7 +33,7 @@ void DisplayToRgba(const std::vector<uint16_t>& vram, uint32_t x, uint32_t y, ui
         uint32_t* dst = out.data() + size_t(row) * w;
         if (!is_24bit) {
             for (uint32_t col = 0; col < w; ++col) {
-                const uint16_t p = line[(x + col) % W];
+                const uint16_t p = line[x + col < W ? x + col : (x + col) % W];
                 const uint32_t r = (p & 0x1F) << 3, g = ((p >> 5) & 0x1F) << 3, b = ((p >> 10) & 0x1F) << 3;
                 dst[col] = 0xFF000000u | b << 16 | g << 8 | r;
             }
