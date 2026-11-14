@@ -118,6 +118,13 @@ target_compile_features(unit_test_host_logic PRIVATE cxx_std_17)
 add_test(NAME unit_test_host_logic COMMAND unit_test_host_logic)
 set_tests_properties(unit_test_host_logic PROPERTIES LABELS "unit" TIMEOUT 120)
 
+add_executable(unit_test_host_settings test_host_settings.cpp ${CMAKE_SOURCE_DIR}/src/host/settings.cpp ${CMAKE_SOURCE_DIR}/src/host/host_logic.cpp)
+target_link_libraries(unit_test_host_settings PRIVATE personarm_core)
+target_include_directories(unit_test_host_settings PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_features(unit_test_host_settings PRIVATE cxx_std_17)
+add_test(NAME unit_test_host_settings COMMAND unit_test_host_settings)
+set_tests_properties(unit_test_host_settings PROPERTIES LABELS "unit" TIMEOUT 120)
+
 # Gate G2 (synthetic): the synthetic program is written at build time, tools/recomp_gen turns it
 # into C++, and the test compares that code against the interpreter.
 add_executable(g2_synth_writer g2_synth_writer.cpp)

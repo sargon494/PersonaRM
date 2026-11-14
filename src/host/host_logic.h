@@ -12,6 +12,10 @@ struct Rect { int x = 0, y = 0, w = 0, h = 0; };
 /// Largest 4:3 rectangle centred in a win_w x win_h window (letterbox / pillarbox bars).
 Rect Letterbox4x3(int win_w, int win_h);
 
+/// Where the picture goes: whole window if `stretch`, else the 4:3 box; with `integer` the box is the
+/// largest whole multiple of (tex_h*4/3) x tex_h that fits (falls back to the plain fit if even 1x does not).
+Rect PresentRect(int win_w, int win_h, bool stretch, bool integer, int tex_h);
+
 /// Display area of a 1024x512 16-bit VRAM to 0xAABBGGRR (bytes R,G,B,A in memory). 15bpp: BGR555 words;
 /// 24bpp: packed RGB888 bytes starting at VRAM column x. Wraps at the VRAM edges like the GPU.
 void DisplayToRgba(const std::vector<uint16_t>& vram, uint32_t x, uint32_t y, uint32_t w, uint32_t h,
@@ -23,6 +27,9 @@ struct NamedBit { const char* name; uint16_t bit; };
 /// spelling, e.g. "a", "lefttrigger"). The host resolves the names to SDL codes once at start.
 const std::vector<NamedBit>& KeyboardMap();
 const std::vector<NamedBit>& GamepadMap();
+/// Action names (the keys of the settings file's input maps) -> pad bit: up down left right cross circle
+/// square triangle start select l1 r1 l2 r2. Usable with PadBitForName.
+const std::vector<NamedBit>& ActionNames();
 /// Pad bit for one name of the tables above, 0 = unmapped.
 uint16_t PadBitForName(const std::vector<NamedBit>& map, const std::string& name);
 
@@ -36,6 +43,14 @@ struct HostOptions {
     int interp_hz = 0;
     bool recomp = false;            // --recomp: run the recompiled code linked into this build
     uint32_t recomp_quantum = 1;    // --recomp-quantum
+    // Settings file (src/host/settings.h): "unset" = empty / 0 / -1, so the file's value stays.
+    std::string settings_path;      // --settings F (default: per-user config dir)
+    std::string window_mode;        // --window-mode windowed|fullscreen|borderless
+    int window_scale = 0;           // --window-scale 1..8
+    int volume = -1;                // --volume 0..100
+    bool mute = false;              // --mute
+    bool interp_given = false;      // --interp was on the command line (even --interp 0)
+    bool save_settings = false;     // --save-settings: write the effective settings back to the file
     bool stats = false, unthrottled = false, hidden = false;
 };
 /// False on an unknown option, a missing value, no disc, or --interp not a multiple of 60.
