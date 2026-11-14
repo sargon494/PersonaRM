@@ -71,6 +71,11 @@ int main() {
     const char* tex[] = {"personarm_sdl", "d.cue", "--texture-dump", "dd", "--mods", "mm"};
     CHECK(ParseHostArgs(6, tex, o) && o.texture_dump == "dd" && o.mods == "mm");
     CHECK(ParseHostArgs(2, plain, o) && o.texture_dump.empty() && o.mods.empty());
+    const char* ts[] = {"personarm_sdl", "d.cue", "--text-speed", "fast"};
+    CHECK(ParseHostArgs(4, ts, o) && o.text_speed == "fast");
+    const char* tsbad[] = {"personarm_sdl", "d.cue", "--text-speed", "warp"};
+    CHECK(!ParseHostArgs(4, tsbad, o));
+    CHECK(ParseHostArgs(2, plain, o) && o.text_speed.empty());
     const char* missing[] = {"personarm_sdl", "d.cue", "--memcard1"};
     CHECK(!ParseHostArgs(3, missing, o));
     const char* unknown[] = {"personarm_sdl", "d.cue", "--bogus", "1"};

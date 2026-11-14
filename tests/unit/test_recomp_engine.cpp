@@ -41,6 +41,7 @@ struct Snap {
 };
 
 struct Run {
+    uint64_t applied = 0, skipped = 0;   // first game patch
     std::vector<Snap> frames;
     Engine::RecompStats stats;
     std::vector<uint8_t> ram;
@@ -58,13 +59,14 @@ std::vector<uint8_t> Exe(const g2::Program& p) {
 }
 
 Run Boot(const std::vector<uint8_t>& exe, std::vector<const recomp::Module*> modules, uint32_t quantum,
-         bool eager = false) {
+         bool eager = false, std::vector<GamePatch> patches = {}) {
     auto& e = Engine::Instance();
     EngineBootConfig config;
     config.enable_bios_hle = true;
     e.Initialize(config);
     e.SetRecompModules(std::move(modules), quantum);
     e.SetEagerDevices(eager);
+    e.SetGamePatches(std::move(patches));
     CHECK(e.BootExecutable(exe.data(), exe.size()));
     Run r;
     for (int f = 0; f < kFrames; ++f) {
@@ -81,6 +83,9 @@ Run Boot(const std::vector<uint8_t>& exe, std::vector<const recomp::Module*> mod
     }
     r.stats = e.GetRecompStats();
     r.ram = e.GetRam();
+    r.applied = e.PatchesApplied(0);
+    r.skipped = e.PatchesSkipped(0);
+    e.SetGamePatches({});
     e.SetRecompModules({});
     e.SetEagerDevices(false);
     e.Shutdown();
@@ -146,6 +151,48 @@ int main() {
     CHECK(coarse.frames.size() == static_cast<size_t>(kFrames));
     CHECK(coarse.stats.native_instructions > 0);
     CHECK(Word(coarse.ram, d + 32) > kFrames);
+
+    // Gameplay patches: store-triggered RAM writes. #0 fires on the guest's own store (native code calls
+    // back at the end of that instruction), #1 on the HLE memset of the program, and they change what
+    // the program computes (the work loop accumulates through d+4), so any difference in when they fire
+    // shows. Interpreter, generated code and both with eager devices must agree to the cycle.
+    auto make_patches = [&](bool good_guard) {
+        GamePatch a;
+        a.name = "synthetic";
+        a.trigger = d + 8;
+        const uint32_t first = p.words[0] ^ (good_guard ? 0u : 1u);
+        a.expect.push_back({g2::kBase, {uint8_t(first), uint8_t(first >> 8), uint8_t(first >> 16), uint8_t(first >> 24)}});
+        a.write = {d + 4, {0x11, 0x22, 0x33, 0x44}};
+        GamePatch b;
+        b.name = "memset";
+        b.trigger = d + 0x108;
+        b.only_if_nonzero = true;
+        b.write = {d + 0x200, {0x55, 0x66, 0x77, 0x88}};
+        return std::vector<GamePatch>{a, b};
+    };
+    const Run pi = Boot(exe, {}, 1, false, make_patches(true));
+    CHECK(pi.applied > 100);
+    CHECK(Word(pi.ram, d + 0x200) == 0x88776655u);                 // fired from the HLE copy
+    CHECK(FirstDifference(interp, pi) != 0);                       // the patch changed the run
+    const Run pn = Boot(exe, {&kRecompModule_rengine}, 1, false, make_patches(true));
+    CHECK(FirstDifference(pi, pn) == 0 && pn.ram == pi.ram && pn.applied == pi.applied);
+    CHECK(pn.stats.native_instructions > 4 * pn.stats.interp_resident);   // still native, not unwound to a PC
+    CHECK(FirstDifference(pi, Boot(exe, {}, 1, true, make_patches(true))) == 0);
+    CHECK(FirstDifference(pi, Boot(exe, {&kRecompModule_rengine}, 1, true, make_patches(true))) == 0);
+    // Expected-bytes guard: a mismatch skips the patch (counted) and leaves the run as without it.
+    std::vector<GamePatch> only_guarded = make_patches(false);
+    only_guarded.pop_back();
+    const Run pg = Boot(exe, {&kRecompModule_rengine}, 1, false, only_guarded);
+    CHECK(pg.applied == 0 && pg.skipped > 100);
+    CHECK(FirstDifference(native, pg) == 0 && pg.ram == native.ram);
+    // Patches given but no trigger ever hit: the same run as none.
+    GamePatch never;
+    never.trigger = d + 0x800;
+    never.write = {d + 0x808, {1}};
+    CHECK(FirstDifference(interp, Boot(exe, {}, 1, false, {never})) == 0);
+    CHECK(FirstDifference(native, Boot(exe, {&kRecompModule_rengine}, 1, false, {never})) == 0);
+    std::printf("gameplay patches: applied %llu (interpreter), %llu (recompiled); guard skips %llu\n",
+                (unsigned long long)pi.applied, (unsigned long long)pn.applied, (unsigned long long)pg.skipped);
 
     // Overlays: two modules for one slot, live only while their code is in RAM.
     const rovl::Set ov = rovl::Build();

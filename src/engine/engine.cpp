@@ -77,6 +77,7 @@ void Engine::Reset() {
     m_recomp_on = false;   // ActivateRecomp rebuilds the registry once the EXE is in RAM
     m_mods.clear();
     m_watch.clear();
+    RebuildWake();
     m_native_map.clear();
     m_cand_at.clear();
     m_cand.clear();
@@ -92,7 +93,7 @@ uint32_t Engine::RamDma::ReadWord(uint32_t a) {
 void Engine::RamDma::WriteWord(uint32_t a, uint32_t v) {
     a &= PS1_MAIN_RAM_SIZE - 4;
     for (int i = 0; i < 4; ++i) engine.m_ram[a + i] = static_cast<uint8_t>(v >> (8 * i));
-    if (!engine.m_watch.empty()) {
+    if (!engine.m_wake.empty()) {
         ++engine.m_epoch;   // CD/MDEC data may be new code: modules that did not match may now
         engine.OnCodeWrite(a);
     }
@@ -630,7 +631,7 @@ void Engine::RunHle() {
         // B0:34 read and B0:4F _card_read (memory card) do the same.
         const uint32_t fn = m_cpu.GetGPR(9), vec = m_cpu.GetPC() & 0x1FFFFFFF;
         const bool card_read = vec == 0xB0 && fn == 0x4F;
-        const bool copies = !m_watch.empty() && ((vec == 0xA0 && (fn == 0x02 || fn == 0x2A || fn == 0x2B)) ||
+        const bool copies = !m_wake.empty() && ((vec == 0xA0 && (fn == 0x02 || fn == 0x2A || fn == 0x2B)) ||
                                                  (vec == 0xB0 && fn == 0x34) || card_read);
         const uint32_t dst = card_read ? m_cpu.GetGPR(6) : m_cpu.GetGPR(fn == 0x02 || fn == 0x34 ? 5 : 4);
         const uint32_t len = card_read ? 128 : m_cpu.GetGPR(6);
@@ -639,9 +640,74 @@ void Engine::RunHle() {
     }
 }
 
+// ───────────────────────────────────────────────────────────────────────────
+// Gameplay patches (GamePatch): store-triggered RAM writes, identical in interpreter and generated code
+// ───────────────────────────────────────────────────────────────────────────
+
+void Engine::SetGamePatches(std::vector<GamePatch> patches) {
+    constexpr uint32_t kMask = PS1_MAIN_RAM_SIZE - 1;
+    auto in_ram = [&](uint32_t a, size_t n) {
+        const uint32_t p = a & 0x1FFFFFFFu;
+        return p < 0x00800000u && n <= PS1_MAIN_RAM_SIZE && (p & kMask) + n <= PS1_MAIN_RAM_SIZE;
+    };
+    m_patches.clear();
+    for (GamePatch& g : patches) {
+        bool ok = in_ram(g.trigger, 4) && !g.write.bytes.empty() && in_ram(g.write.address, g.write.bytes.size());
+        for (const auto& e : g.expect) ok = ok && in_ram(e.address, e.bytes.size());
+        if (!ok) { PRM_LOG_WARN("PATCH", "ignoring patch '" + g.name + "': address outside main RAM or empty write"); continue; }
+        m_patches.push_back(std::move(g));
+    }
+    m_patch_applied.assign(m_patches.size(), 0);
+    m_patch_skipped.assign(m_patches.size(), 0);
+    RebuildWake();
+}
+
+void Engine::RebuildWake() {
+    const size_t n = PS1_MAIN_RAM_SIZE / 4 / 32;
+    m_hook_bits.assign(m_patches.empty() ? 0 : n, 0);
+    for (const GamePatch& g : m_patches) {
+        const uint32_t o = g.trigger & (PS1_MAIN_RAM_SIZE - 4);
+        m_hook_bits[o >> 7] |= 1u << ((o >> 2) & 31u);
+    }
+    if (m_watch.empty() && m_hook_bits.empty()) { m_wake.clear(); return; }
+    m_wake.assign(n, 0);
+    for (size_t i = 0; i < n; ++i)
+        m_wake[i] = (m_watch.empty() ? 0u : m_watch[i]) | (m_hook_bits.empty() ? 0u : m_hook_bits[i]);
+}
+
+// A store, DMA word or HLE copy landed on a word of m_wake: retire live code and/or run its patches.
+void Engine::WakeWrite(uint32_t o) {
+    const uint32_t bit = 1u << ((o >> 2) & 31u);
+    if (!m_watch.empty() && (m_watch[o >> 7] & bit)) RetireAt(o);
+    if (!m_in_patch && !m_hook_bits.empty() && (m_hook_bits[o >> 7] & bit)) RunPatches(o);
+}
+
+void Engine::RunPatches(uint32_t o) {
+    constexpr uint32_t kMask = PS1_MAIN_RAM_SIZE - 1;
+    const uint32_t w = o & kMask & ~3u;
+    m_in_patch = true;  // the patch's own writes retire code but trigger nothing
+    for (size_t i = 0; i < m_patches.size(); ++i) {
+        const GamePatch& g = m_patches[i];
+        if ((g.trigger & kMask & ~3u) != w) continue;
+        if (g.only_if_nonzero && !(m_ram[w] | m_ram[w + 1] | m_ram[w + 2] | m_ram[w + 3])) continue;
+        bool match = true;
+        for (const auto& e : g.expect)
+            match = match && std::equal(e.bytes.begin(), e.bytes.end(), m_ram.begin() + (e.address & kMask));
+        if (!match) {
+            if (!m_patch_skipped[i]++) PRM_LOG_WARN("PATCH", "patch '" + g.name + "' skipped: expected bytes differ (other game version?)");
+            continue;
+        }
+        const uint32_t dst = g.write.address & kMask;
+        std::copy(g.write.bytes.begin(), g.write.bytes.end(), m_ram.begin() + dst);
+        OnRamRangeWritten(dst, static_cast<uint32_t>(g.write.bytes.size()));
+        ++m_patch_applied[i];
+    }
+    m_in_patch = false;
+}
+
 void Engine::OnRamRangeWritten(uint32_t addr, uint32_t len) {
     const uint32_t p = addr & 0x1FFFFFFFu;
-    if (m_watch.empty() || p >= PS1_MAIN_RAM_SIZE || len == 0) return;
+    if (m_wake.empty() || p >= PS1_MAIN_RAM_SIZE || len == 0) return;
     ++m_epoch;
     const uint32_t end = static_cast<uint32_t>(std::min<uint64_t>(PS1_MAIN_RAM_SIZE, uint64_t(p) + len));
     for (uint32_t o = p & ~3u; o < end; o += 4) OnCodeWrite(o);
@@ -657,12 +723,13 @@ void Engine::ActivateRecomp() {
     m_native_map.clear();
     m_code_changed = false;
     m_recomp_on = !m_recomp_modules.empty();
-    if (!m_recomp_on) return;
+    if (!m_recomp_on) { RebuildWake(); return; }
     // Flat maps over KSEG0 main RAM (the interpreter loop asks at every instruction). Only the exact
     // addresses the code was generated for: a mirror would link other $ra values.
     const size_t words = PS1_MAIN_RAM_SIZE / 4;
     m_native_map.assign(words, nullptr);
     m_watch.assign(words / 32, 0);
+    RebuildWake();
     m_cand_at.assign(words, 0);
     m_recomp_stats.interp_by_pc.assign(words, 0);
     m_recomp_stats.map_base = kNativeLo;
@@ -717,6 +784,7 @@ void Engine::SetLive(uint32_t index) {
             // A live module never shares a code word with another: that one's bytes are gone.
             if ((m_watch[o >> 7] >> ((o >> 2) & 31u)) & 1u) RetireAt(o);
             m_watch[o >> 7] |= 1u << ((o >> 2) & 31u);
+            m_wake[o >> 7] |= 1u << ((o >> 2) & 31u);
         }
     for (size_t i = 0; i < m.resume_count; ++i) m_native_map[(m.resume[i].address - kNativeLo) / 4] = m.resume[i].fn;
     for (size_t i = 0; i < m.count; ++i) m_native_map[(m.entries[i].address - kNativeLo) / 4] = m.entries[i].fn;
@@ -729,7 +797,11 @@ void Engine::Retire(uint32_t index) {
     const recomp::Module& m = *lm.m;
     for (size_t r = 0; r < m.code_count; ++r)
         for (uint32_t o = m.code[2 * r] - kNativeLo; o < m.code[2 * r + 1] - kNativeLo; o += 4)
-            m_watch[o >> 7] &= ~(1u << ((o >> 2) & 31u));
+        {
+            const uint32_t bit = 1u << ((o >> 2) & 31u);
+            m_watch[o >> 7] &= ~bit;
+            m_wake[o >> 7] = (m_wake[o >> 7] & ~bit) | (m_hook_bits.empty() ? 0u : (m_hook_bits[o >> 7] & bit));
+        }
     for (size_t i = 0; i < m.resume_count; ++i) m_native_map[(m.resume[i].address - kNativeLo) / 4] = nullptr;
     for (size_t i = 0; i < m.count; ++i) m_native_map[(m.entries[i].address - kNativeLo) / 4] = nullptr;
     lm.live = false;
@@ -794,7 +866,7 @@ bool Engine::RunNative() {
     s.ram = m_ram.data(); s.scratch = m_scratchpad.data(); s.ram_stall = kRamLoadStallCycles;
     s.dispatcher = nullptr;
     s.map = m_native_map.data(); s.map_lo = kNativeLo; s.map_words = static_cast<uint32_t>(m_native_map.size());
-    s.watch = m_watch.data(); s.code_write = NativeCodeWrite;
+    s.watch = m_wake.data(); s.code_write = NativeCodeWrite;
     s.fallbacks = 0; s.stalls = 0; s.stopped = false; s.next_pc = 0; s.load_reg = 0;
     const uint64_t start = GetCycles();
     s.cycles = start;
@@ -897,7 +969,7 @@ void Engine::NativeWrite(void* engine, uint32_t address, uint32_t value, uint32_
 }
 
 void Engine::NativeCodeWrite(recomp::CpuState& s, uint32_t ram_offset) {
-    static_cast<Engine*>(s.host)->RetireAt(ram_offset);
+    static_cast<Engine*>(s.host)->WakeWrite(ram_offset);
 }
 
 uint64_t Engine::NextDeviceEvent() const {

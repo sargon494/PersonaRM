@@ -105,6 +105,8 @@ set(HW_SOURCES
 set(ENGINE_SOURCES
     engine/engine.cpp
     engine/engine.h
+    engine/gameplay_patches.cpp
+    engine/gameplay_patches.h
 )
 
 # ───────────────────────────────────────────────────────────────────────
