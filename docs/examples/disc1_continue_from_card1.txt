@@ -1,0 +1,16 @@
+# personarm --boot <disc1.cue> --memcard1 <card.mcd> --input-script docs/examples/disc1_continue_from_card1.txt --max-frames 4000
+# Disc 1 (JP), slot 1 holding the save of disc1_save_to_card1.txt: title, CONTINUE (preselected when the
+# card has a save), slot 1, FILE 1, confirm. The game is back in the editor's office (編集長室) by f3100;
+# the main menu then shows the saved money (5000) and play time. Lines: <frame> <button> [<hold>].
+300 start
+1350 start
+# press any button; the memory card check follows
+1600 start
+# START / CONTINUE: CONTINUE
+1900 circle
+# load slot prompt: 差込口1
+2200 circle
+# file list: FILE 1 (キスメット出版 編集長室)
+2500 circle
+# "FILE1のデータをロードします よろしいですか?" はい
+2800 circle

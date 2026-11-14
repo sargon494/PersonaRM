@@ -1,0 +1,127 @@
+# personarm --boot <disc1.cue> --memcard1 <card.mcd> --input-script docs/examples/disc1_save_to_card1.txt --max-frames 21400
+# Disc 1 (JP), memory card in slot 1 (created if missing): new game as in disc1_new_game_to_field.txt up to
+# the first free movement in the editor's office, open the main menu with square, choose セーブ, slot 1
+# (差込口1) and the first FILE (新規作成). "セーブが終了しました" shows from ~f21300; the card then holds
+# BISLPS-028250 (3 blocks). Load it with disc1_continue_from_card1.txt. Lines: <frame> <button> [<hold>].
+300 start
+1350 start
+1600 start
+1900 circle
+2020 down
+2060 circle
+# advance dialogue (shrine, conference room, Kismet office)
+6950 circle
+7070 circle
+7190 circle
+7310 circle
+7430 circle
+7550 circle
+7670 circle
+7790 circle
+7910 circle
+8030 circle
+8150 circle
+8270 circle
+8390 circle
+8510 circle
+8630 circle
+8750 circle
+8870 circle
+8990 circle
+9110 circle
+9230 circle
+9350 circle
+9470 circle
+9590 circle
+9710 circle
+9830 circle
+9950 circle
+10070 circle
+10190 circle
+10310 circle
+10430 circle
+10550 circle
+10670 circle
+10790 circle
+10910 circle
+11030 circle
+11150 circle
+11270 circle
+11390 circle
+11510 circle
+11630 circle
+11750 circle
+11870 circle
+11990 circle
+12110 circle
+12230 circle
+12350 circle
+12470 circle
+12590 circle
+12710 circle
+12830 circle
+12950 circle
+13070 circle
+13190 circle
+13310 circle
+13430 circle
+13550 circle
+13670 circle
+13790 circle
+13910 circle
+14030 circle
+14150 circle
+14270 circle
+14390 circle
+14510 circle
+14630 circle
+14750 circle
+14870 circle
+14990 circle
+15110 circle
+15230 circle
+15350 circle
+15470 circle
+15590 circle
+15710 circle
+15830 circle
+15950 circle
+16070 circle
+16190 circle
+16310 circle
+16430 circle
+16550 circle
+16670 circle
+16790 circle
+16910 circle
+17030 circle
+17150 circle
+17270 circle
+17390 circle
+17510 circle
+17630 circle
+17750 circle
+17870 circle
+17990 circle
+18110 circle
+18230 circle
+18350 circle
+18470 circle
+18590 circle
+18710 circle
+# free movement: d-pad held 30 frames each
+18900 down 30
+18960 left 30
+19020 up 30
+19080 right 30
+19250 square
+# main menu: cursor starts on 魔法; right -> アナライズ, down x3 -> セーブ
+19450 right
+19500 down
+19550 down
+19600 down
+19660 circle
+# save slot prompt (差込口1 / 差込口2): slot 1
+20450 circle
+# file list (4 x 新規作成): FILE 1, saved at once
+20800 circle
