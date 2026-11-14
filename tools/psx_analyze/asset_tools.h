@@ -8,6 +8,8 @@
 #include <string>
 #include <vector>
 
+#include "loader/disc_reader.h"
+
 namespace personarm::tools {
 
 struct FileposEntry { uint32_t lba = 0; uint32_t size = 0; };
@@ -33,6 +35,20 @@ struct Hazard { uint32_t addr = 0; uint32_t load = 0; uint32_t next = 0; };
 /// against the next word in memory, not the branch target (known limit).
 std::vector<Hazard> ScanHazards(const uint8_t* data, size_t size, uint32_t base,
                                 bool use_entry, uint32_t entry);
+
+/// FILEPOS-indexed access to the F*.BIN files of a disc image (read-only).
+class DiscFiles {
+public:
+    bool Open(const std::string& disc);
+    size_t Count() const { return fp_.size(); }
+    /// False for empty entries, entries without a matching ISO record, and .EXT streams.
+    bool Read(uint32_t index, std::vector<uint8_t>& out);
+    DiscReader& Reader() { return d_; }
+private:
+    DiscReader d_;
+    std::vector<FileposEntry> fp_;
+    std::vector<DiscFileEntry> files_;
+};
 
 /// Commands behind psx_analyze --filepos / --extract-file. Return a process exit code.
 int RunFilepos(const std::string& disc);
