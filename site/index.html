@@ -142,7 +142,7 @@
                 </article>
                 <article class="feature reveal">
                     <h3>Memory card and saves</h3>
-                    <p>Planned. For now the game sees no memory card inserted; quicksave comes later.</p>
+                    <p>Standard 128 KB card files via <code>--memcard1</code> and <code>--memcard2</code>. Disc 1 saves and CONTINUE work; quicksave comes later.</p>
                 </article>
             </div>
         </section>
@@ -163,7 +163,7 @@
                 overlays too, each validated by a hash of its code in RAM, with the interpreter as fallback. On disc 1 it
                 runs essentially 100% of instructions as native code, and the trace still matches the interpreter exactly
                 up to free movement. Device timing now advances lazily, with exact results: on a fast PC the interpreter
-                went from about 74 to 129 fps, and the recompiled mode from about 100 to 370 fps. Next: saving and loading with an emulated memory card, and playing in the window at full speed.</p>
+                went from about 74 to 129 fps, and the recompiled mode from about 100 to 370 fps. Memory cards work: standard 128 KB <code>.mcd</code> files via <code>--memcard1</code> and <code>--memcard2</code>. On disc 1 the game saves from the main menu, and after a reboot CONTINUE loads the save. The SDL3 window can run the recompiled mode (<code>--recomp</code>) with memory cards, as a developer build. Next: quality-of-life mod support, starting with texture replacement; locating the game's text system for translations; and playing further (area changes, first battle).</p>
             <div class="status-table reveal" role="table" aria-label="Subsystem status">
                 <div class="row head" role="row"><span role="columnheader">Subsystem</span><span
                         role="columnheader">Status</span></div>
@@ -191,8 +191,10 @@
                         class="tag progress">Free movement and main menu</span></div>
                 <div class="row" role="row"><span role="cell">Static recompiler</span><span role="cell"
                         class="tag progress">v0: function-level C++ generation, synthetic G2 passing; overlays covered (code-hash checked); not yet playable end to end</span></div>
+                <div class="row" role="row"><span role="cell">Memory cards and saves</span><span role="cell"
+                        class="tag ok">Works: 128 KB .mcd cards; disc 1 saves and CONTINUE</span></div>
                 <div class="row" role="row"><span role="cell">Window, input and audio (SDL3)</span><span role="cell"
-                        class="tag progress">Works; full SPU and CD/XA mix in the window; optional frame interpolation (off by default)</span></div>
+                        class="tag progress">Works; full SPU and CD/XA mix in the window; runs with --recomp and --memcard1/2; optional frame interpolation (off by default)</span></div>
             </div>
         </section>
 
@@ -203,7 +205,7 @@
                 <h2 id="start-title">Quick <em>start</em></h2>
             </header>
             <div class="notice reveal">
-                <strong>Not playable yet.</strong> There are no releases yet; build from source. The commands below manage disc images and
+                <strong>Not playable yet.</strong> There are no releases yet; build from source. Most commands below manage disc images and
                 configuration for development.
             </div>
             <ol class="steps">
@@ -221,7 +223,9 @@
                     <div class="code">
                         <pre><code>personarm --scan "/path/to/discs"
 personarm --verify-disc "/path/to/disc1.cue"
-personarm --portal</code></pre>
+personarm --portal
+# developer build (-DPRM_WITH_SDL3=ON, recompiled code generated locally):
+personarm_sdl "/path/to/disc1.cue" --recomp --memcard1 "/path/to/card1.mcd"</code></pre>
                         <button class="copy" type="button" aria-label="Copy commands">Copy</button>
                     </div>
                 </li>
