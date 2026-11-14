@@ -26,6 +26,8 @@
 
 namespace personarm {
 
+class MemoryCard;
+
 // ───────────────────────────────────────────────────────────────────────────
 // PlayStation 1 Hardware Clock Rates & Timings
 // ───────────────────────────────────────────────────────────────────────────
@@ -124,6 +126,14 @@ public:
     void SetPadButtons(uint16_t mask) { m_pad_buttons = mask; }
     /// Buttons held by the script at the current frame (bit set = pressed).
     uint16_t ScriptedButtons() const;
+
+    /// Memory card in slot 0 (/JOY1, "bu00:") or 1 (/JOY2, "bu10:"); null = no card (the default).
+    /// The card stays owned by the caller; the SIO0 port and the HLE BIOS card functions use it, and
+    /// RunFrame writes a changed card back to its file at the end of the frame.
+    void SetMemoryCard(int slot, MemoryCard* card) { m_cards[slot & 1] = card; m_bios.SetMemoryCard(slot, card); }
+    MemoryCard* GetMemoryCard(int slot) const { return m_cards[slot & 1]; }
+    /// Write every changed card to its file (atomic). False if a write failed.
+    bool FlushMemoryCards();
 
     const std::vector<uint8_t>& GetRam() const { return m_ram; }
     void SetRam(const std::vector<uint8_t>& ram) { m_ram = ram; OnRamRangeWritten(0, PS1_MAIN_RAM_SIZE); }
@@ -346,7 +356,8 @@ private:
     uint16_t PadButtons() const;  // scripted + InputManager, bit set = pressed
     void WriteJoyCtrl(uint16_t v);
     void TickJoy(uint32_t cycles);
-    uint32_t m_joy_step = 0;  // 0 idle, 1-4 pad read sequence, 5 ignore until deselect
+    uint32_t m_joy_step = 0;  // 0 idle, 1-4 pad read sequence, 5 ignore until deselect, 6 memory card
+    std::array<MemoryCard*, 2> m_cards{};
     std::vector<uint8_t> m_joy_rx_fifo;
     uint32_t m_joy_ctrl = 0, m_joy_mode = 0, m_joy_baud = 0;
     bool m_joy_ack_low = false, m_joy_irq = false;

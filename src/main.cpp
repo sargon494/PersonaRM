@@ -24,6 +24,7 @@
 #include "launcher/portal.h"
 #include "core/memory_manager.h"
 #include "core/save_manager.h"
+#include <array>
 #include "input/input_manager.h"
 #include "loader/disc_reader.h"
 #include "loader/tim_parser.h"
@@ -82,6 +83,8 @@ static void PrintUsage(const char* prog) {
               << "                                            -DPRM_RECOMP_GENERATED_DIR builds) and report counters\n"
               << "                     --recomp-quantum <n>   cycles between service points (default 1 = exact\n"
               << "                                            interpreter timing; larger = faster, IRQs late)\n"
+              << "                     --memcard1/2 <file>    memory card in slot 1/2: raw 128 KB .mcd image, created\n"
+              << "                                            and formatted if missing, rewritten atomically on change\n"
               << "                     --eager-devices        tick devices after every instruction (reference for\n"
               << "                                            the lazy device time; same results, slower)\n"
               << "  --config           Open interactive settings menu\n"
@@ -811,6 +814,7 @@ struct BootOptions {
     bool recomp = false;             // --recomp: run the linked recompiled modules natively
     uint32_t recomp_quantum = 1;     // --recomp-quantum: cycles between service points
     bool eager_devices = false;      // --eager-devices: per-instruction device ticks (reference)
+    std::string memcard[2];          // --memcard1/2: raw .mcd image per slot (empty = no card)
 };
 
 // Overlay slots (OVERLAY_MAP OV-010, discs 1 and 2): code loaded above the resident EXE text.
@@ -882,6 +886,16 @@ static int RunBootHarness(const std::string& disc_path, const BootOptions& opt) 
         return EXIT_FAILURE;
     }
     engine.SetPadScript(opt.presses);
+    std::array<personarm::MemoryCard, 2> cards;
+    for (int slot = 0; slot < 2; ++slot) {
+        if (opt.memcard[slot].empty()) continue;
+        std::string err;
+        if (!cards[slot].Open(opt.memcard[slot], &err)) {
+            std::cerr << "[BOOT] --memcard" << slot + 1 << ": " << err << "\n";
+            return EXIT_FAILURE;
+        }
+        engine.SetMemoryCard(slot, &cards[slot]);
+    }
     personarm::DiscReader probe;
     probe.Open(disc_path);
     const auto disc = personarm::DiscReader::IdentifyPersona2(probe.DetectBootExecutable());
@@ -1094,6 +1108,9 @@ static int RunBootHarness(const std::string& disc_path, const BootOptions& opt) 
               << " cd_read_start calls=" << reads << " polygon=" << seen_poly << " image=" << seen_image
               << " key-on=" << seen_kon << " bios_calls=" << engine.GetBios().GetInterceptedCallCount()
               << " unimplemented:" << (unimpl.empty() ? " none" : unimpl) << "\n";
+    if (!engine.FlushMemoryCards()) std::cerr << "[BOOT] a memory card could not be written\n";
+    engine.SetMemoryCard(0, nullptr);
+    engine.SetMemoryCard(1, nullptr);
     engine.Shutdown();
     return done || !opt.stop_at_first_load ? EXIT_SUCCESS : 2;
 }
@@ -1143,6 +1160,8 @@ int main(int argc, char* argv[]) {
                     if (std::strcmp(argv[k], "--dump-frames") == 0) opt.dump_frames = argv[k + 1];
                     if (std::strcmp(argv[k], "--dump-audio") == 0) opt.dump_audio = argv[k + 1];
                     if (std::strcmp(argv[k], "--watch-pc") == 0) opt.watch_pcs.push_back(std::strtoul(argv[k + 1], nullptr, 16));
+                    if (std::strcmp(argv[k], "--memcard1") == 0) opt.memcard[0] = argv[k + 1];
+                    if (std::strcmp(argv[k], "--memcard2") == 0) opt.memcard[1] = argv[k + 1];
                     if (std::strcmp(argv[k], "--recomp-quantum") == 0)
                         opt.recomp_quantum = static_cast<uint32_t>(std::strtoul(argv[k + 1], nullptr, 10));
                     if (std::strcmp(argv[k], "--trace-out") == 0)
@@ -1174,7 +1193,8 @@ int main(int argc, char* argv[]) {
                 std::strcmp(argv[i], "--dump-vram") == 0 || std::strcmp(argv[i], "--dump-frames") == 0 || std::strcmp(argv[i], "--dump-audio") == 0 ||
                 std::strcmp(argv[i], "--every") == 0 || std::strcmp(argv[i], "--press") == 0 ||
                 std::strcmp(argv[i], "--input-script") == 0 ||
-                std::strcmp(argv[i], "--watch-pc") == 0 || std::strcmp(argv[i], "--recomp-quantum") == 0) { ++i; continue; } // read by --boot
+                std::strcmp(argv[i], "--watch-pc") == 0 || std::strcmp(argv[i], "--recomp-quantum") == 0 ||
+                std::strcmp(argv[i], "--memcard1") == 0 || std::strcmp(argv[i], "--memcard2") == 0) { ++i; continue; } // read by --boot
             if (std::strcmp(argv[i], "--launch") == 0) {
                 return launcher.LaunchGame();
             }
