@@ -1,4 +1,5 @@
 #include "engine/engine.h"
+#include "core/save_manager.h"
 #include "core/logger.h"
 #include <cstdlib>
 #include <cstring>
@@ -351,13 +352,18 @@ void Engine::WriteBus(uint32_t address, uint32_t value, uint32_t size) {
 
 void Engine::WriteIo(uint32_t physical, uint32_t value, uint32_t size) {
     // 3. SIO0 (psx-spx "Controller and Memory Card I/O Ports" / "Controllers - Communication Sequence"):
-    // a digital pad on /JOY1, nothing on /JOY2, no memory card (0x81 gets no /ACK -> "no card").
+    // a digital pad on /JOY1, nothing else on /JOY2; a memory card answers address 81h on its port when
+    // inserted (SetMemoryCard), otherwise 81h gets no /ACK -> "no card".
     if (physical == 0x1F801040) {
         const uint8_t tx = static_cast<uint8_t>(value & 0xFF);
         uint8_t rx = 0xFF;
         bool ack = false;
         m_joy_ack_low = false;
-        if ((m_joy_ctrl & 0x2002) == 0x0002) {  // /JOY1 selected
+        MemoryCard* card = (m_joy_ctrl & 0x2) ? m_cards[(m_joy_ctrl >> 13) & 1] : nullptr;
+        if (card && m_joy_step == 0 && tx == 0x81) { card->Select(); m_joy_step = 6; }
+        if (m_joy_step == 6) {
+            ack = card->Exchange(tx, rx);
+        } else if ((m_joy_ctrl & 0x2002) == 0x0002) {  // /JOY1 selected
             switch (m_joy_step) {
             case 0: ack = tx == 0x01; m_joy_step = ack ? 1 : 5; break;  // pad address; others ignored
             case 1: ack = tx == 0x42; rx = ack ? 0x41 : 0xFF; m_joy_step = ack ? 2 : 5; break;  // read: ID lo
@@ -590,6 +596,7 @@ void Engine::RunFrame() {
     // upgrade with a scanline-based scheduler.
     RaiseIrq(0);
     m_frame_counter++;
+    FlushMemoryCards();
 
     if (m_trace) {
         // TRACE_FORMAT.md section 3: `vsync`, then the checkpoint taken at it.
@@ -620,9 +627,13 @@ void Engine::RunHle() {
         }
         // A0:02 read / 2A memcpy / 2B memset write guest RAM straight through the pointer: they may
         // load or overwrite code. shortcut: other HLE writes are kernel tables, never code.
-        const uint32_t fn = m_cpu.GetGPR(9);
-        const bool copies = !m_watch.empty() && (m_cpu.GetPC() & 0x1FFFFFFF) == 0xA0 && (fn == 0x02 || fn == 0x2A || fn == 0x2B);
-        const uint32_t dst = m_cpu.GetGPR(fn == 0x02 ? 5 : 4), len = m_cpu.GetGPR(6);
+        // B0:34 read and B0:4F _card_read (memory card) do the same.
+        const uint32_t fn = m_cpu.GetGPR(9), vec = m_cpu.GetPC() & 0x1FFFFFFF;
+        const bool card_read = vec == 0xB0 && fn == 0x4F;
+        const bool copies = !m_watch.empty() && ((vec == 0xA0 && (fn == 0x02 || fn == 0x2A || fn == 0x2B)) ||
+                                                 (vec == 0xB0 && fn == 0x34) || card_read);
+        const uint32_t dst = card_read ? m_cpu.GetGPR(6) : m_cpu.GetGPR(fn == 0x02 || fn == 0x34 ? 5 : 4);
+        const uint32_t len = card_read ? 128 : m_cpu.GetGPR(6);
         if (!m_bios.HandleBiosHook(m_cpu, m_ram.data(), m_ram.size())) break;
         if (copies) OnRamRangeWritten(dst, len);
     }
@@ -996,6 +1007,13 @@ bool Engine::ParsePadScript(std::istream& in, std::vector<PadPress>& out, size_t
         out.push_back(p);
     }
     return true;
+}
+
+bool Engine::FlushMemoryCards() {
+    bool ok = true;
+    for (MemoryCard* c : m_cards)
+        if (c && c->Dirty()) ok = c->Flush() && ok;
+    return ok;
 }
 
 uint16_t Engine::PadButtons() const {

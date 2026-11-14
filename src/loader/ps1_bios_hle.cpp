@@ -1,6 +1,7 @@
 #include "loader/ps1_bios_hle.h"
 #include "loader/disc_reader.h"
 #include "core/logger.h"
+#include "core/save_manager.h"
 #include "trace/trace.h"
 #include <iostream>
 #include <cstring>
@@ -37,6 +38,7 @@ constexpr uint32_t kRcntAck = 0xE1E8;     // 4 words: ChangeClearRCnt flags
 constexpr uint32_t kPadAck = 0xE1F8;      // ChangeClearPad flag
 constexpr uint32_t kDefaultHook = 0xE200; // jmp_buf 30h (ResetEntryInt)
 constexpr uint32_t kTCB = 0xE240, kTCBSize = 0xC0;
+constexpr uint32_t kDCB = 0xE400, kDCBSize = 0x50; // one device control block ("bu"), name at +50h
 constexpr uint32_t kIStat = 0x1F801070, kIMask = 0x1F801074, kGp0 = 0x1F801810;
 
 constexpr uint32_t Kseg0(uint32_t a) { return 0x80000000u | a; }
@@ -56,7 +58,7 @@ std::string Hex(uint32_t v) { std::ostringstream o; o << std::hex << v; return o
 // psx-spx "BIOS Event Functions": EvCB +00h class, +04h status, +08h spec, +0Ch mode, +10h func.
 constexpr uint32_t kEvFree = 0, kEvDisabled = 0x1000, kEvBusy = 0x2000, kEvReady = 0x4000;
 constexpr uint32_t kEvModeCallback = 0x1000, kEvModeReady = 0x2000;
-constexpr uint32_t kHwCard = 0xF0000011, kSwCard = 0xF4000001, kEvSpTimeout = 0x0100;
+constexpr uint32_t kHwCard = 0xF0000011, kSwCard = 0xF4000001, kEvSpTimeout = 0x0100, kEvSpIoe = 0x0004;
 } // namespace
 
 Ps1BiosHle& Ps1BiosHle::Instance() {
@@ -73,6 +75,8 @@ void Ps1BiosHle::Initialize() {
 void Ps1BiosHle::Reset() {
     m_intercept_count = 0;
     m_open_files.clear();
+    m_card_files.clear();
+    m_find = {};
     m_next_fd = 2; // shortcut: fd 0/1 are assumed to be the TTY (stdin/stdout) as after InstallDevices
     m_frames.clear();
     m_irq_frame_base = 0;
@@ -90,6 +94,17 @@ void Ps1BiosHle::InstallKernel(uint8_t* ram, size_t n) {
     Wr(ram, n, 0x108, 0xA0000000u | kPCB);  Wr(ram, n, 0x10C, 4);
     Wr(ram, n, 0x110, 0xA0000000u | kTCB);  Wr(ram, n, 0x114, kTCBSize);
     Wr(ram, n, 0x120, 0xA0000000u | kEvCB); Wr(ram, n, 0x124, kEvCBN * kEvCBSize);
+    // Device control blocks (psx-spx "BIOS File/Device Control Blocks", 50h each): the game's libcard
+    // finds the "bu" device here and hooks its firstfile entry (+34h) before calling B(42h) firstfile;
+    // without it, firstfile is skipped and the game waits for a card directory read forever.
+    // The entries are never called: the HLE file functions do the work.
+    Wr(ram, n, 0x150, 0xA0000000u | kDCB);  Wr(ram, n, 0x154, kDCBSize);
+    Wr(ram, n, kDCB + 0x00, Kseg0(kDCB + kDCBSize));
+    Wr(ram, n, kDCB + 0x04, 0x14);          // flags: block device
+    Wr(ram, n, kDCB + 0x08, 0x80);          // sector size
+    Wr(ram, n, kDCB + 0x34, Kseg0(kStubB + 4 * 0x42));
+    Wr(ram, n, kDCB + 0x38, Kseg0(kStubB + 4 * 0x43));
+    Wr(ram, n, kDCB + kDCBSize, 'b' | 'u' << 8);
     for (uint32_t i = 0; i < kATableN; ++i) Wr(ram, n, kATable + 4 * i, Kseg0(kStubA + 4 * i));
     for (uint32_t i = 0; i < kBTableN; ++i) Wr(ram, n, kBTable + 4 * i, Kseg0(kStubB + 4 * i));
     for (uint32_t i = 0; i < kCTableN; ++i) Wr(ram, n, kCTable + 4 * i, Kseg0(kStubC + 4 * i));
@@ -374,6 +389,155 @@ void Ps1BiosHle::CardNoCard(uint32_t cls, uint8_t* ram, size_t n, std::vector<ui
     DeliverEvent(cls, kEvSpTimeout, ram, n, callbacks);
 }
 
+// ── Memory card (psx-spx "Memory Card BIOS Functions" / "Memory Card Data Format") ──────────────
+// shortcut: every request completes during the call (events delivered before it returns) instead of
+// from the card IRQ some milliseconds later, as the no-card path already did. Event choice follows
+// common HLE BIOSes (unverified against a real BIOS): sector I/O ends with HwCARD EvSpIOE, info/load
+// and async file I/O with HwCARD + SwCARD EvSpIOE. The "new card" flag is never reported.
+
+void Ps1BiosHle::CardSector(bool write, CpuContext& cpu, uint8_t* ram, size_t n, std::vector<uint32_t>& callbacks) {
+    MemoryCard* card = CardAtPort(cpu.GetGPR(4));
+    const uint32_t sector = cpu.GetGPR(5), buf = cpu.GetGPR(6) & 0x1FFFFF;
+    if (!card) { CardNoCard(kHwCard, ram, n, callbacks); cpu.SetGPR(2, 1); return; }
+    if (sector >= MemoryCard::kFrames || !ram || buf + MemoryCard::kFrameSize > n) { cpu.SetGPR(2, 0); return; }
+    if (write) card->WriteFrame(sector, ram + buf);
+    else std::memcpy(ram + buf, card->Frame(sector), MemoryCard::kFrameSize);
+    DeliverEvent(kHwCard, kEvSpIoe, ram, n, callbacks);
+    cpu.SetGPR(2, 1);
+}
+
+namespace {
+constexpr uint32_t kBlockSize = 0x2000, kFramesPerBlock = 64;
+uint8_t Xor127(const uint8_t* f) { uint8_t x = 0; for (int i = 0; i < 127; ++i) x ^= f[i]; return x; }
+std::string DirName(const uint8_t* dir) {  // directory frame +0Ah, 20 chars max
+    std::string s;
+    for (int i = 0; i < 20 && dir[0x0A + i]; ++i) s += char(dir[0x0A + i]);
+    return s;
+}
+// firstfile wildcards: '?' any one character, '*' anything from here on.
+bool NameMatches(const std::string& pat, const std::string& name) {
+    for (size_t i = 0; i < pat.size(); ++i) {
+        if (pat[i] == '*') return true;
+        if (i >= name.size() || (pat[i] != '?' && pat[i] != name[i])) return false;
+    }
+    return pat.size() == name.size();
+}
+// Directory frame (1..15) of the first block of `name`, 0 if none.
+uint32_t FindFile(const MemoryCard& card, const std::string& name) {
+    for (uint32_t f = 1; f < 16; ++f)
+        if (card.Frame(f)[0] == 0x51 && DirName(card.Frame(f)) == name) return f;
+    return 0;
+}
+} // namespace
+
+// "buXY:NAME" (X = slot 0/1, Y = multitap port, only 0 here). Returns false for a slot without a card
+// so the caller answers -1 as before.
+bool Ps1BiosHle::CardFileOpen(const std::string& path, uint32_t mode, CpuContext& cpu) {
+    MemoryCard* card = (path[2] == '0' || path[2] == '1') && path[3] == '0' ? m_cards[path[2] - '0'] : nullptr;
+    if (!card) return false;
+    const std::string name = path.substr(5, 20);
+    int32_t result = -1;
+    CardFile file{card, {}, 0, (mode & 0x8000) != 0};
+    const uint32_t f = name.empty() ? 0 : FindFile(*card, name);
+    if (mode & 0x200) {  // create, size in blocks in bits 16-31; fails if the name exists or space is short
+        const uint32_t blocks = std::max<uint32_t>(1, mode >> 16);
+        std::vector<uint32_t> free_frames;
+        for (uint32_t d = 1; d < 16 && free_frames.size() < blocks; ++d)
+            if ((card->Frame(d)[0] & 0xF0) == 0xA0) free_frames.push_back(d);
+        if (!name.empty() && !f && free_frames.size() == blocks) {
+            for (size_t i = 0; i < blocks; ++i) {
+                uint8_t dir[MemoryCard::kFrameSize] = {};
+                dir[0] = i == 0 ? 0x51 : (i + 1 == blocks ? 0x53 : 0x52);
+                if (i == 0) {
+                    const uint32_t size = blocks * kBlockSize;
+                    for (int b = 0; b < 4; ++b) dir[4 + b] = uint8_t(size >> (8 * b));
+                    std::memcpy(dir + 0x0A, name.data(), name.size());
+                }
+                const uint16_t next = i + 1 < blocks ? uint16_t(free_frames[i + 1] - 1) : 0xFFFF;
+                dir[8] = uint8_t(next);
+                dir[9] = uint8_t(next >> 8);
+                dir[127] = Xor127(dir);
+                card->WriteFrame(free_frames[i], dir);
+            }
+            file.blocks = free_frames;
+        }
+    } else if (f) {
+        for (uint32_t d = f, guard = 0; d >= 1 && d < 16 && guard < 15; ++guard) {
+            file.blocks.push_back(d);
+            const uint32_t next = card->Frame(d)[8] | (card->Frame(d)[9] << 8);
+            if (next == 0xFFFF) break;
+            d = next + 1;
+        }
+    }
+    if (!file.blocks.empty()) {
+        result = m_next_fd++;
+        m_card_files[result] = std::move(file);
+    }
+    PRM_LOG_INFO("BIOS", "open('" + path + "', " + Hex(mode) + "h) -> " + std::to_string(result));
+    cpu.SetGPR(2, static_cast<uint32_t>(result));
+    return true;
+}
+
+// read/write on a card fd: whole 128-byte frames at a 128-byte aligned position inside the file.
+bool Ps1BiosHle::CardFileIo(bool write, CpuContext& cpu, uint8_t* ram, size_t n, std::vector<uint32_t>& callbacks) {
+    auto it = m_card_files.find(static_cast<int>(cpu.GetGPR(4)));
+    if (it == m_card_files.end()) return false;
+    CardFile& f = it->second;
+    const uint32_t buf = cpu.GetGPR(5) & 0x1FFFFF, len = cpu.GetGPR(6);
+    const uint32_t size = uint32_t(f.blocks.size()) * kBlockSize;
+    if (!ram || len % MemoryCard::kFrameSize || f.pos % MemoryCard::kFrameSize || len > size - f.pos ||
+        buf + size_t(len) > n) {
+        cpu.SetGPR(2, 0xFFFFFFFFu);
+        return true;
+    }
+    for (uint32_t done = 0; done < len; done += MemoryCard::kFrameSize, f.pos += MemoryCard::kFrameSize) {
+        const uint32_t frame = f.blocks[f.pos / kBlockSize] * kFramesPerBlock + (f.pos % kBlockSize) / MemoryCard::kFrameSize;
+        if (write) f.card->WriteFrame(frame, ram + buf + done);
+        else std::memcpy(ram + buf + done, f.card->Frame(frame), MemoryCard::kFrameSize);
+    }
+    if (f.async) {  // completion through events; v0 = 0 like common HLE BIOSes
+        DeliverEvent(kHwCard, kEvSpIoe, ram, n, callbacks);
+        DeliverEvent(kSwCard, kEvSpIoe, ram, n, callbacks);
+        cpu.SetGPR(2, 0);
+    } else {
+        cpu.SetGPR(2, len);
+    }
+    return true;
+}
+
+// firstfile(pattern, direntry) / nextfile(direntry) -> direntry, or 0 when no (more) file matches.
+// DIRENTRY: name[20], +14h attr, +18h size, +1Ch next, +20h head (first block), +24h system[4].
+void Ps1BiosHle::CardFind(bool first, CpuContext& cpu, uint8_t* ram, size_t n, std::vector<uint32_t>& callbacks) {
+    const uint32_t entry = cpu.GetGPR(first ? 5 : 4);
+    if (first) {
+        std::string pat;
+        for (uint32_t p = cpu.GetGPR(4) & 0x1FFFFF; ram && p < n && ram[p] && pat.size() < 64; ++p) pat += char(ram[p]);
+        m_find = {};
+        if (pat.size() >= 5 && pat.compare(0, 2, "bu") == 0 && pat[4] == ':' && pat[3] == '0' && (pat[2] == '0' || pat[2] == '1'))
+            m_find.card = m_cards[pat[2] - '0'];
+        m_find.pattern = pat.size() > 5 ? pat.substr(5) : "*";
+        // firstfile re-reads the card directory (libcard forces it, see the "bu" DCB): the game waits
+        // for that read's HwCARD event. A "buXY:" path on an empty slot times out.
+        if (pat.compare(0, 2, "bu") == 0)
+            DeliverEvent(kHwCard, m_find.card ? kEvSpIoe : kEvSpTimeout, ram, n, callbacks);
+    }
+    cpu.SetGPR(2, 0);
+    if (!m_find.card || !ram || (entry & 0x1FFFFF) + 0x28 > n) return;
+    while (m_find.next < 16) {
+        const uint8_t* dir = m_find.card->Frame(m_find.next++);
+        const std::string name = DirName(dir);
+        if (dir[0] != 0x51 || name.empty() || !NameMatches(m_find.pattern, name)) continue;
+        uint8_t* e = ram + (entry & 0x1FFFFF);
+        std::memset(e, 0, 0x28);
+        std::memcpy(e, name.data(), name.size());
+        Wr(ram, n, entry + 0x14, 0x51);
+        Wr(ram, n, entry + 0x18, Rd(dir, MemoryCard::kFrameSize, 4));
+        Wr(ram, n, entry + 0x20, m_find.next - 1);
+        cpu.SetGPR(2, entry);
+        return;
+    }
+}
+
 uint32_t Ps1BiosHle::EventCall(uint32_t fn, CpuContext& cpu, uint8_t* ram, size_t n, bool& blocked) {
     uint32_t a0 = cpu.GetGPR(4);
     if (fn == 0x08) { // OpenEvent(class, spec, mode, func) -> F10000xxh, or -1 when the table is full
@@ -423,8 +587,8 @@ bool Ps1BiosHle::ExecuteCall(BiosVector vec, uint32_t func_code, CpuContext& cpu
 
 // Function numbers per psx-spx "BIOS Function Summary". Implemented: what Persona 2 EP calls
 // (FUNCTION_CATALOG "Stubs BIOS": 7 A0, 26 B0, 3 C0 + B(56h)/B(57h)) for events, interrupts,
-// tables, heap and files, plus the existing memcpy/memset/puts. Memory card (A70/AB/AC, B4A-50)
-// behaves as "no card inserted"; B42/43 (firstfile/nextfile) are logged as unimplemented.
+// tables, heap and files, plus the existing memcpy/memset/puts. Memory card (A70/AB/AC, B4A-50,
+// "buXY:" files, B42/43 firstfile/nextfile) works on the inserted MemoryCard, else "no card inserted".
 bool Ps1BiosHle::ExecuteCall(BiosVector vec, uint32_t func_code, CpuContext& cpu, uint8_t* ram, size_t ram_size) {
     m_intercept_count++;
     std::vector<uint32_t> callbacks;
@@ -434,8 +598,12 @@ bool Ps1BiosHle::ExecuteCall(BiosVector vec, uint32_t func_code, CpuContext& cpu
         switch (func_code) {
             case 0x00: HandleFileOpen(cpu, ram, ram_size); break;   // open(name, mode)
             case 0x01: HandleFileSeek(cpu); break;                  // lseek(fd, off, whence)
-            case 0x02: HandleFileRead(cpu, ram, ram_size); break;   // read(fd, dst, len)
-            case 0x03: HandleFileWrite(cpu, ram, ram_size); break;  // write(fd, src, len)
+            case 0x02:                                              // read(fd, dst, len)
+                if (!CardFileIo(false, cpu, ram, ram_size, callbacks)) HandleFileRead(cpu, ram, ram_size);
+                break;
+            case 0x03:                                              // write(fd, src, len)
+                if (!CardFileIo(true, cpu, ram, ram_size, callbacks)) HandleFileWrite(cpu, ram, ram_size);
+                break;
             case 0x04: HandleFileClose(cpu); break;                 // close(fd)
             case 0x2A: HandleMemCopy(cpu, ram, ram_size); break;
             case 0x2B: HandleMemSet(cpu, ram, ram_size); break;
@@ -448,7 +616,13 @@ bool Ps1BiosHle::ExecuteCall(BiosVector vec, uint32_t func_code, CpuContext& cpu
             case 0x72: cpu.SetGPR(2, 0); break;                     // _96_remove: no BIOS CD driver to remove
             case 0x70: cpu.SetGPR(2, 0); break;                     // _bu_init
             case 0xAB: case 0xAC:                                   // _card_info(port) / _card_load(port)
-                CardNoCard(kSwCard, ram, ram_size, callbacks);
+                if (CardAtPort(cpu.GetGPR(4))) {
+                    // Card present, directory readable: low and high level "end of I/O".
+                    DeliverEvent(kHwCard, kEvSpIoe, ram, ram_size, callbacks);
+                    DeliverEvent(kSwCard, kEvSpIoe, ram, ram_size, callbacks);
+                } else {
+                    CardNoCard(kSwCard, ram, ram_size, callbacks);
+                }
                 cpu.SetGPR(2, 1);
                 break;
             default: LogUnimplemented(vec, func_code); cpu.SetGPR(2, 0); break;
@@ -486,14 +660,16 @@ bool Ps1BiosHle::ExecuteCall(BiosVector vec, uint32_t func_code, CpuContext& cpu
             }
             case 0x32: HandleFileOpen(cpu, ram, ram_size); break;
             case 0x33: HandleFileSeek(cpu); break;
-            case 0x34: HandleFileRead(cpu, ram, ram_size); break;
-            case 0x35: HandleFileWrite(cpu, ram, ram_size); break;
+            case 0x34: if (!CardFileIo(false, cpu, ram, ram_size, callbacks)) HandleFileRead(cpu, ram, ram_size); break;
+            case 0x35: if (!CardFileIo(true, cpu, ram, ram_size, callbacks)) HandleFileWrite(cpu, ram, ram_size); break;
             case 0x36: HandleFileClose(cpu); break;
             case 0x3F: HandleStdPuts(cpu, ram, ram_size); break;
+            case 0x42: case 0x43:                     // firstfile / nextfile
+                CardFind(func_code == 0x42, cpu, ram, ram_size, callbacks);
+                break;
             case 0x4A: case 0x4B: case 0x4C: cpu.SetGPR(2, 0); break; // InitCARD2 / StartCARD / StopCARD
             case 0x4E: case 0x4F:                     // _card_write / _card_read(port, sector, buf)
-                CardNoCard(kHwCard, ram, ram_size, callbacks);
-                cpu.SetGPR(2, 1);
+                CardSector(func_code == 0x4E, cpu, ram, ram_size, callbacks);
                 break;
             case 0x50: cpu.SetGPR(2, 0); break;       // _new_card
             case 0x56: cpu.SetGPR(2, kCTable); break; // GetC0Table
@@ -556,6 +732,9 @@ void Ps1BiosHle::HandleFileOpen(CpuContext& cpu, const uint8_t* ram, size_t ram_
         }
     }
 
+    if (filename.size() >= 5 && filename.compare(0, 2, "bu") == 0 && filename[4] == ':' &&
+        CardFileOpen(filename, cpu.GetGPR(5), cpu))
+        return;
     if (m_disc_reader && !filename.empty()) {
         std::vector<uint8_t> file_bytes;
         // Strip cdrom: prefix if present
@@ -587,9 +766,17 @@ void Ps1BiosHle::HandleFileOpen(CpuContext& cpu, const uint8_t* ram, size_t ram_
 
 void Ps1BiosHle::HandleFileSeek(CpuContext& cpu) {
     // lseek(fd, offset, seektype): 0 = from start, 1 = from current (psx-spx); 2 = from end (from memory).
-    auto it = m_open_files.find(static_cast<int>(cpu.GetGPR(4)));
     int64_t off = static_cast<int32_t>(cpu.GetGPR(5));
     uint32_t whence = cpu.GetGPR(6);
+    if (auto c = m_card_files.find(static_cast<int>(cpu.GetGPR(4))); c != m_card_files.end()) {
+        const int64_t size = int64_t(c->second.blocks.size()) * 0x2000;
+        int64_t pos = (whence == 0 ? 0 : whence == 1 ? int64_t(c->second.pos) : size) + off;
+        if (whence > 2 || pos < 0 || pos > size) { cpu.SetGPR(2, 0xFFFFFFFFu); return; }
+        c->second.pos = static_cast<uint32_t>(pos);
+        cpu.SetGPR(2, c->second.pos);
+        return;
+    }
+    auto it = m_open_files.find(static_cast<int>(cpu.GetGPR(4)));
     if (it == m_open_files.end() || whence > 2) { cpu.SetGPR(2, 0xFFFFFFFFu); return; }
     int64_t base = whence == 0 ? 0 : whence == 1 ? int64_t(it->second.pos) : int64_t(it->second.data.size());
     int64_t pos = base + off;
@@ -633,6 +820,7 @@ void Ps1BiosHle::HandleFileWrite(CpuContext& cpu, const uint8_t* ram, size_t ram
 void Ps1BiosHle::HandleFileClose(CpuContext& cpu) {
     int fd = static_cast<int>(cpu.GetGPR(4));
     m_open_files.erase(fd);
+    m_card_files.erase(fd);
     cpu.SetGPR(2, 0); // 0 = success
     PRM_LOG_DEBUG("BIOS", "FileClose intercepted for fd=" + std::to_string(fd));
 }

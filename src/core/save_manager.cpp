@@ -2,7 +2,9 @@
 #include "engine/engine.h"
 #include "core/logger.h"
 
+#include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <cstring>
 #include <chrono>
 #include <algorithm>
@@ -42,6 +44,133 @@ struct QuickSaveHeader {
 #pragma pack(pop)
 
 } // anonymous namespace
+
+// ── MemoryCard ──────────────────────────────────────────────────────────────
+
+void MemoryCard::Format() {
+    m_data.assign(kSize, 0);
+    auto frame = [&](uint32_t n) { return &m_data[size_t(n) * kFrameSize]; };
+    auto seal = [&](uint32_t n) { frame(n)[127] = ComputeXorChecksum(frame(n), 127); };
+    // psx-spx "Memory Card Data Format": frame 0 header, 1-15 free directory entries, 16-35 broken
+    // sector list (none), 36-62 FFh-filled, 63 write-test frame = copy of frame 0.
+    frame(0)[0] = 'M'; frame(0)[1] = 'C'; seal(0);
+    for (uint32_t n = 1; n < 16; ++n) {
+        frame(n)[0] = 0xA0;
+        frame(n)[8] = frame(n)[9] = 0xFF;  // no next block
+        seal(n);
+    }
+    for (uint32_t n = 16; n < 36; ++n) {
+        std::memset(frame(n), 0xFF, 4);
+        frame(n)[8] = frame(n)[9] = 0xFF;
+        seal(n);
+    }
+    for (uint32_t n = 36; n < 63; ++n) std::memset(frame(n), 0xFF, kFrameSize);
+    std::memcpy(frame(63), frame(0), kFrameSize);
+    m_dirty = true;
+}
+
+bool MemoryCard::Open(const std::string& path, std::string* err) {
+    m_path = path;
+    m_flag = 0x08;
+    m_step = 0;
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        if (std::ifstream(path + ".tmp", std::ios::binary)) {
+            // A crash between writing and renaming a new card: do not format over what may be a save.
+            if (err) *err = path + " is missing but " + path + ".tmp exists (interrupted write?): rename it to use it";
+            return false;
+        }
+        Format();
+        if (!Flush()) { if (err) *err = "cannot create " + path; return false; }
+        PRM_LOG_INFO("MEMCARD", "created and formatted " + path);
+        return true;
+    }
+    std::vector<uint8_t> data((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    if (data.size() != kSize) {
+        if (err) *err = path + ": " + std::to_string(data.size()) + " bytes, a raw card image has 131072";
+        return false;
+    }
+    m_data = std::move(data);
+    m_dirty = false;
+    PRM_LOG_INFO("MEMCARD", "loaded " + path);
+    return true;
+}
+
+bool MemoryCard::Flush() {
+    if (!m_dirty || m_path.empty()) return true;
+    const std::string tmp = m_path + ".tmp";
+    {
+        std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+        out.write(reinterpret_cast<const char*>(m_data.data()), std::streamsize(m_data.size()));
+        out.flush();
+        if (!out) { PRM_LOG_ERROR("MEMCARD", "cannot write " + tmp); return false; }
+    }
+    std::error_code ec;
+    std::filesystem::rename(tmp, m_path, ec);  // replaces the old image in one step
+    if (ec) { PRM_LOG_ERROR("MEMCARD", "cannot replace " + m_path + ": " + ec.message()); return false; }
+    m_dirty = false;
+    return true;
+}
+
+void MemoryCard::WriteFrame(uint32_t n, const uint8_t* src) {
+    uint8_t* dst = &m_data[size_t(n % kFrames) * kFrameSize];
+    if (std::memcmp(dst, src, kFrameSize)) { std::memcpy(dst, src, kFrameSize); m_dirty = true; }
+    m_flag &= ~0x08;
+}
+
+// psx-spx "Memory Card Read/Write Commands". Steps count bytes after the 81h address byte.
+// Read  'R': FLAG 5A 5D (MSB) (LSB) 5C 5D MSB LSB data*128 CHK 47
+// Write 'W': FLAG 5A 5D (MSB) (LSB) data*128 CHK 5C 5D 47/4E/FF
+// ID    'S': FLAG 5A 5D 5C 5D 04 00 00 80
+// The last byte of each command gets no /ACK. A bad sector reads back address FFFFh and aborts.
+// shortcut: no 31000-cycle extra delay after Read byte 7 (Sony cards); /ACK timing is the port's.
+bool MemoryCard::Exchange(uint8_t tx, uint8_t& rx) {
+    rx = 0xFF;
+    if (m_step >= 0xFFFF) return false;  // aborted or not addressed: silent until the next select
+    const uint32_t s = m_step++;
+    const uint8_t prev = m_prev;
+    m_prev = tx;
+    if (s == 0) { if (tx != 0x81) m_step = 0xFFFF; return tx == 0x81; }  // not for us: stay silent
+    if (s == 1) {
+        m_cmd = tx;
+        rx = m_flag;
+        if (tx != 'R' && tx != 'W' && tx != 'S') { m_step = 0xFFFF; return false; }
+        return true;
+    }
+    if (s == 2) { rx = 0x5A; return true; }
+    if (s == 3) { rx = 0x5D; return true; }
+    if (m_cmd == 'S') {
+        static const uint8_t kId[] = {0x5C, 0x5D, 0x04, 0x00, 0x00, 0x80};
+        if (s - 4 >= sizeof(kId)) return false;
+        rx = kId[s - 4];
+        return s - 4 < sizeof(kId) - 1;
+    }
+    if (s == 4) { rx = 0x00; m_sector = uint16_t(tx << 8); return true; }
+    if (s == 5) { rx = prev; m_sector |= tx; m_chk = uint8_t((m_sector >> 8) ^ (m_sector & 0xFF)); return true; }
+    const bool valid = m_sector < kFrames;
+    if (m_cmd == 'R') {
+        if (s == 6) { rx = 0x5C; return true; }
+        if (s == 7) { rx = 0x5D; return true; }
+        if (s == 8) { rx = valid ? uint8_t(m_sector >> 8) : 0xFF; return true; }
+        if (s == 9) { rx = valid ? uint8_t(m_sector) : 0xFF; return valid; }  // bad sector: abort here
+        if (!valid) return false;
+        if (s < 10 + kFrameSize) { rx = Frame(m_sector)[s - 10]; m_chk ^= rx; return true; }
+        if (s == 10 + kFrameSize) { rx = m_chk; return true; }
+        if (s == 11 + kFrameSize) rx = 0x47;
+        return false;
+    }
+    // Write
+    if (s < 6 + kFrameSize) { rx = prev; m_buf[s - 6] = tx; m_chk ^= tx; return true; }
+    if (s == 6 + kFrameSize) { rx = prev; m_chk ^= tx; return true; }  // m_chk == 0 when the checksum matched
+    if (s == 7 + kFrameSize) { rx = 0x5C; return true; }
+    if (s == 8 + kFrameSize) { rx = 0x5D; return true; }
+    if (s == 9 + kFrameSize) {
+        if (!valid) rx = 0xFF;
+        else if (m_chk) rx = 0x4E;
+        else { WriteFrame(m_sector, m_buf.data()); rx = 0x47; }
+    }
+    return false;
+}
 
 SaveManager::SaveManager() {
     FormatMemoryCard();

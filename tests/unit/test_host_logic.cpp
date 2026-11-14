@@ -59,6 +59,26 @@ int main() {
     const uint32_t all = 0xFFF9u;  // all 14 digital buttons (bits 1-2 are unused on a digital pad)
     CHECK(kb == all && gp == all);
 
+    // Command line: cards, recomp, values; errors on unknown options, missing values, no disc, bad --interp.
+    HostOptions o;
+    const char* full[] = {"personarm_sdl", "d.cue", "--memcard1", "a.mcd", "--memcard2", "b.mcd", "--recomp",
+                          "--recomp-quantum", "64", "--interp", "120", "--frames", "100", "--hidden"};
+    CHECK(ParseHostArgs(14, full, o));
+    CHECK(o.disc == "d.cue" && o.memcard[0] == "a.mcd" && o.memcard[1] == "b.mcd" && o.recomp &&
+          o.recomp_quantum == 64 && o.interp_hz == 120 && o.max_frames == 100 && o.hidden && !o.stats);
+    const char* plain[] = {"personarm_sdl", "d.cue"};
+    CHECK(ParseHostArgs(2, plain, o) && o.memcard[0].empty() && o.memcard[1].empty() && !o.recomp && o.recomp_quantum == 1);
+    const char* missing[] = {"personarm_sdl", "d.cue", "--memcard1"};
+    CHECK(!ParseHostArgs(3, missing, o));
+    const char* unknown[] = {"personarm_sdl", "d.cue", "--bogus", "1"};
+    CHECK(!ParseHostArgs(4, unknown, o));
+    const char* nodisc[] = {"personarm_sdl", "--recomp"};
+    CHECK(!ParseHostArgs(2, nodisc, o));
+    const char* interp[] = {"personarm_sdl", "d.cue", "--interp", "90"};
+    CHECK(!ParseHostArgs(4, interp, o));
+    const char* two[] = {"personarm_sdl", "d.cue", "e.cue"};
+    CHECK(!ParseHostArgs(3, two, o));
+
     std::puts("test_host_logic: OK");
     return 0;
 }

@@ -9,6 +9,7 @@
 #include "loader/exe_loader.h"
 #include "loader/ps1_bios_hle.h"
 #include "trace/trace.h"
+#include "core/save_manager.h"
 
 using personarm::CpuContext;
 using personarm::Engine;
@@ -289,6 +290,110 @@ static void TestMemoryCardNoCard() {
     CHECK_EQ("_card_info runs the SwCARD timeout callback", cpu.GetPC(), 0x80012340);
 }
 
+// Memory card inserted: a guest program saves a file on "bu00:", reads it back and lists it
+// (open/create, write, close, open, read, firstfile, nextfile), then sector I/O and card events.
+static void TestMemoryCardFiles() {
+    const uint32_t kName = kData + 0x100, kPat = kData + 0x120, kSrc = kData + 0x200, kDst = kData + 0x300,
+                   kDir = kData + 0x400;
+    Prog p;
+    p.Emit({LUI(s7, kData >> 16)});
+    p.Li(a0, kName);
+    p.Li(a1, 0x00010202);  // 1 block, create, write
+    p.Bios(0xB0, 0x32);    // open
+    p.Emit({SW(v0, 0x00, s7), MOVE(a0, v0)});
+    p.Li(a1, kSrc);
+    p.Emit({ADDIU(a2, zero, 0x80)});
+    p.Bios(0xB0, 0x35);    // write 128 bytes
+    p.Emit({SW(v0, 0x04, s7), LW(a0, 0x00, s7), kNop});
+    p.Bios(0xB0, 0x36);    // close
+    p.Li(a0, kName);
+    p.Emit({ADDIU(a1, zero, 1)});
+    p.Bios(0xB0, 0x32);    // open for reading
+    p.Emit({SW(v0, 0x08, s7), MOVE(a0, v0)});
+    p.Li(a1, kDst);
+    p.Emit({ADDIU(a2, zero, 0x80)});
+    p.Bios(0xB0, 0x34);    // read 128 bytes
+    p.Emit({SW(v0, 0x0C, s7)});
+    p.Li(a0, kName);
+    p.Li(a1, 0x00010202);
+    p.Bios(0xB0, 0x32);    // create again: the name exists -> -1
+    p.Emit({SW(v0, 0x18, s7)});
+    p.Li(a0, kPat);
+    p.Li(a1, kDir);
+    p.Bios(0xB0, 0x42);    // firstfile("bu00:BI*")
+    p.Emit({SW(v0, 0x10, s7)});
+    p.Li(a0, kDir);
+    p.Bios(0xB0, 0x43);    // nextfile: no more
+    p.Emit({SW(v0, 0x14, s7)});
+    p.Spin();
+    auto& e = Boot(p);
+    personarm::MemoryCard card;
+    e.SetMemoryCard(0, &card);
+    for (uint32_t i = 0; i < 32; ++i) e.Write(kSrc + 4 * i, 0x01020304u * (i + 1), 4);
+    const char* path = "bu00:BISLPS-02785TEST";
+    const char* name = path + 5;  // the directory holds the name without the device
+    for (uint32_t i = 0; i <= std::strlen(path); ++i) e.Write(kName + i, path[i], 1);
+    for (uint32_t i = 0; i < 9; ++i) e.Write(kPat + i, "bu00:BI*"[i], 1);
+    e.RunFrame();
+    CHECK_EQ("open/create fd", Data(e, 0x00) < 0x100, 1);
+    CHECK_EQ("write -> 128 (sync)", Data(e, 0x04), 0x80);
+    CHECK_EQ("open existing", Data(e, 0x08) < 0x100, 1);
+    CHECK_EQ("read -> 128", Data(e, 0x0C), 0x80);
+    CHECK_EQ("create existing -> -1", Data(e, 0x18), 0xFFFFFFFFu);
+    CHECK_EQ("firstfile -> entry", Data(e, 0x10), kDir);
+    CHECK_EQ("nextfile -> 0", Data(e, 0x14), 0);
+    CHECK_EQ("data read back", std::memcmp(&e.GetRam()[kDst & 0x1FFFFF], &e.GetRam()[kSrc & 0x1FFFFF], 128), 0);
+    CHECK_EQ("direntry name", std::memcmp(&e.GetRam()[kDir & 0x1FFFFF], name, std::strlen(name)), 0);
+    CHECK_EQ("direntry size", Data(e, 0x400 + 0x18), 0x2000);
+    const uint8_t* dir = card.Frame(1);
+    uint8_t x = 0;
+    for (int i = 0; i < 127; ++i) x ^= dir[i];
+    CHECK_EQ("dir frame in use", dir[0], 0x51);
+    CHECK_EQ("dir frame size", dir[4] | dir[5] << 8, 0x2000);
+    CHECK_EQ("dir frame last block", dir[8] | dir[9] << 8, 0xFFFF);
+    CHECK_EQ("dir frame checksum", dir[127], x);
+    CHECK_EQ("file data in block 1", std::memcmp(card.Frame(64), &e.GetRam()[kSrc & 0x1FFFFF], 128), 0);
+    e.SetMemoryCard(0, nullptr);
+
+    // Sector I/O and events on the BIOS directly (slot 2 = port 10h).
+    auto& bios = Ps1BiosHle::Instance();
+    bios.Initialize();
+    bios.SetIoHooks(nullptr, nullptr);
+    std::vector<uint8_t> ram(2 * 1024 * 1024, 0);
+    bios.InstallKernel(ram.data(), ram.size());
+    personarm::MemoryCard card2;
+    bios.SetMemoryCard(1, &card2);
+    CpuContext cpu;
+    auto call = [&](uint32_t vec, uint32_t fn, uint32_t x0 = 0, uint32_t x1 = 0, uint32_t x2 = 0, uint32_t x3 = 0) {
+        cpu.SetGPR(9, fn);
+        cpu.SetGPR(4, x0); cpu.SetGPR(5, x1); cpu.SetGPR(6, x2); cpu.SetGPR(7, x3);
+        cpu.SetGPR(31, 0x80001000);
+        cpu.SetPC(vec);
+        bios.HandleBiosHook(cpu, ram.data(), ram.size());
+        return cpu.GetGPR(2);
+    };
+    const uint32_t sw = 0xF4000001, hw = 0xF0000011, ioe = 0x0004, timeout = 0x0100;
+    const uint32_t sw_ok = call(0xB0, 0x08, sw, ioe, 0x2000, 0), hw_ok = call(0xB0, 0x08, hw, ioe, 0x2000, 0);
+    const uint32_t sw_to = call(0xB0, 0x08, sw, timeout, 0x2000, 0);
+    for (uint32_t ev : {sw_ok, hw_ok, sw_to}) call(0xB0, 0x0C, ev);
+    CHECK_EQ("_card_info(10h) accepted", call(0xA0, 0xAB, 0x10), 1);
+    CHECK_EQ("_card_info -> SwCARD IOE", call(0xB0, 0x0B, sw_ok), 1);
+    CHECK_EQ("_card_info no timeout", call(0xB0, 0x0B, sw_to), 0);
+    for (int i = 0; i < 128; ++i) ram[0x100000 + i] = uint8_t(i ^ 0x5A);
+    CHECK_EQ("_card_write accepted", call(0xB0, 0x4E, 0x10, 0x3F, 0x80100000), 1);
+    CHECK_EQ("_card_write -> HwCARD IOE", call(0xB0, 0x0B, hw_ok), 1);
+    CHECK_EQ("_card_write landed", std::memcmp(card2.Frame(0x3F), &ram[0x100000], 128), 0);
+    CHECK_EQ("_card_read accepted", call(0xB0, 0x4F, 0x10, 0x3F, 0x80100100), 1);
+    CHECK_EQ("_card_read data", std::memcmp(&ram[0x100100], &ram[0x100000], 128), 0);
+    CHECK_EQ("_card_read bad sector -> 0", call(0xB0, 0x4F, 0x10, 0x400, 0x80100100), 0);
+    CHECK_EQ("_card_info slot 1 (empty) -> timeout", (call(0xA0, 0xAB, 0x00), call(0xB0, 0x0B, sw_to)), 1);
+    CHECK_EQ("open on the empty slot -> -1", [&] {
+        std::memcpy(&ram[0x100200], "bu00:X", 7);
+        return call(0xB0, 0x32, 0x80100200, 1);
+    }(), 0xFFFFFFFFu);
+    bios.SetMemoryCard(1, nullptr);
+}
+
 static std::string TraceRun() {
     std::ostringstream out;
     {
@@ -321,6 +426,7 @@ int main() {
     std::printf("[UNIT TEST] HLE kernel events / IRQ chain / tables / trace\n");
     TestEventSemantics();
     TestMemoryCardNoCard();
+    TestMemoryCardFiles();
     TestVsyncChain();
     TestWaitEvent();
     TestCriticalSection();

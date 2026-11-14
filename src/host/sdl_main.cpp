@@ -5,16 +5,18 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 
+#include <array>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
 #include <fstream>
 #include <string>
 #include <vector>
 
+#include "core/save_manager.h"
 #include "engine/engine.h"
 #include "host/host_logic.h"
 #include "loader/png_codec.h"
+#include "recomp/runtime/generated_modules.h"
 #include "rendering/frame_interp.h"
 
 using namespace personarm;
@@ -28,29 +30,34 @@ static void Usage() {
                          "                       ones between the game's frames (display only, one game frame late)\n"
                          "  --dump-dir D --dump-from F --dump-to G   every presented picture of frames F..G as PNG\n"
                          "  --stats              per second: game flips, distinct pictures, interpolable pairs\n"
+                         "  --memcard1 F, --memcard2 F   memory card in slot 1/2: raw 128 KB .mcd, created and\n"
+                         "                       formatted if missing, rewritten atomically when the game saves\n"
+                         "  --recomp             run the recompiled code linked into this build (local\n"
+                         "                       -DPRM_RECOMP_GENERATED_DIR builds)   --recomp-quantum N (default 1)\n"
                          "  --unthrottled        no 60 Hz pacing    --hidden  no visible window\n");
 }
 
 int main(int argc, char** argv) {
-    std::string disc, screenshot, input_script, dump_dir;
-    uint64_t max_frames = 0, dump_from = 0, dump_to = 0;
-    int interp_hz = 0;
-    bool stats = false, unthrottled = false, hidden = false;
-    for (int i = 1; i < argc; ++i) {
-        if (!std::strcmp(argv[i], "--frames") && i + 1 < argc) max_frames = std::strtoull(argv[++i], nullptr, 10);
-        else if (!std::strcmp(argv[i], "--screenshot") && i + 1 < argc) screenshot = argv[++i];
-        else if (!std::strcmp(argv[i], "--input-script") && i + 1 < argc) input_script = argv[++i];
-        else if (!std::strcmp(argv[i], "--interp") && i + 1 < argc) interp_hz = std::atoi(argv[++i]);
-        else if (!std::strcmp(argv[i], "--dump-dir") && i + 1 < argc) dump_dir = argv[++i];
-        else if (!std::strcmp(argv[i], "--dump-from") && i + 1 < argc) dump_from = std::strtoull(argv[++i], nullptr, 10);
-        else if (!std::strcmp(argv[i], "--dump-to") && i + 1 < argc) dump_to = std::strtoull(argv[++i], nullptr, 10);
-        else if (!std::strcmp(argv[i], "--stats")) stats = true;
-        else if (!std::strcmp(argv[i], "--unthrottled")) unthrottled = true;
-        else if (!std::strcmp(argv[i], "--hidden")) hidden = true;
-        else if (argv[i][0] != '-' && disc.empty()) disc = argv[i];
-        else { Usage(); return EXIT_FAILURE; }
+    host::HostOptions opt;
+    if (!host::ParseHostArgs(argc, argv, opt)) { Usage(); return EXIT_FAILURE; }
+    const std::string &disc = opt.disc, &screenshot = opt.screenshot, &input_script = opt.input_script,
+                      &dump_dir = opt.dump_dir;
+    const uint64_t max_frames = opt.max_frames, dump_from = opt.dump_from, dump_to = opt.dump_to;
+    const int interp_hz = opt.interp_hz;
+    const bool stats = opt.stats, unthrottled = opt.unthrottled, hidden = opt.hidden;
+    if (opt.recomp && recomp::GeneratedModules().empty()) {
+        std::fprintf(stderr, "--recomp: this build has no recompiled code (configure with "
+                             "-DPRM_RECOMP_GENERATED_DIR=<dir outside the repo>)\n");
+        return EXIT_FAILURE;
     }
-    if (disc.empty() || interp_hz < 0 || interp_hz % 60) { Usage(); return EXIT_FAILURE; }
+    std::array<MemoryCard, 2> cards;
+    for (int slot = 0; slot < 2; ++slot) {
+        std::string err;
+        if (!opt.memcard[slot].empty() && !cards[slot].Open(opt.memcard[slot], &err)) {
+            std::fprintf(stderr, "--memcard%d: %s\n", slot + 1, err.c_str());
+            return EXIT_FAILURE;
+        }
+    }
     std::vector<Engine::PadPress> presses;
     if (!input_script.empty()) {
         std::ifstream in(input_script);
@@ -83,12 +90,15 @@ int main(int argc, char** argv) {
     EngineBootConfig config;
     config.enable_bios_hle = true;
     engine.Initialize(config);
+    if (opt.recomp) engine.SetRecompModules(recomp::GeneratedModules(), opt.recomp_quantum);
     if (!engine.BootFromDisc(disc)) {
         std::fprintf(stderr, "cannot boot %s\n", disc.c_str());
         SDL_Quit();
         return EXIT_FAILURE;
     }
     engine.SetPadScript(presses);
+    for (int slot = 0; slot < 2; ++slot)
+        if (!opt.memcard[slot].empty()) engine.SetMemoryCard(slot, &cards[slot]);
 
     // Resolve the name tables to SDL codes once.
     struct KeyBit { SDL_Scancode code; uint16_t bit; };
@@ -242,6 +252,9 @@ int main(int argc, char** argv) {
     std::printf("[SDL] frames=%llu non-black=%llu audio_samples=%llu\n", (unsigned long long)engine.GetFrameCount(),
                 (unsigned long long)lit_frames, (unsigned long long)audio_samples);
     engine.GetGpu().SetCommandLog(nullptr);
+    if (!engine.FlushMemoryCards()) std::fprintf(stderr, "a memory card could not be written\n");
+    engine.SetMemoryCard(0, nullptr);
+    engine.SetMemoryCard(1, nullptr);
     engine.Shutdown();
     for (SDL_Gamepad* g : gamepads) SDL_CloseGamepad(g);
     if (texture) SDL_DestroyTexture(texture);

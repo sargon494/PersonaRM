@@ -36,6 +36,52 @@ struct SaveSlotInfo {
 };
 
 // ───────────────────────────────────────────────────────────────────────────
+// MemoryCard — one standard 128 KB card (raw .mcd image: 1024 frames of 128 bytes, block 0 = header,
+// directory and broken-sector list) with the SIO0 card protocol (psx-spx "Memory Card Read/Write
+// Commands") and atomic host persistence. Shared by the SIO0 port and the HLE BIOS card functions.
+// ───────────────────────────────────────────────────────────────────────────
+
+class MemoryCard {
+public:
+    static constexpr uint32_t kFrameSize = 128, kFrames = 1024;
+    static constexpr size_t kSize = kFrameSize * kFrames;  // 131072
+
+    MemoryCard() { Format(); }
+
+    /// Fresh card: "MC" header, 15 free directory frames (A0h), empty broken-sector list.
+    void Format();
+    /// Load `path` (exactly 131072 bytes), or format and create it when it does not exist.
+    /// False (with a reason in `err`) when the file exists but cannot be used; nothing is written then.
+    bool Open(const std::string& path, std::string* err = nullptr);
+    /// Write the image to the opened path if it changed: temp file + rename, so a crash never leaves
+    /// a half-written card. True when nothing needed writing or the write succeeded.
+    bool Flush();
+    bool Dirty() const { return m_dirty; }
+    const std::string& Path() const { return m_path; }
+
+    const uint8_t* Frame(uint32_t n) const { return &m_data[size_t(n % kFrames) * kFrameSize]; }
+    void WriteFrame(uint32_t n, const uint8_t* src);  // marks dirty, clears FLAG bit 3 ("new card")
+    const std::vector<uint8_t>& Data() const { return m_data; }
+    uint8_t Flag() const { return m_flag; }
+
+    /// SIO0: the card was selected (/JOYn low); the next byte must be the 81h address.
+    void Select() { m_step = 0; }
+    /// One SIO0 byte exchange while selected: `rx` = card reply, returns whether /ACK follows.
+    bool Exchange(uint8_t tx, uint8_t& rx);
+
+private:
+    std::vector<uint8_t> m_data;
+    std::string m_path;
+    bool m_dirty = false;
+    uint8_t m_flag = 0x08;  // bit 3: directory not read since power-up (cleared by a write)
+    // Protocol state
+    uint32_t m_step = 0;
+    uint8_t m_cmd = 0, m_prev = 0, m_chk = 0;
+    uint16_t m_sector = 0;
+    std::array<uint8_t, kFrameSize> m_buf{};
+};
+
+// ───────────────────────────────────────────────────────────────────────────
 // SaveManager — Virtual PS1 Memory Card & QuickSave / QuickLoad System
 // ───────────────────────────────────────────────────────────────────────────
 

@@ -12,6 +12,7 @@
 namespace personarm {
 
 class DiscReader;
+class MemoryCard;
 namespace trace { class ITraceSink; }
 
 enum class BiosVector : uint32_t {
@@ -47,6 +48,8 @@ public:
     bool ExecuteCall(BiosVector vec, uint32_t func_code, CpuContext& cpu, uint8_t* ram, size_t ram_size);
 
     void SetDiscReader(DiscReader* disc_reader) { m_disc_reader = disc_reader; }
+    /// Memory card behind port 00h/"bu00:" (slot 0) or 10h/"bu10:" (slot 1); null = no card inserted.
+    void SetMemoryCard(int slot, MemoryCard* card) { m_cards[slot & 1] = card; }
 
     /// True for every physical address the HLE intercepts before the CPU fetches it
     /// (exception vector 0x80, call vectors A0/B0/C0, kernel stubs/trampolines in low RAM).
@@ -98,6 +101,12 @@ private:
     uint32_t EventCall(uint32_t fn, CpuContext& cpu, uint8_t* ram, size_t ram_size, bool& blocked);
     void LogUnimplemented(BiosVector vec, uint32_t fn);
     void CardNoCard(uint32_t cls, uint8_t* ram, size_t ram_size, std::vector<uint32_t>& callbacks);
+    MemoryCard* CardAtPort(uint32_t port) const { return (port & 0xF) == 0 && port < 0x20 ? m_cards[port >> 4] : nullptr; }
+    void CardSector(bool write, CpuContext& cpu, uint8_t* ram, size_t ram_size, std::vector<uint32_t>& callbacks);
+    // "buXY:" files (psx-spx "Memory Card BIOS Functions"): open/create, 128-byte unit read/write, find.
+    bool CardFileOpen(const std::string& name, uint32_t mode, CpuContext& cpu);
+    bool CardFileIo(bool write, CpuContext& cpu, uint8_t* ram, size_t ram_size, std::vector<uint32_t>& callbacks);
+    void CardFind(bool first, CpuContext& cpu, uint8_t* ram, size_t ram_size, std::vector<uint32_t>& callbacks);
 
     // Vector A Handlers (C Runtime & File I/O)
     void HandleFileOpen(CpuContext& cpu, const uint8_t* ram, size_t ram_size);
@@ -117,6 +126,10 @@ private:
     DiscReader* m_disc_reader = nullptr;
     struct OpenFile { std::vector<uint8_t> data; size_t pos = 0; };
     std::unordered_map<int, OpenFile> m_open_files;
+    MemoryCard* m_cards[2] = {nullptr, nullptr};
+    struct CardFile { MemoryCard* card = nullptr; std::vector<uint32_t> blocks; uint32_t pos = 0; bool async = false; };
+    std::unordered_map<int, CardFile> m_card_files;
+    struct CardFindState { MemoryCard* card = nullptr; std::string pattern; uint32_t next = 1; } m_find;
     int m_next_fd = 2;
 
     std::vector<Frame> m_frames;
