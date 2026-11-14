@@ -14,6 +14,7 @@
 
 #include "core/save_manager.h"
 #include "engine/engine.h"
+#include "engine/gameplay_patches.h"
 #include "host/host_logic.h"
 #include "loader/png_codec.h"
 #include "recomp/runtime/generated_modules.h"
@@ -32,7 +33,9 @@ static void Usage() {
                          "  --dump-dir D --dump-from F --dump-to G   every presented picture of frames F..G as PNG\n"
                          "  --texture-dump D     write every VRAM texture the game samples as <HASH>_<bits>bit_<WxH>.png into D\n"
                          "  --mods D             HD texture mods: D/<mod>/textures/<HASH>.png (+ manifest.json priority/serial)\n"
-                         "  --stats              per second: game flips, distinct pictures, interpolable pairs\n"
+                         "  --text-speed S       dialogue speed: normal (game default), fast or instant; also set by a mod\n"
+                         "                       manifest \"gameplay\": {\"text_speed\": ...} (this flag wins). Disc 1 only\n"
+                         "  --stats             per second: game flips, distinct pictures, interpolable pairs\n"
                          "  --memcard1 F, --memcard2 F   memory card in slot 1/2: raw 128 KB .mcd, created and\n"
                          "                       formatted if missing, rewritten atomically when the game saves\n"
                          "  --recomp             run the recompiled code linked into this build (local\n"
@@ -107,6 +110,18 @@ int main(int argc, char** argv) {
             std::printf("[textures] %zu replacement textures indexed from %s\n", texture_hook.LoadMods(opt.mods),
                         opt.mods.c_str());
         engine.GetGpu().SetTextureHook(&texture_hook);
+    }
+    // Gameplay options (mod manifests, then the command line): no option = no patch = untouched engine.
+    {
+        GameplayOptions gameplay;
+        if (!opt.mods.empty()) gameplay = LoadGameplayMods(opt.mods, engine.DiscSerial());
+        if (!opt.text_speed.empty()) ParseTextSpeed(opt.text_speed, gameplay.text_speed);
+        std::vector<GamePatch> patches = BuildGamePatches(engine.DiscSerial(), gameplay);
+        if (gameplay.text_speed != TextSpeed::Normal && patches.empty())
+            std::fprintf(stderr, "[gameplay] text_speed=%s: no patch for disc %s, ignored\n", TextSpeedName(gameplay.text_speed),
+                         engine.DiscSerial().empty() ? "(unrecognized)" : engine.DiscSerial().c_str());
+        if (!patches.empty()) std::printf("[gameplay] text_speed=%s\n", TextSpeedName(gameplay.text_speed));
+        engine.SetGamePatches(std::move(patches));
     }
     engine.SetPadScript(presses);
     for (int slot = 0; slot < 2; ++slot)

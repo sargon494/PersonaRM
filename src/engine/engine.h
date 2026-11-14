@@ -28,6 +28,21 @@ namespace personarm {
 
 class MemoryCard;
 
+/// A declarative RAM patch applied right after the guest (CPU store, DMA word or HLE copy) writes
+/// the word at `trigger`. Triggering on a store, not on a PC, is what keeps interpreter and
+/// recompiled code identical: generated code only calls back for stores to watched words, at the
+/// end of that very instruction, whereas it cannot be stopped at an arbitrary PC in the middle of
+/// a compiled function. A file load (overlay DMA / HLE read) therefore triggers it the same way.
+/// The patch costs no guest cycles and its own write does not trigger anything.
+struct GamePatch {
+    struct Bytes { uint32_t address = 0; std::vector<uint8_t> bytes; };
+    std::string name;
+    uint32_t trigger = 0;            // guest RAM address (any mirror); the whole aligned word triggers
+    bool only_if_nonzero = false;    // skip when the trigger word reads zero after the store
+    std::vector<Bytes> expect;       // every range must equal RAM when it fires, else the patch is skipped (logged once)
+    Bytes write;                     // what to write
+};
+
 // ───────────────────────────────────────────────────────────────────────────
 // PlayStation 1 Hardware Clock Rates & Timings
 // ───────────────────────────────────────────────────────────────────────────
@@ -137,6 +152,14 @@ public:
 
     const std::vector<uint8_t>& GetRam() const { return m_ram; }
     void SetRam(const std::vector<uint8_t>& ram) { m_ram = ram; OnRamRangeWritten(0, PS1_MAIN_RAM_SIZE); }
+
+    /// Gameplay patches (see GamePatch): replaced as a whole, kept across Reset/boot. Empty (the
+    /// default) = nothing is watched and no store path does anything new.
+    void SetGamePatches(std::vector<GamePatch> patches);
+    uint64_t PatchesApplied(size_t i) const { return i < m_patch_applied.size() ? m_patch_applied[i] : 0; }
+    uint64_t PatchesSkipped(size_t i) const { return i < m_patch_skipped.size() ? m_patch_skipped[i] : 0; }
+    /// Serial of the recognized disc ("SLPS-02785"), empty when the boot executable is not a known one.
+    const std::string& DiscSerial() const { return m_trace_disc; }
     const std::vector<uint8_t>& GetScratchpad() const { return m_scratchpad; }
     void SetScratchpad(const std::vector<uint8_t>& sp) { m_scratchpad = sp; }
     void SetFrameCount(uint64_t count) { m_frame_counter = count; }
@@ -322,19 +345,27 @@ private:
     std::vector<LiveModule> m_mods;
     std::vector<uint32_t> m_cand_at;          // per RAM word: 1 + start in m_cand (0 = none)
     std::vector<Candidate> m_cand;            // runs ended by module == ~0u
-    std::vector<uint32_t> m_watch;            // one bit per RAM word (recomp::CpuState::watch)
+    std::vector<uint32_t> m_watch;            // one bit per RAM word: code of live modules
+    std::vector<uint32_t> m_hook_bits;        // one bit per RAM word: GamePatch triggers (empty = no patches)
+    std::vector<uint32_t> m_wake;             // m_watch | m_hook_bits: what stores check (recomp::CpuState::watch)
+    std::vector<GamePatch> m_patches;
+    std::vector<uint64_t> m_patch_applied, m_patch_skipped;
+    bool m_in_patch = false;
+    void RebuildWake();
+    void RunPatches(uint32_t ram_offset);
+    void WakeWrite(uint32_t ram_offset);
     uint64_t m_epoch = 0;                     // bumped when RAM may hold new code (DMA, HLE copy, retire)
     bool m_code_changed = false;              // a live module was retired: native code must hand back
     bool TryValidate(uint32_t pc);            // a module with an entry at pc is in RAM: make it live
     void SetLive(uint32_t index);
     void Retire(uint32_t index);
-    void OnCodeWrite(uint32_t ram_offset) {   // a write landed on a watched word
-        if ((m_watch[ram_offset >> 7] >> ((ram_offset >> 2) & 31u)) & 1u) RetireAt(ram_offset);
+    void OnCodeWrite(uint32_t ram_offset) {   // a write landed on a word: patch trigger and/or live code
+        if ((m_wake[ram_offset >> 7] >> ((ram_offset >> 2) & 31u)) & 1u) WakeWrite(ram_offset);
     }
     void RetireAt(uint32_t ram_offset);
     void OnRamRangeWritten(uint32_t addr, uint32_t len);  // HLE copies straight into RAM
     void OnRamWord(uint32_t ram_offset) {     // every bus/DMA store to RAM
-        if (!m_watch.empty()) OnCodeWrite(ram_offset);
+        if (!m_wake.empty()) OnCodeWrite(ram_offset);
     }
 
     std::vector<recomp::RecompFn> m_native_map;  // live entries and resume points, by (pc - kNativeLo) / 4
