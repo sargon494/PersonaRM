@@ -145,7 +145,7 @@
                 </article>
                 <article class="feature reveal">
                     <h3>メモリーカードとセーブ</h3>
-                    <p>予定。現時点では、ゲームからはメモリーカードが挿入されていないように見えます。クイックセーブは後で対応します。</p>
+                    <p>標準の 128 KB カードファイルを <code>--memcard1</code> と <code>--memcard2</code> で指定できます。ディスク 1 のセーブと「CONTINUE」が動作します。クイックセーブは後で対応します。</p>
                 </article>
             </div>
         </section>
@@ -161,7 +161,7 @@
             <p class="intro reveal"><strong>現在のフェーズ:全 6 ステップ中のステップ 4、静的再コンパイル(進行中)。</strong> CPU とマシンの中核は完成しています。ステップ 3(初回起動)は、さらに先へ進めるために継続中です。
                 ディスク 1 は音声付きでイントロを再生し、タイトル画面を表示し、ニューゲームでは自由移動とメインメニューまで到達します。
                 起動の挙動は、最初のオーバーレイのロードまで、リファレンスエミュレーターの PCSX-Redux と一致しています。
-                音楽と効果音が再生されるようになり、SPU はエミュレートされた時間(44,100 Hz)で動作します。リコンパイラはオーバーレイも対象になり、それぞれ RAM 上のコードのハッシュで検証され、上書きされた場合はインタプリタにフォールバックします。ディスク 1 では命令のほぼ 100% がネイティブコードとして実行され、トレースは自由移動までインタプリタと完全に一致したままです。デバイスのタイミングは遅延して進むようになり、結果は正確なまま、高速な PC でインタプリタは約 74 から 129 fps、再コンパイル版は約 100 から 370 fps に向上しました。次は、エミュレートしたメモリーカードでのセーブ・ロードと、ウィンドウでのフルスピードでのプレイです。</p>
+                音楽と効果音が再生されるようになり、SPU はエミュレートされた時間(44,100 Hz)で動作します。リコンパイラはオーバーレイも対象になり、それぞれ RAM 上のコードのハッシュで検証され、上書きされた場合はインタプリタにフォールバックします。ディスク 1 では命令のほぼ 100% がネイティブコードとして実行され、トレースは自由移動までインタプリタと完全に一致したままです。デバイスのタイミングは遅延して進むようになり、結果は正確なまま、高速な PC でインタプリタは約 74 から 129 fps、再コンパイル版は約 100 から 370 fps に向上しました。メモリーカードは動作します。標準の 128 KB の <code>.mcd</code> ファイルを <code>--memcard1</code> と <code>--memcard2</code> で指定できます。ディスク 1 ではメインメニューからセーブでき、再起動後に「CONTINUE」でそのセーブを読み込めます。SDL3 ウィンドウは開発ビルドとして、<code>--recomp</code>(再コンパイル版)をメモリーカードと併用して実行できます。次は、テクスチャ置換から始める品質向上のための MOD 対応、翻訳に向けたゲームのテキストシステムの特定、そしてさらに先へのプレイ(エリア移動、初戦闘)です。</p>
             <div class="status-table reveal" role="table" aria-label="サブシステムの進捗">
                 <div class="row head" role="row"><span role="columnheader">サブシステム</span><span
                         role="columnheader">状況</span></div>
@@ -189,8 +189,10 @@
                         class="tag progress">自由移動とメインメニュー</span></div>
                 <div class="row" role="row"><span role="cell">静的リコンパイラ</span><span role="cell"
                         class="tag progress">v0:関数単位の C++ 生成、合成テスト G2 合格。オーバーレイも対象(コードのハッシュで検証)。まだ端から端までプレイはできません</span></div>
+                <div class="row" role="row"><span role="cell">メモリーカードとセーブ</span><span role="cell"
+                        class="tag ok">動作中:128 KB の .mcd カード、ディスク 1 のセーブと CONTINUE</span></div>
                 <div class="row" role="row"><span role="cell">ウィンドウ、入力、オーディオ(SDL3)</span><span role="cell"
-                        class="tag progress">動作中。ウィンドウで SPU と CD/XA の全ミックスを再生。フレーム補間は任意(既定でオフ)</span></div>
+                        class="tag progress">動作中。ウィンドウで SPU と CD/XA の全ミックスを再生。--recomp と --memcard1/2 に対応。フレーム補間は任意(既定でオフ)</span></div>
             </div>
         </section>
 
@@ -201,7 +203,7 @@
                 <h2 id="start-title"><em>クイック</em>スタート</h2>
             </header>
             <div class="notice reveal">
-                <strong>まだプレイはできません。</strong>リリース版はまだないため、ソースからビルドしてください。以下のコマンドは、開発用にディスクイメージと
+                <strong>まだプレイはできません。</strong>リリース版はまだないため、ソースからビルドしてください。以下のコマンドのほとんどは、開発用にディスクイメージと
                 設定を管理するものです。
             </div>
             <ol class="steps">
@@ -219,7 +221,9 @@
                     <div class="code">
                         <pre><code>personarm --scan "/path/to/discs"
 personarm --verify-disc "/path/to/disc1.cue"
-personarm --portal</code></pre>
+personarm --portal
+# 開発ビルド(-DPRM_WITH_SDL3=ON、再コンパイル済みコードはローカルで生成):
+personarm_sdl "/path/to/disc1.cue" --recomp --memcard1 "/path/to/card1.mcd"</code></pre>
                         <button class="copy" type="button" aria-label="コマンドをコピー">コピー</button>
                     </div>
                 </li>

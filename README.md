@@ -24,7 +24,7 @@ PersonaRM aims to run *Persona 2: Eternal Punishment* natively on Windows and Li
 
 > **Not playable yet.** PersonaRM is a research-driven work in progress. The game's real executable plays its intro videos with sound, shows the title screen and, on a new game, reaches the first story scenes, free movement of the player character and the main menu. An optional SDL3 window shows it live, with music and sound effects from the emulated SPU. See [Status](#status) for what exists today.
 >
-> **Current phase: step 4 of 6, static recompilation (in progress).** Steps 1 and 2 are done. Step 3, first boot, continues for playing further (area changes, first battle): the boot matches the PCSX-Redux reference emulator at event level up to the first overlay loads (gate G1: pass with known BIOS and timing differences). Music and sound effects now play, with the SPU on emulated time. The recompiler now also covers overlays: each is validated by a hash of its code in RAM and falls back to the interpreter if that code is overwritten. On disc 1, with the recompiled main executable and overlays, essentially 100% of instructions run as native code, and the trace still matches the interpreter exactly (to free movement, about 19,700 frames). Device timing now advances lazily, with exact results: on a fast PC (headless Release build) the interpreter went from about 74 to 129 fps, and the recompiled mode from about 100 to 370 fps. Next: saving and loading with an emulated memory card, and playing in the window at full speed.
+> **Current phase: step 4 of 6, static recompilation (in progress).** Steps 1 and 2 are done. Step 3, first boot, continues for playing further (area changes, first battle): the boot matches the PCSX-Redux reference emulator at event level up to the first overlay loads (gate G1: pass with known BIOS and timing differences). Music and sound effects now play, with the SPU on emulated time. The recompiler now also covers overlays: each is validated by a hash of its code in RAM and falls back to the interpreter if that code is overwritten. On disc 1, with the recompiled main executable and overlays, essentially 100% of instructions run as native code, and the trace still matches the interpreter exactly (to free movement, about 19,700 frames). Device timing now advances lazily, with exact results: on a fast PC (headless Release build) the interpreter went from about 74 to 129 fps, and the recompiled mode from about 100 to 370 fps. Memory cards work: standard 128 KB `.mcd` files via `--memcard1 <path>` / `--memcard2 <path>` (created and formatted if missing). On disc 1 the game saves from the main menu, and after a reboot CONTINUE loads the save. The SDL3 window can run the recompiled mode (`--recomp`) with memory cards, so a play session with saves is possible on a capable PC (a developer build; see [Quick start](#quick-start)). Next: quality-of-life mod support, starting with texture replacement; locating the game's text system for translations; and playing further (area changes, first battle).
 
 PersonaRM follows a strict **Bring Your Own Copy (BYOC)** model:
 
@@ -51,7 +51,7 @@ The chosen approach is an **interpreter-first native runtime**, with static reco
 1. ✅ **CPU correctness.** A conformance test suite for every MIPS-I instruction, including delay slots, load delays, unaligned access, overflow traps, exceptions, and edge cases of `DIV`.
 2. ✅ **Complete machine core.** Interrupt controller, DMA, timers, CD-ROM, joypad bus, and a real GPU rasterizer.
 3. 🔨 **First boot.** Run disc 1 from the intro FMVs to player control (done) and match a reference emulator trace (done, gate G1); keep playing further.
-4. 🔨 **Static recompilation.** Translate the main executable and each overlay ahead of time, with the interpreter as fallback. Started: `tools/recomp_gen` translates MIPS functions to C++ with the interpreter's exact semantics; the synthetic differential gate G2 shows 0 divergences, and locally all 399 functions found in the disc 1 main executable matched the interpreter on random inputs. Overlays are now covered too, each checked by a hash of its code in RAM. Next: saving and loading with an emulated memory card, and playing in the window at full speed.
+4. 🔨 **Static recompilation.** Translate the main executable and each overlay ahead of time, with the interpreter as fallback. Started: `tools/recomp_gen` translates MIPS functions to C++ with the interpreter's exact semantics; the synthetic differential gate G2 shows 0 divergences, and locally all 399 functions found in the disc 1 main executable matched the interpreter on random inputs. Overlays are now covered too, each checked by a hash of its code in RAM. Memory cards and saves work, and the window can run the recompiled code.
 5. **Replace library routines** (video playback, pad, memory card, CD, SPU, GPU) with hand-written native code.
 6. **Host layer.** SDL3 window and input, OpenGL display, host audio, then the launcher and modern enhancements.
 
@@ -69,19 +69,20 @@ A JIT is not planned: the PS1 workload does not call for one.
 | GPU and VRAM | ✅ Software rasterizer: polygons, lines, sprites, textures with CLUT, semi-transparency, GPUREAD |
 | MDEC video and XA audio | ✅ Wired in; the game's FMVs decode with sound (timing values approximated) |
 | SPU audio | 🟡 Registers, ADPCM, pitch, ADSR and reverb on emulated time (44,100 Hz); CD/XA audio mixed in; music and sound effects play. The Gaussian interpolation table is still an approximation |
-| BIOS HLE | ✅ Kernel events, interrupt chain, patchable tables and file calls the game uses (memory card still missing) |
+| BIOS HLE | ✅ Kernel events, interrupt chain, patchable tables and file calls the game uses and memory card calls |
 | Interrupts, VBlank, root counters | ✅ Implemented (timing approximated) |
 | DMA, CD-ROM | ✅ Wired into the bus; the game reads FILEPOS and its first overlay through them (timing approximated) |
 | Real-game boot (`personarm --boot`) | 🔨 Disc 1: intro, title, new game, story scenes, free movement and the main menu (scripted input via `--input-script`) |
 | Reference comparison (gate G1) | ✅ Matches PCSX-Redux at event level up to the first overlay loads; known BIOS/timing differences |
 | Trace format for reference comparison (`PRMTRACE v1`) | ✅ Format, comparator and `--trace-out` |
 | Static recompiler (`tools/recomp_gen`) | 🔨 v0: function-level C++ generation, synthetic G2 passing; overlays covered (code-hash checked, interpreter fallback); on disc 1 the recompiled trace matches the interpreter; not yet playable end to end |
-| Window, input and audio (`personarm_sdl`, optional SDL3) | 🟡 Window, keyboard/gamepad and audio work; the full SPU and CD/XA mix plays in the window and in `--dump-audio` output. Optional display-only frame interpolation (`--interp 120`), off by default, synthesizes frames from the GPU primitives; known limits: edge popping, no perspective correction, one game frame of extra latency |
+| Memory cards / saves | ✅ Standard 128 KB `.mcd` cards via `--memcard1/2`; disc 1 saves and CONTINUE loads work |
+| Window, input and audio (`personarm_sdl`, optional SDL3) | 🟡 Window, keyboard/gamepad and audio work; the full SPU and CD/XA mix plays in the window and in `--dump-audio` output, and runs with `--recomp` and `--memcard1/2`. Optional display-only frame interpolation (`--interp 120`), off by default, synthesizes frames from the GPU primitives; known limits: edge popping, no perspective correction, one game frame of extra latency |
 | Launcher | 🟡 Disc scan and verification; launching the game is a stub |
 
 ## Quick start
 
-> **Note:** There is no playable build. The commands below manage disc images and configuration for development.
+> **Note:** There is no released playable build. Most commands below manage disc images and configuration for development.
 
 **Requirements**
 
@@ -102,6 +103,12 @@ personarm --portal
 
 # Show every option
 personarm --help
+```
+
+The SDL3 window (`personarm_sdl`) needs a build with `-DPRM_WITH_SDL3=ON` and recompiled code generated locally from your own disc. With that build, you can play disc 1 with a memory card:
+
+```bash
+personarm_sdl "/path/to/disc1.cue" --recomp --memcard1 "/path/to/card1.mcd"
 ```
 
 Settings are stored in `personarm_config.json`.
