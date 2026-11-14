@@ -57,12 +57,18 @@ bool DecodeBankChunk(const std::vector<uint8_t>& file, const BankRef& r, std::ve
 struct GlyphMap {
     std::map<uint32_t, std::string> to_text;
     std::map<std::string, uint32_t> to_glyph;
+    /// US release: text is packed as `0x1136, u16 = two ASCII bytes (low first)..., end at the first NUL byte`
+    /// (odd length: last word has a zero high byte; even length: a 0x0000 word follows). Render/Encode then
+    /// show/accept plain ASCII; a run that is not canonical stays as `<c:1136>` + raw words.
+    bool packed = false;
     GlyphMap();                          // ASCII seed
     /// Lines `id<TAB>char` (id decimal or 0xHEX; '#' comments, blank lines ok). Returns false + error.
     bool Load(const std::string& path, std::string& error);
     void Set(uint32_t glyph, const std::string& utf8);
 };
 
+/// True if any message contains the packed-text control 0x1136 (US bank/file); JP never does.
+bool UsesPackedText(const Messages& m);
 /// Number of u16 a code occupies (controls: L of 0x1Lxx, min 1; glyphs 1).
 size_t CodeLength(uint16_t c);
 std::string Render(const std::vector<uint16_t>& codes, const GlyphMap& m);
