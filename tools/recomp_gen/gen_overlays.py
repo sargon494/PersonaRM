@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Generate one recompiled module per code overlay, at its slot base (local use only).
 
-    python -I gen_overlays.py <disc.cue> <overlay_map.json> <out-dir> <tools-dir> [--disc d1] [--ids 0,42,...]
+    python -I gen_overlays.py <disc.cue> <overlay_map.json> <out-dir> <tools-dir> [--disc d1|d2] [--ids 0,42,...]
+                              [--extra <id>@<base>[:<entry>],...]
 
 <overlay_map.json> is the research export (docs/research/OVERLAY_MAP.md): file id, status, inferred
 base, entries and external call targets per overlay. Each file is extracted with psx_analyze
@@ -10,6 +11,9 @@ starts found by scanning (a word right after `jr ra` + delay slot): callbacks re
 pointers would otherwise stay interpreted. A wrong start only adds a function boundary (a tail call)
 or code nobody enters. Output: <out-dir>/ovl_<disc>_F<id>.cpp, for -DPRM_RECOMP_GENERATED_DIR; it
 must stay outside the repository (generated game code is never committed).
+
+--extra adds overlays the static map missed, seen at run time in the boot harness log
+(`load_file_by_id(id=N, dest=B)` then `overlay entry E`), e.g. disc 2 F0140: `--extra 140@0x80093000:0x80093134`.
 """
 import json
 import os
@@ -46,6 +50,10 @@ def main(argv):
     psx = os.path.join(tools, 'psx_analyze' + exe)
     gen = os.path.join(tools, 'recomp_gen' + exe)
     overlays = json.load(open(map_path, encoding='utf-8'))['overlays']
+    for spec in filter(None, opts.get('--extra', '').split(',')):
+        fid, rest = spec.split('@')
+        base, _, entry = rest.partition(':')
+        overlays.append({'file_id': int(fid), 'inferred_base': base, 'entries': {entry: 'harness'} if entry else {}})
     done = 0
     for ov in overlays:
         fid, base = ov['file_id'], ov.get('inferred_base')
