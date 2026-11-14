@@ -22,7 +22,7 @@ struct VideoSettings {
     std::string aspect = "4:3";            // 4:3 | stretch
     bool vsync = false;
     int fps_target = 60;                   // 30 | 60 | 90 | 120; >60 = --interp, 30/90 not supported yet (= 60)
-    int resolution_scale = 1;              // reserved: 1..4, parsed and preserved, not used yet
+    int resolution_scale = 1;              // 1..4 internal resolution (display only; not combined with interpolation)
 };
 /// --interp value behind fps_target: a multiple of 60 above 60, else 0 (off).
 inline int InterpHz(const VideoSettings& v) { return v.fps_target > 60 && v.fps_target % 60 == 0 ? v.fps_target : 0; }

@@ -18,8 +18,9 @@ Rect PresentRect(int win_w, int win_h, bool stretch, bool integer, int tex_h);
 
 /// Display area of a 1024x512 16-bit VRAM to 0xAABBGGRR (bytes R,G,B,A in memory). 15bpp: BGR555 words;
 /// 24bpp: packed RGB888 bytes starting at VRAM column x. Wraps at the VRAM edges like the GPU.
+/// scale > 1 (15bpp only): `vram` is Ps1Gpu::GetScaledVram() and the output is (w*scale)x(h*scale).
 void DisplayToRgba(const std::vector<uint16_t>& vram, uint32_t x, uint32_t y, uint32_t w, uint32_t h,
-                   bool is_24bit, std::vector<uint32_t>& out);
+                   bool is_24bit, std::vector<uint32_t>& out, uint32_t scale = 1);
 
 struct NamedBit { const char* name; uint16_t bit; };
 /// Digital pad bit (psx-spx "Controllers", bit set = pressed) per SDL key name (SDL_GetScancodeName
@@ -41,6 +42,7 @@ struct HostOptions {
     std::string memcard[2];         // --memcard1/2: raw .mcd per slot, empty = no card
     uint64_t max_frames = 0, dump_from = 0, dump_to = 0;
     int interp_hz = 0;
+    uint32_t resolution_scale = 1;  // --resolution-scale 1-4 (display-only internal resolution)
     bool recomp = false;            // --recomp: run the recompiled code linked into this build
     uint32_t recomp_quantum = 1;    // --recomp-quantum
     // Settings file (src/host/settings.h): "unset" = empty / 0 / -1, so the file's value stays.
@@ -50,10 +52,12 @@ struct HostOptions {
     int volume = -1;                // --volume 0..100
     bool mute = false;              // --mute
     bool interp_given = false;      // --interp was on the command line (even --interp 0)
+    bool resolution_scale_given = false;  // --resolution-scale was on the command line
     bool save_settings = false;     // --save-settings: write the effective settings back to the file
     bool stats = false, unthrottled = false, hidden = false;
 };
-/// False on an unknown option, a missing value, no disc, or --interp not a multiple of 60.
+/// False on an unknown option, a missing value, no disc, --interp not a multiple of 60, a resolution scale
+/// outside 1-4, or --interp with a resolution scale above 1 (the interpolator replays at 1x only).
 bool ParseHostArgs(int argc, const char* const* argv, HostOptions& out);
 
 } // namespace personarm::host

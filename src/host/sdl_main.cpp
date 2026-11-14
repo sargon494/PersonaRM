@@ -5,6 +5,7 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdio>
 #include <cstdlib>
@@ -32,6 +33,8 @@ static void Usage() {
                          "  --input-script file  scripted pad presses (<frame> <button> [<hold>] per line)\n"
                          "  --interp HZ          present HZ pictures/s (multiple of 60, e.g. 120), synthesizing the\n"
                          "                       ones between the game's frames (display only, one game frame late)\n"
+                         "  --resolution-scale N internal resolution N x 320x240 (1-4, default 1 = native); display\n"
+                         "                       only, the game still sees the native VRAM. Not with --interp\n"
                          "  --dump-dir D --dump-from F --dump-to G   every presented picture of frames F..G as PNG\n"
                          "  --texture-dump D     write every VRAM texture the game samples as <HASH>_<bits>bit_<WxH>.png into D\n"
                          "  --mods D             HD texture mods: D/<mod>/textures/<HASH>.png (+ manifest.json priority/serial)\n"
@@ -67,6 +70,11 @@ int main(int argc, char** argv) {
     for (const std::string& w : warnings) std::fprintf(stderr, "[settings] %s\n", w.c_str());
     const host::Settings cfg = host::ApplyCli(file, opt, "");  // everything but the per-game part
     const int interp_hz = host::InterpHz(cfg.video);
+    int scale = cfg.video.resolution_scale;
+    if (interp_hz && scale > 1) {  // shortcut: the interpolator only knows 1x VRAM; compose them when it snapshots the scaled mirror
+        std::fprintf(stderr, "[settings] video.resolution_scale %d is ignored while fps_target > 60\n", scale);
+        scale = 1;
+    }
     if (cfg.video.fps_target == 30 || cfg.video.fps_target == 90)
         std::fprintf(stderr, "[settings] video.fps_target %d is not supported yet, running at 60\n", cfg.video.fps_target);
     std::array<MemoryCard, 2> cards;
@@ -86,7 +94,7 @@ int main(int argc, char** argv) {
     }
     SDL_Window* window = nullptr;
     SDL_Renderer* renderer = nullptr;
-    if (!SDL_CreateWindowAndRenderer("PersonaRM", 320 * cfg.video.window_scale, 240 * cfg.video.window_scale,
+    if (!SDL_CreateWindowAndRenderer("PersonaRM", 320 * std::max(cfg.video.window_scale, scale), 240 * std::max(cfg.video.window_scale, scale),
                                      SDL_WINDOW_RESIZABLE | (hidden ? SDL_WINDOW_HIDDEN : 0), &window, &renderer)) {
         std::fprintf(stderr, "SDL_CreateWindowAndRenderer: %s\n", SDL_GetError());
         SDL_Quit();
@@ -180,6 +188,7 @@ int main(int argc, char** argv) {
         if (!patches.empty()) std::printf("[gameplay] text_speed=%s\n", TextSpeedName(gameplay.text_speed));
         engine.SetGamePatches(std::move(patches));
     }
+    engine.GetGpu().SetResolutionScale(uint32_t(scale));
     engine.SetPadScript(presses);
     for (int slot = 0; slot < 2; ++slot)
         if (!card_path[slot].empty()) engine.SetMemoryCard(slot, &cards[slot]);
@@ -214,7 +223,7 @@ int main(int argc, char** argv) {
     std::vector<uint32_t> cmd_log;
     if (interp_hz) engine.GetGpu().SetCommandLog(&cmd_log);
     const int sub = interp_hz ? interp_hz / 60 : 1;  // presents per emulated frame
-    uint64_t interp_ns = 0, interp_frames = 0, last_hash = 0;
+    uint64_t run_ns = 0, interp_ns = 0, interp_frames = 0, last_hash = 0;
     uint32_t flips = 0, changes = 0, pairs = 0, pairs_ok = 0, last_start = ~0u;
 
     while (!quit && engine.GetState() == EngineState::Running && (!max_frames || engine.GetFrameCount() < max_frames)) {
@@ -260,7 +269,9 @@ int main(int argc, char** argv) {
             }
         engine.SetPadButtons(mask);
 
-        engine.RunFrame();
+        const uint64_t run_t0 = SDL_GetTicksNS();
+        engine.RunFrame();  // with --resolution-scale this includes the scaled raster pass
+        run_ns += SDL_GetTicksNS() - run_t0;
 
         engine.TakeAudio(pcm);
         audio_samples += pcm.size();
@@ -288,11 +299,11 @@ int main(int argc, char** argv) {
             flips += start != last_start;
             last_start = start;
             if (frame % 60 == 0) {
-                std::printf("[stats] f=%llu flips/s=%u pictures/s=%u interp_pairs=%u/%u %ux%u%s\n",
+                std::printf("[stats] f=%llu flips/s=%u pictures/s=%u interp_pairs=%u/%u %ux%u%s frame_ms=%.2f\n",
                             (unsigned long long)frame, flips, changes, pairs_ok, pairs, d.width, d.height,
-                            d.is_24bit ? " 24bpp" : "");
+                            d.is_24bit ? " 24bpp" : "", double(run_ns) / 60e6);
                 std::fflush(stdout);
-                flips = changes = pairs_ok = pairs = 0;
+                flips = changes = pairs_ok = pairs = 0, run_ns = 0;
             }
         }
 
@@ -308,8 +319,11 @@ int main(int argc, char** argv) {
                 if (t > 0 && t < 1 && interp.PairOk()) interp_ns += SDL_GetTicksNS() - t0, ++interp_frames;
                 off = false;
             }
-            const uint32_t w = d.width ? d.width : 320, h = d.height ? d.height : 240;
+            // 24bpp (FMV) is shown at 1x and stretched by the presenter.
+            const uint32_t hs = scale > 1 && !d.is_24bit ? uint32_t(scale) : 1;
+            const uint32_t w = (d.width ? d.width : 320) * hs, h = (d.height ? d.height : 240) * hs;
             if (off) rgba.assign(size_t(w) * h, 0xFF000000u);  // display disabled
+            else if (hs > 1) host::DisplayToRgba(gpu.GetScaledVram(), d.x, d.y, w / hs, h / hs, false, rgba, hs);
             else host::DisplayToRgba(*vram, d.x, d.y, w, h, d.is_24bit, rgba);
             for (uint32_t p : rgba)
                 if (p & 0xFFFFFFu) { ++lit_frames; break; }

@@ -12,8 +12,9 @@
 //
 // Limits (first version): the hash ignores the CLUT, so every palette variant of an upload shares one
 // PNG (dumped with the first CLUT seen); the replacement is full colour and ignores the CLUT. Sampling is
-// nearest at native output resolution (more texture detail per texel is not visible yet; higher output
-// resolution is a separate step). Textures split over several uploads get one PNG per upload.
+// nearest; at 1x one HD sample per original texel, with Ps1Gpu::SetResolutionScale(s) the scaled raster
+// passes the sub-texel position so the HD detail shows. Textures split over several uploads get one PNG
+// per upload.
 
 #include "rendering/texture_override.h"
 
@@ -41,9 +42,11 @@ public:
     void Invalidate(uint32_t x, uint32_t y, uint32_t w, uint32_t h);   // rect overwritten by a non-upload write
     void ClearTags();
     /// `orig` is the texel the rasterizer would use. (wx,wy) = VRAM word holding the texel, mode = texpage
-    /// depth (0=4bit, 1=8bit, else 15bit), sub = pixel index inside that word, clut_x/y = CLUT origin.
+    /// depth (0=4bit, 1=8bit, else 15bit), sub = pixel index inside that word, clut_x/y = CLUT origin,
+    /// (fx, fy) = sub-texel sample in 1/scale steps (scale 1 = texel centre).
     uint16_t Texel(const std::vector<uint16_t>& vram, uint32_t wx, uint32_t wy, uint32_t mode, uint32_t sub,
-                   uint32_t clut_x, uint32_t clut_y, uint16_t orig);
+                   uint32_t clut_x, uint32_t clut_y, uint16_t orig, uint32_t fx = 0, uint32_t fy = 0,
+                   uint32_t scale = 1);
 
     static uint32_t HashUpload(const std::vector<uint16_t>& vram, uint32_t x, uint32_t y, uint32_t w, uint32_t h);
 

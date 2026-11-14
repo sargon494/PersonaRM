@@ -94,6 +94,17 @@ public:
     /// Texture dump / replacement (rendering/vram_texture_hook.h); null = off (default), no effect on VRAM.
     void SetTextureHook(VramTextureHook* hook);
 
+    /// Display-only internal resolution (1-4, default 1 = off, no extra work). The 1x VRAM stays the only
+    /// thing the game sees (GPUREAD, copies, textures); a second (1024*s)x(512*s) VRAM mirrors it:
+    /// polygons/rectangles are re-rasterized there at s x (finer edge and UV sampling, textures read from
+    /// the 1x VRAM or the HD hook), lines and every CPU/FMV upload, fill and TIM load are nearest-upscaled,
+    /// VRAM->VRAM copies copy the scaled pixels. Semi-transparency and the mask bit work on the scaled
+    /// pixels; dithering uses the 1x pattern (scaled). Enabling it upscales the current VRAM.
+    void SetResolutionScale(uint32_t scale);
+    uint32_t GetResolutionScale() const { return m_scale; }
+    /// The scaled VRAM, row stride 1024*scale; empty at scale 1.
+    const std::vector<uint16_t>& GetScaledVram() const { return m_vram_hi; }
+
 private:
     // One rasterizer vertex: VRAM-space position (drawing offset applied), 24-bit color, texcoord.
     struct Vertex {
@@ -117,11 +128,21 @@ private:
     void DrawPolygon(uint8_t cmd);
     void DrawLineCommand(uint8_t cmd);
     void DrawRectangle(uint8_t cmd);
-    void DrawTriangle(const Vertex& a, const Vertex& b, const Vertex& c, bool gouraud, const DrawFlags& f);
+    // Raster target: the 1x VRAM (s = 1) or the scaled VRAM. Coordinates and UVs are in target units
+    // (scaled: UV in 1/(256 s) texel steps).
+    struct Target {
+        uint16_t* px;
+        int32_t s;
+    };
+    Target Vram1x() { return {m_vram.data(), 1}; }
+    void DrawTriangle(const Target& t, const Vertex& a, const Vertex& b, const Vertex& c, bool gouraud,
+                      const DrawFlags& f);
     void DrawLine(const Vertex& a, const Vertex& b, bool gouraud, bool semi);
-    void PlotPixel(int32_t x, int32_t y, int32_t r, int32_t g, int32_t b,
+    void DrawLineOn(const Target& t, const Vertex& a, const Vertex& b, bool gouraud, const DrawFlags& f);
+    void PlotPixel(const Target& t, int32_t x, int32_t y, int32_t r, int32_t g, int32_t b,
                    int32_t u, int32_t v, const DrawFlags& f);
-    uint16_t FetchTexel(int32_t u, int32_t v, uint16_t clut) const;
+    uint16_t FetchTexel(int32_t u, int32_t v, uint32_t fu, uint32_t fv, uint32_t s, uint16_t clut) const;
+    void UpscaleRect(uint32_t x, uint32_t y, uint32_t w, uint32_t h);  // 1x rect -> scaled VRAM (nearest)
     Vertex ParseVertex(uint32_t xy_word, uint32_t color_word) const;
     void UpdateStatDrawBits();
 
@@ -154,6 +175,8 @@ private:
 
     // 1 MB VRAM (1024x512 16-bit pixels in RGB 1:5:5:5)
     std::vector<uint16_t> m_vram;
+    uint32_t m_scale = 1;
+    std::vector<uint16_t> m_vram_hi;  // display-only scaled mirror (SetResolutionScale)
 
     // Display & Drawing state
     GpuDisplayArea m_display;

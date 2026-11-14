@@ -59,7 +59,7 @@ as-is, unknown ones preserved) with a warning.
 | `aspect` | `4:3`, `stretch` (fill the window) | `4:3` | honoured |
 | `vsync` | bool | false | honoured; ignored while interpolation or `--unthrottled` is on (it would slow the game down) |
 | `fps_target` | `30`, `60`, `90`, `120` | 60 | `60` = native, `120` = frame interpolation (same as `--interp 120`; `--interp N` sets it to N, `--interp 0` to 60). `30` and `90` are valid and stored but not supported yet: they run at 60 with a warning |
-| `resolution_scale` | integer 1..4 | 1 | **reserved**: parsed and preserved, not used yet (implemented on a separate branch) |
+| `resolution_scale` | integer 1..4 | 1 | internal resolution (display only); same as `--resolution-scale`. Ignored (with a warning) when `fps_target` > 60 |
 
 ### audio
 

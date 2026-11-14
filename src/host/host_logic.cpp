@@ -34,15 +34,17 @@ Rect PresentRect(int win_w, int win_h, bool stretch, bool integer, int tex_h) {
 }
 
 void DisplayToRgba(const std::vector<uint16_t>& vram, uint32_t x, uint32_t y, uint32_t w, uint32_t h,
-                   bool is_24bit, std::vector<uint32_t>& out) {
+                   bool is_24bit, std::vector<uint32_t>& out, uint32_t scale) {
+    const uint32_t s = is_24bit ? 1 : scale, W = 1024 * s, H = 512 * s;
+    x *= s, y *= s, w *= s, h *= s;
     out.assign(size_t(w) * h, 0xFF000000u);
-    if (vram.size() < 1024u * 512u) return;
+    if (vram.size() < size_t(W) * H) return;
     for (uint32_t row = 0; row < h; ++row) {
-        const uint16_t* line = vram.data() + size_t((y + row) & 511) * 1024;
+        const uint16_t* line = vram.data() + size_t((y + row) % H) * W;
         uint32_t* dst = out.data() + size_t(row) * w;
         if (!is_24bit) {
             for (uint32_t col = 0; col < w; ++col) {
-                const uint16_t p = line[(x + col) & 1023];
+                const uint16_t p = line[x + col < W ? x + col : (x + col) % W];
                 const uint32_t r = (p & 0x1F) << 3, g = ((p >> 5) & 0x1F) << 3, b = ((p >> 10) & 0x1F) << 3;
                 dst[col] = 0xFF000000u | b << 16 | g << 8 | r;
             }
@@ -123,6 +125,7 @@ bool ParseHostArgs(int argc, const char* const* argv, HostOptions& o) {
             }
             else if (is("--window-scale")) { o.window_scale = std::atoi(v); if (o.window_scale < 1 || o.window_scale > 8) return false; }
             else if (is("--volume")) { o.volume = std::atoi(v); if (o.volume < 0 || o.volume > 100) return false; }
+            else if (is("--resolution-scale")) o.resolution_scale = uint32_t(std::strtoul(v, nullptr, 10)), o.resolution_scale_given = true;
             else if (is("--dump-dir")) o.dump_dir = v;
             else if (is("--texture-dump")) o.texture_dump = v;
             else if (is("--mods")) o.mods = v;
@@ -138,7 +141,8 @@ bool ParseHostArgs(int argc, const char* const* argv, HostOptions& o) {
             else return false;
         }
     }
-    return !o.disc.empty() && o.interp_hz >= 0 && o.interp_hz % 60 == 0 && o.recomp_quantum > 0;
+    return !o.disc.empty() && o.interp_hz >= 0 && o.interp_hz % 60 == 0 && o.recomp_quantum > 0 &&
+           o.resolution_scale >= 1 && o.resolution_scale <= 4 && !(o.interp_hz && o.resolution_scale > 1);
 }
 
 } // namespace personarm::host

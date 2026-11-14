@@ -213,6 +213,7 @@ Settings ApplyCli(Settings s, const HostOptions& o, const std::string& serial) {
     if (!o.window_mode.empty()) s.video.window_mode = o.window_mode;
     if (o.window_scale > 0) s.video.window_scale = o.window_scale;
     if (o.interp_given) s.video.fps_target = o.interp_hz ? o.interp_hz : 60;
+    if (o.resolution_scale_given) s.video.resolution_scale = int(o.resolution_scale);
     if (o.volume >= 0) s.audio.master_volume = o.volume;
     if (o.mute) s.audio.mute = true;
     GameSettings g = GameFor(s, serial);

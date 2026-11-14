@@ -141,7 +141,8 @@ void VramTextureHook::Dump(const std::vector<uint16_t>& vram, const Upload& u, u
 }
 
 uint16_t VramTextureHook::Texel(const std::vector<uint16_t>& vram, uint32_t wx, uint32_t wy, uint32_t mode,
-                                uint32_t sub, uint32_t clut_x, uint32_t clut_y, uint16_t orig) {
+                                uint32_t sub, uint32_t clut_x, uint32_t clut_y, uint16_t orig, uint32_t fx,
+                                uint32_t fy, uint32_t scale) {
     const uint32_t id = m_tags[(wy & (kH - 1)) * kW + (wx & (kW - 1))];
     if (!id) return orig;
     Upload& u = m_uploads[id - 1];
@@ -156,8 +157,10 @@ uint16_t VramTextureHook::Texel(const std::vector<uint16_t>& vram, uint32_t wx, 
     const uint32_t px = ((wx - u.x) & (kW - 1)) * ppw + sub, py = (wy - u.y) & (kH - 1);
     if (px >= W || py >= H) return orig;
     const HdTexture& hd = *u.hd;
-    const uint32_t hx = uint32_t(std::min<uint64_t>(hd.width - 1, (uint64_t(2 * px + 1) * hd.width) / (2 * W)));
-    const uint32_t hy = uint32_t(std::min<uint64_t>(hd.height - 1, (uint64_t(2 * py + 1) * hd.height) / (2 * H)));
+    // Sample at texel px + (2 fx + 1) / (2 scale): the texel centre at scale 1.
+    const uint64_t s2 = 2ull * scale;
+    const uint32_t hx = uint32_t(std::min<uint64_t>(hd.width - 1, ((px * s2 + 2 * fx + 1) * hd.width) / (W * s2)));
+    const uint32_t hy = uint32_t(std::min<uint64_t>(hd.height - 1, ((py * s2 + 2 * fy + 1) * hd.height) / (H * s2)));
     const uint8_t* p = &hd.rgba[(size_t(hy) * hd.width + hx) * 4];
     if (p[3] < 128) return 0;  // transparent texel
     uint16_t t = uint16_t((p[0] >> 3) | ((p[1] >> 3) << 5) | ((p[2] >> 3) << 10)) | (orig & 0x8000);

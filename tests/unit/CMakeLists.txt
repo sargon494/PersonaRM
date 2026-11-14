@@ -206,6 +206,13 @@ target_compile_features(unit_test_gameplay_patches PRIVATE cxx_std_17)
 add_test(NAME unit_test_gameplay_patches COMMAND unit_test_gameplay_patches)
 set_tests_properties(unit_test_gameplay_patches PROPERTIES LABELS "unit" TIMEOUT 120)
 
+add_executable(unit_test_resolution_scale test_resolution_scale.cpp ${CMAKE_SOURCE_DIR}/src/host/host_logic.cpp)
+target_link_libraries(unit_test_resolution_scale PRIVATE personarm_core)
+target_include_directories(unit_test_resolution_scale PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_features(unit_test_resolution_scale PRIVATE cxx_std_17)
+add_test(NAME unit_test_resolution_scale COMMAND unit_test_resolution_scale)
+set_tests_properties(unit_test_resolution_scale PROPERTIES LABELS "unit" TIMEOUT 120)
+
 add_executable(unit_test_p2text test_p2text.cpp)
 target_link_libraries(unit_test_p2text PRIVATE p2text_lib)
 target_compile_features(unit_test_p2text PRIVATE cxx_std_17)
