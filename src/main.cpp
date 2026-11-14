@@ -39,6 +39,7 @@
 #include "loader/png_codec.h"
 #include "loader/str_demuxer.h"
 #include "engine/engine.h"
+#include "engine/file_mods.h"
 #include "recomp/runtime/generated_modules.h"
 #include "rendering/window_context.h"
 #include "rendering/gl_renderer.h"
@@ -815,6 +816,7 @@ struct BootOptions {
     uint32_t recomp_quantum = 1;     // --recomp-quantum: cycles between service points
     bool eager_devices = false;      // --eager-devices: per-instruction device ticks (reference)
     std::string memcard[2];          // --memcard1/2: raw .mcd image per slot (empty = no card)
+    std::string mods;                // --mods: mod folders (only file mods here, docs/MOD_FILES.md)
 };
 
 // Overlay slots (OVERLAY_MAP OV-010, discs 1 and 2): code loaded above the resident EXE text.
@@ -885,6 +887,8 @@ static int RunBootHarness(const std::string& disc_path, const BootOptions& opt) 
         std::cerr << "[BOOT] cannot boot " << disc_path << "\n";
         return EXIT_FAILURE;
     }
+    personarm::FileRedirect file_redirect;   // outlives the run: the engine reads the CD through it
+    if (!opt.mods.empty()) engine.SetGamePatches(personarm::InstallFileMods(engine, file_redirect, opt.mods));
     engine.SetPadScript(opt.presses);
     std::array<personarm::MemoryCard, 2> cards;
     for (int slot = 0; slot < 2; ++slot) {
@@ -1164,6 +1168,7 @@ int main(int argc, char* argv[]) {
                     if (std::strcmp(argv[k], "--dump-audio") == 0) opt.dump_audio = argv[k + 1];
                     if (std::strcmp(argv[k], "--watch-pc") == 0) opt.watch_pcs.push_back(std::strtoul(argv[k + 1], nullptr, 16));
                     if (std::strcmp(argv[k], "--memcard1") == 0) opt.memcard[0] = argv[k + 1];
+                    if (std::strcmp(argv[k], "--mods") == 0) opt.mods = argv[k + 1];
                     if (std::strcmp(argv[k], "--memcard2") == 0) opt.memcard[1] = argv[k + 1];
                     if (std::strcmp(argv[k], "--recomp-quantum") == 0)
                         opt.recomp_quantum = static_cast<uint32_t>(std::strtoul(argv[k + 1], nullptr, 10));
@@ -1197,7 +1202,8 @@ int main(int argc, char* argv[]) {
                 std::strcmp(argv[i], "--every") == 0 || std::strcmp(argv[i], "--press") == 0 ||
                 std::strcmp(argv[i], "--input-script") == 0 ||
                 std::strcmp(argv[i], "--watch-pc") == 0 || std::strcmp(argv[i], "--recomp-quantum") == 0 ||
-                std::strcmp(argv[i], "--memcard1") == 0 || std::strcmp(argv[i], "--memcard2") == 0) { ++i; continue; } // read by --boot
+                std::strcmp(argv[i], "--memcard1") == 0 || std::strcmp(argv[i], "--memcard2") == 0 ||
+                std::strcmp(argv[i], "--mods") == 0) { ++i; continue; } // read by --boot
             if (std::strcmp(argv[i], "--launch") == 0) {
                 return launcher.LaunchGame();
             }

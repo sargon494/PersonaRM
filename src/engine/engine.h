@@ -106,6 +106,11 @@ public:
     const SpuEmulator& GetSpu() const { return m_spu; }
     Ps1BiosHle& GetBios() { return m_bios; }
     hw::CdRom& GetCdRom() { return *m_cdrom; }
+    /// Sector source the CD-ROM reads through (mod files, docs/MOD_FILES.md); null = the disc itself
+    /// (the default). Kept across Reset; the source stays owned by the caller.
+    void SetCdSectorSource(hw::SectorSource* s) { m_cd_override = s; m_cdrom->SetSectorSource(s ? s : &m_cd_source); }
+    hw::SectorSource& GetDiscSectorSource() { return m_cd_source; }
+    DiscReader& GetDiscReader() { return m_disc_reader; }
     hw::Dma& GetDma() { return *m_dma; }
     hw::Mdec& GetMdec() { return *m_mdec; }
 
@@ -300,6 +305,7 @@ private:
     DiscReader m_disc_reader;
     InputManager& m_input;
     hw::DiscSectorSource m_cd_source{m_disc_reader};
+    hw::SectorSource* m_cd_override = nullptr;
     std::unique_ptr<RamDma> m_dma_mem;
     std::unique_ptr<hw::CdRom> m_cdrom;
     std::unique_ptr<hw::Dma> m_dma;

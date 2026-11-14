@@ -16,6 +16,7 @@
 
 #include "core/save_manager.h"
 #include "engine/engine.h"
+#include "engine/file_mods.h"
 #include "engine/gameplay_patches.h"
 #include "host/host_logic.h"
 #include "host/settings.h"
@@ -37,7 +38,7 @@ static void Usage() {
                          "                       only, the game still sees the native VRAM. Not with --interp\n"
                          "  --dump-dir D --dump-from F --dump-to G   every presented picture of frames F..G as PNG\n"
                          "  --texture-dump D     write every VRAM texture the game samples as <HASH>_<bits>bit_<WxH>.png into D\n"
-                         "  --mods D             HD texture mods: D/<mod>/textures/<HASH>.png (+ manifest.json priority/serial)\n"
+                         "  --mods D             mods: D/<mod>/textures/<HASH>.png, D/<mod>/files/Fnnnn.BIN (+ manifest.json priority/serial)\n"
                          "  --text-speed S       dialogue speed: normal (game default), fast or instant; also set by a mod\n"
                          "                       manifest \"gameplay\": {\"text_speed\": ...} (this flag wins). Disc 1 (JP, US) only\n"
                          "  --stats             per second: game flips, distinct pictures, interpolable pairs\n"
@@ -176,7 +177,8 @@ int main(int argc, char** argv) {
                         game.mods.c_str());
         engine.GetGpu().SetTextureHook(&texture_hook);
     }
-    // Gameplay options (mod manifests, then the command line): no option = no patch = untouched engine.
+    // Gameplay options (mod manifests, then the command line) and file mods: none = no patch = untouched engine.
+    FileRedirect file_redirect;
     {
         GameplayOptions gameplay;
         if (!game.mods.empty()) gameplay = LoadGameplayMods(game.mods, engine.DiscSerial());
@@ -186,6 +188,11 @@ int main(int argc, char** argv) {
             std::fprintf(stderr, "[gameplay] text_speed=%s: no patch for disc %s, ignored\n", TextSpeedName(gameplay.text_speed),
                          engine.DiscSerial().empty() ? "(unrecognized)" : engine.DiscSerial().c_str());
         if (!patches.empty()) std::printf("[gameplay] text_speed=%s\n", TextSpeedName(gameplay.text_speed));
+        if (!game.mods.empty()) {
+            std::vector<GamePatch> files = InstallFileMods(engine, file_redirect, game.mods);
+            if (!files.empty()) std::printf("[files] %zu replacement files from %s\n", files.size(), game.mods.c_str());
+            patches.insert(patches.end(), files.begin(), files.end());
+        }
         engine.SetGamePatches(std::move(patches));
     }
     engine.GetGpu().SetResolutionScale(uint32_t(scale));

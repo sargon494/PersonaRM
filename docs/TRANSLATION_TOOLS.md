@@ -55,7 +55,7 @@ The font order is the game's own, and kanji/kana cannot be derived automatically
 Re-reads the original file, applies the rows whose `text` changed (unchanged rows keep the original bytes, so unmapped glyphs survive), rebuilds the message section, updates every op-19 operand, recompresses the chunk and writes a patched file. Any character without a glyph rejects the whole run with a list of `file:line: msg N: U+XXXX 'c' sin glifo` and writes nothing. It prints the size change of the messages, the decompressed bank, the chunk and the file.
 
 * If nothing changed, the output is byte-identical to the input. `--recompress` forces recompression (our compressor is not bit-identical to the game's, but decompresses to the same data and is usually ~0.5 % larger).
-* The chunk grows or shrinks and the padding to the next `0x800` boundary is recomputed; the file may therefore change size. A patched file is meant to be served through a `FILEPOS` redirect that also carries the new size (not implemented here).
+* The chunk grows or shrinks and the padding to the next `0x800` boundary is recomputed; the file may therefore change size. To load a patched file in the game, put it in a mod as `files/Fnnnn.BIN` and run with `--mods` (see `MOD_FILES.md`): the game then reads it with its new size.
 * Messages not referenced by any op 19 may shift when earlier messages change length; the tool warns about it because other opcodes might point at them.
 * The size of the bank that fits in RAM is unknown (`TEXT_SYSTEM.md` Q-TS4). Keep translations reasonably close to the original size.
 
