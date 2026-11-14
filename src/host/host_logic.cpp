@@ -94,6 +94,8 @@ bool ParseHostArgs(int argc, const char* const* argv, HostOptions& o) {
             else if (is("--input-script")) o.input_script = v;
             else if (is("--interp")) o.interp_hz = std::atoi(v);
             else if (is("--dump-dir")) o.dump_dir = v;
+            else if (is("--texture-dump")) o.texture_dump = v;
+            else if (is("--mods")) o.mods = v;
             else if (is("--dump-from")) o.dump_from = std::strtoull(v, nullptr, 10);
             else if (is("--dump-to")) o.dump_to = std::strtoull(v, nullptr, 10);
             else if (is("--memcard1")) o.memcard[0] = v;

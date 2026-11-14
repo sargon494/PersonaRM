@@ -18,6 +18,7 @@
 #include "loader/png_codec.h"
 #include "recomp/runtime/generated_modules.h"
 #include "rendering/frame_interp.h"
+#include "rendering/vram_texture_hook.h"
 
 using namespace personarm;
 
@@ -29,6 +30,8 @@ static void Usage() {
                          "  --interp HZ          present HZ pictures/s (multiple of 60, e.g. 120), synthesizing the\n"
                          "                       ones between the game's frames (display only, one game frame late)\n"
                          "  --dump-dir D --dump-from F --dump-to G   every presented picture of frames F..G as PNG\n"
+                         "  --texture-dump D     write every VRAM texture the game samples as <HASH>_<bits>bit_<WxH>.png into D\n"
+                         "  --mods D             HD texture mods: D/<mod>/textures/<HASH>.png (+ manifest.json priority/serial)\n"
                          "  --stats              per second: game flips, distinct pictures, interpolable pairs\n"
                          "  --memcard1 F, --memcard2 F   memory card in slot 1/2: raw 128 KB .mcd, created and\n"
                          "                       formatted if missing, rewritten atomically when the game saves\n"
@@ -95,6 +98,15 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "cannot boot %s\n", disc.c_str());
         SDL_Quit();
         return EXIT_FAILURE;
+    }
+    // Texture dump / HD replacement: off unless asked; the GPU then runs its untouched path.
+    VramTextureHook texture_hook;
+    if (!opt.texture_dump.empty() || !opt.mods.empty()) {
+        if (!opt.texture_dump.empty()) texture_hook.SetDumpDir(opt.texture_dump);
+        if (!opt.mods.empty())
+            std::printf("[textures] %zu replacement textures indexed from %s\n", texture_hook.LoadMods(opt.mods),
+                        opt.mods.c_str());
+        engine.GetGpu().SetTextureHook(&texture_hook);
     }
     engine.SetPadScript(presses);
     for (int slot = 0; slot < 2; ++slot)
@@ -252,6 +264,11 @@ int main(int argc, char** argv) {
     std::printf("[SDL] frames=%llu non-black=%llu audio_samples=%llu\n", (unsigned long long)engine.GetFrameCount(),
                 (unsigned long long)lit_frames, (unsigned long long)audio_samples);
     engine.GetGpu().SetCommandLog(nullptr);
+    if (!opt.texture_dump.empty() || !opt.mods.empty()) {
+        std::printf("[textures] uploads=%zu dumped=%zu replaced=%zu\n", texture_hook.UploadCount(),
+                    texture_hook.DumpedCount(), texture_hook.ReplacedUploadCount());
+        engine.GetGpu().SetTextureHook(nullptr);
+    }
     if (!engine.FlushMemoryCards()) std::fprintf(stderr, "a memory card could not be written\n");
     engine.SetMemoryCard(0, nullptr);
     engine.SetMemoryCard(1, nullptr);
