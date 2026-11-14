@@ -83,6 +83,7 @@ static void TestGameSeesTheSame() {
         0xE1000200 | 8 | (2 << 7),                                                       // dither on
         0x300000FF, XY(0, 0), 0x0000FF00, XY(60, 5), 0x00FF0000, XY(15, 50),            // gouraud tri
         0x2A404040, XY(10, 10), XY(50, 12), XY(8, 40), XY(52, 44),                      // semi quad
+        0x34808080, XY(80, 0), 0x00000000, 0x00404040, XY(150, 20), 0x01080003, 0x00FF8080, XY(90, 60), 0x00000103,  // tex gouraud tri
         0x4800FFFF, XY(0, 60), XY(30, 70), XY(5, 90), 0x55555555,                       // polyline
         0xE1000000 | 8 | (2 << 7) | (1 << 12) | (1 << 13), 0x64808080, XY(70, 70), 0x00000301, XY(4, 2),
         0xE6000003, 0x60FFFFFF, XY(0, 0), XY(30, 30),                                   // mask set+check
@@ -101,7 +102,11 @@ static void TestGameSeesTheSame() {
         assert(g.GetVram() == ref.GetVram());
         assert(g.ReadGPUSTAT() == ref_stat);
         for (uint32_t w : ref_read) assert(g.ReadGP0() == w);
-        if (s > 1) assert(Hi(g, 2 * s, 2 * s) & 0x8000);  // mask bit written on the scaled target too
+        if (s == 1) continue;
+        assert(Hi(g, 2 * s, 2 * s) & 0x8000);  // mask bit written on the scaled target too
+        // Every s x s block corner samples where the 1x raster did: same pixel (shading, texel, blend).
+        for (uint32_t y = 0; y < 512; ++y)
+            for (uint32_t x = 0; x < 1024; ++x) assert(Hi(g, x * s, y * s) == g.ReadVram(x, y));
     }
 }
 

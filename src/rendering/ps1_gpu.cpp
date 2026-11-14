@@ -507,6 +507,9 @@ uint32_t Ps1Gpu::Gp0CommandWords(uint8_t cmd) {
     return 1;
 }
 
+// Fixed-point UV steps per scaled pixel on the scaled target (sub-texel precision).
+static constexpr int32_t kSubUv = 256;
+
 static int32_t SignExtend11(uint32_t v) {
     return static_cast<int32_t>((v & 0x7FF) << 21) >> 21;
 }
@@ -561,7 +564,11 @@ void Ps1Gpu::DrawPolygon(uint8_t cmd) {
         Vertex hv[4];
         for (int i = 0; i < n; ++i) {
             hv[i] = v[i];
-            hv[i].x *= s, hv[i].y *= s, hv[i].u *= s, hv[i].v *= s;
+            // UV in 1/(256 s) texel units, shifted by half a texel: the 1x raster rounds the interpolated
+            // UV to the nearest texel, flooring the shifted fine UV picks the same texel at block corners
+            // (up to 1/512 s of a texel at exact ties).
+            hv[i].x *= s, hv[i].y *= s;
+            hv[i].u = hv[i].u * s * kSubUv + s * kSubUv / 2, hv[i].v = hv[i].v * s * kSubUv + s * kSubUv / 2;
         }
         const Target hi{m_vram_hi.data(), s};
         DrawTriangle(hi, hv[0], hv[1], hv[2], gouraud, f);
@@ -709,15 +716,16 @@ void Ps1Gpu::DrawRectangle(uint8_t cmd) {
     // E1h bits 12/13: textured rectangle X/Y flip. unverified: flipped texcoords simply decrement from u0/v0.
     const bool flip_x = (m_texpage >> 12) & 1, flip_y = (m_texpage >> 13) & 1;
     auto draw = [&](const Target& t) {  // target units; a flipped UV keeps texel u0 for the first s pixels
-        const int32_t s = t.s, us = u0 * s + (flip_x ? s - 1 : 0), vs = v0 * s + (flip_y ? s - 1 : 0);
+        const int32_t s = t.s, k = s == 1 ? 1 : kSubUv;  // scaled: sample each fine pixel's centre
+        const int32_t us = (u0 * s + (flip_x ? s - 1 : 0)) * k + k / 2, vs = (v0 * s + (flip_y ? s - 1 : 0)) * k + k / 2;
         for (int32_t dy = 0; dy < h * s; ++dy) {
             int32_t y = o.y * s + dy;
             if (y < m_drawing.y1 * s || y > m_drawing.y2 * s + s - 1) continue;
             for (int32_t dx = 0; dx < w * s; ++dx) {
                 int32_t x = o.x * s + dx;
                 if (x < m_drawing.x1 * s || x > m_drawing.x2 * s + s - 1) continue;
-                int32_t u = flip_x ? us - dx : us + dx;
-                int32_t v = flip_y ? vs - dy : vs + dy;
+                int32_t u = flip_x ? us - dx * k : us + dx * k;
+                int32_t v = flip_y ? vs - dy * k : vs + dy * k;
                 PlotPixel(t, x, y, o.r, o.g, o.b, u, v, f);
             }
         }
@@ -787,10 +795,10 @@ void Ps1Gpu::PlotPixel(const Target& t, int32_t x, int32_t y, int32_t r, int32_t
     int32_t c8[3] = {r, g, b}; // 8-bit-scale color before dithering/truncation
     if (f.textured) {
         uint16_t texel;
-        if (hi) {  // u, v in 1/s texel steps: texel (wrapped like the 8-bit UV) and sub-texel position
-            const int32_t m = 256 * t.s;
+        if (hi) {  // u, v in 1/(256 s) texel units: texel (wrapped like the 8-bit UV) and 1/s sub-texel
+            const int32_t q = t.s * kSubUv, m = 256 * q;
             u = ((u % m) + m) % m, v = ((v % m) + m) % m;
-            texel = FetchTexel(u / t.s, v / t.s, uint32_t(u % t.s), uint32_t(v % t.s), uint32_t(t.s), f.clut);
+            texel = FetchTexel(u / q, v / q, uint32_t(u % q / kSubUv), uint32_t(v % q / kSubUv), uint32_t(t.s), f.clut);
         } else {
             texel = FetchTexel(u, v, 0, 0, 1, f.clut);
         }

@@ -129,7 +129,7 @@ private:
     void DrawLineCommand(uint8_t cmd);
     void DrawRectangle(uint8_t cmd);
     // Raster target: the 1x VRAM (s = 1) or the scaled VRAM. Coordinates and UVs are in target units
-    // (UV in 1/s texel steps).
+    // (scaled: UV in 1/(256 s) texel steps).
     struct Target {
         uint16_t* px;
         int32_t s;
