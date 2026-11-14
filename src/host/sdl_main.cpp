@@ -36,7 +36,7 @@ static void Usage() {
                          "  --texture-dump D     write every VRAM texture the game samples as <HASH>_<bits>bit_<WxH>.png into D\n"
                          "  --mods D             HD texture mods: D/<mod>/textures/<HASH>.png (+ manifest.json priority/serial)\n"
                          "  --text-speed S       dialogue speed: normal (game default), fast or instant; also set by a mod\n"
-                         "                       manifest \"gameplay\": {\"text_speed\": ...} (this flag wins). Disc 1 only\n"
+                         "                       manifest \"gameplay\": {\"text_speed\": ...} (this flag wins). Disc 1 (JP, US) only\n"
                          "  --stats             per second: game flips, distinct pictures, interpolable pairs\n"
                          "  --memcard1 F, --memcard2 F   memory card in slot 1/2: raw 128 KB .mcd, created and\n"
                          "                       formatted if missing, rewritten atomically when the game saves\n"
