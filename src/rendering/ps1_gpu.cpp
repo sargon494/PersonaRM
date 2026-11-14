@@ -1,5 +1,6 @@
 #include "rendering/ps1_gpu.h"
 #include "core/logger.h"
+#include "rendering/vram_texture_hook.h"
 #include <cstring>
 #include <algorithm>
 #include <cstdlib>
@@ -11,8 +12,19 @@ Ps1Gpu::Ps1Gpu() {
     Reset();
 }
 
+void Ps1Gpu::SetTextureHook(VramTextureHook* hook) {
+    m_hook = hook;
+    if (m_hook) m_hook->ClearTags();
+}
+
+void Ps1Gpu::SetVram(const std::vector<uint16_t>& vram) {
+    m_vram = vram;
+    if (m_hook) m_hook->ClearTags();
+}
+
 void Ps1Gpu::Reset() {
     std::fill(m_vram.begin(), m_vram.end(), static_cast<uint16_t>(0));
+    if (m_hook) m_hook->ClearTags();
 
     m_display.x = 0;
     m_display.y = 0;
@@ -67,9 +79,11 @@ void Ps1Gpu::WriteVram(uint32_t x, uint32_t y, uint16_t pixel) {
     x &= (PS1_VRAM_WIDTH - 1);
     y &= (PS1_VRAM_HEIGHT - 1);
     m_vram[y * PS1_VRAM_WIDTH + x] = pixel;
+    if (m_hook) m_hook->Invalidate(x, y, 1, 1);
 }
 
 void Ps1Gpu::FillVramRect(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t color16) {
+    if (m_hook) m_hook->Invalidate(x, y, w, h);
     for (uint32_t cy = 0; cy < h; ++cy) {
         uint32_t py = (y + cy) & (PS1_VRAM_HEIGHT - 1);
         for (uint32_t cx = 0; cx < w; ++cx) {
@@ -244,6 +258,7 @@ void Ps1Gpu::WriteGP0(uint32_t word) {
         m_transfer_words_left--;
         if (m_transfer_words_left == 0) {
             m_in_vram_transfer = false;
+            if (m_hook) m_hook->OnUpload(m_vram, m_transfer_x, m_transfer_y, m_transfer_w, m_transfer_h);
         }
         return;
     }
@@ -377,6 +392,7 @@ void Ps1Gpu::ExecuteGP0Command() {
             uint16_t w  = m_gp0_packet[3] & 0x3FF;
             uint16_t h  = (m_gp0_packet[3] >> 16) & 0x1FF;
 
+            if (m_hook) m_hook->Invalidate(dx, dy, w, h);
             for (uint32_t cy = 0; cy < h; ++cy) {
                 for (uint32_t cx = 0; cx < w; ++cx) {
                     uint16_t p = ReadVram(sx + cx, sy + cy);
@@ -661,18 +677,31 @@ uint16_t Ps1Gpu::FetchTexel(int32_t u, int32_t v, uint16_t clut) const {
     const uint32_t page_y = ((m_texpage >> 4) & 1) * 256;
     const uint32_t clut_x = (clut & 0x3F) * 16;
     const uint32_t clut_y = (clut >> 6) & 0x1FF;
-    switch ((m_texpage >> 7) & 3) {
+    const uint32_t mode = (m_texpage >> 7) & 3;
+    uint32_t wx, wy = page_y + tv, sub = 0;
+    uint16_t texel;
+    switch (mode) {
         case 0: { // 4-bit CLUT: four indices per halfword, lowest nibble first
-            uint16_t word = ReadVram(page_x + tu / 4, page_y + tv);
-            return ReadVram(clut_x + ((word >> ((tu & 3) * 4)) & 0xF), clut_y);
+            wx = page_x + tu / 4;
+            sub = tu & 3;
+            uint16_t word = ReadVram(wx, wy);
+            texel = ReadVram(clut_x + ((word >> (sub * 4)) & 0xF), clut_y);
+            break;
         }
         case 1: { // 8-bit CLUT: two indices per halfword, low byte first
-            uint16_t word = ReadVram(page_x + tu / 2, page_y + tv);
-            return ReadVram(clut_x + ((word >> ((tu & 1) * 8)) & 0xFF), clut_y);
+            wx = page_x + tu / 2;
+            sub = tu & 1;
+            uint16_t word = ReadVram(wx, wy);
+            texel = ReadVram(clut_x + ((word >> (sub * 8)) & 0xFF), clut_y);
+            break;
         }
         default: // 15-bit direct (mode 3 "reserved" treated as 15-bit; unverified)
-            return ReadVram(page_x + tu, page_y + tv);
+            wx = page_x + tu;
+            texel = ReadVram(wx, wy);
+            break;
     }
+    if (m_hook) texel = m_hook->Texel(m_vram, wx & 1023, wy & 511, mode, sub, clut_x, clut_y, texel);
+    return texel;
 }
 
 // Shade, blend and write one pixel already inside the drawing area
@@ -727,6 +756,7 @@ void Ps1Gpu::PlotPixel(int32_t x, int32_t y, int32_t r, int32_t g, int32_t b,
     uint16_t pixel = static_cast<uint16_t>(c5[0] | (c5[1] << 5) | (c5[2] << 10)) | stp;
     if (m_mask_set) pixel |= 0x8000;
     m_vram[addr] = pixel;
+    if (m_hook) m_hook->Invalidate(x & 1023, y & 511, 1, 1);
 }
 
 void Ps1Gpu::OutputFrameToRGBA(std::vector<uint32_t>& out_rgba, uint32_t& out_w, uint32_t& out_h) const {

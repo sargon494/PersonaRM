@@ -79,6 +79,8 @@ set(RENDERING_SOURCES
     rendering/renderer.h
     rendering/texture_override.cpp
     rendering/texture_override.h
+    rendering/vram_texture_hook.cpp
+    rendering/vram_texture_hook.h
     rendering/ps1_gpu.cpp
     rendering/ps1_gpu.h
     rendering/frame_interp.cpp

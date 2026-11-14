@@ -68,6 +68,9 @@ int main() {
           o.recomp_quantum == 64 && o.interp_hz == 120 && o.max_frames == 100 && o.hidden && !o.stats);
     const char* plain[] = {"personarm_sdl", "d.cue"};
     CHECK(ParseHostArgs(2, plain, o) && o.memcard[0].empty() && o.memcard[1].empty() && !o.recomp && o.recomp_quantum == 1);
+    const char* tex[] = {"personarm_sdl", "d.cue", "--texture-dump", "dd", "--mods", "mm"};
+    CHECK(ParseHostArgs(6, tex, o) && o.texture_dump == "dd" && o.mods == "mm");
+    CHECK(ParseHostArgs(2, plain, o) && o.texture_dump.empty() && o.mods.empty());
     const char* missing[] = {"personarm_sdl", "d.cue", "--memcard1"};
     CHECK(!ParseHostArgs(3, missing, o));
     const char* unknown[] = {"personarm_sdl", "d.cue", "--bogus", "1"};

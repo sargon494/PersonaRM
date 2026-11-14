@@ -8,6 +8,8 @@
 
 namespace personarm {
 
+class VramTextureHook;
+
 // ───────────────────────────────────────────────────────────────────────────
 // PlayStation 1 GPU Hardware Dimensions & Standards
 // ───────────────────────────────────────────────────────────────────────────
@@ -78,7 +80,7 @@ public:
     void FillVramRect(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t color16);
 
     const std::vector<uint16_t>& GetVram() const { return m_vram; }
-    void SetVram(const std::vector<uint16_t>& vram) { m_vram = vram; }
+    void SetVram(const std::vector<uint16_t>& vram);
     /// GP0 polygon commands (20h-3Fh) executed since construction (boot instrumentation).
     uint64_t GetPolygonCount() const { return m_polygon_count; }
 
@@ -88,6 +90,9 @@ public:
     /// (GP1 05h, a double-buffer flip) as [0, x | y << 16] followed by E1h-E6h packets for the current
     /// draw state, so every segment between two flips replays on its own.
     void SetCommandLog(std::vector<uint32_t>* log) { m_cmd_log = log; }
+
+    /// Texture dump / replacement (rendering/vram_texture_hook.h); null = off (default), no effect on VRAM.
+    void SetTextureHook(VramTextureHook* hook);
 
 private:
     // One rasterizer vertex: VRAM-space position (drawing offset applied), 24-bit color, texcoord.
@@ -127,6 +132,7 @@ private:
     bool m_mask_check = false;
     uint64_t m_polygon_count = 0;
     std::vector<uint32_t>* m_cmd_log = nullptr;
+    VramTextureHook* m_hook = nullptr;
     void LogWords(const uint32_t* w, size_t n) {
         m_cmd_log->push_back(static_cast<uint32_t>(n));
         m_cmd_log->insert(m_cmd_log->end(), w, w + n);
