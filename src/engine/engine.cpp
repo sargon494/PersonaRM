@@ -102,7 +102,7 @@ void Engine::RamDma::WriteWord(uint32_t a, uint32_t v) {
 // Wiring per the hw/cdrom.h and hw/dma.h header notes. Rebuilt on every Reset (fresh device state).
 void Engine::WireDevices() {
     m_dma_mem = std::make_unique<RamDma>(*this);
-    m_cdrom = std::make_unique<hw::CdRom>(&m_cd_source);
+    m_cdrom = std::make_unique<hw::CdRom>(m_cd_override ? m_cd_override : &m_cd_source);
     m_dma = std::make_unique<hw::Dma>(*m_dma_mem);
     m_cdrom->SetIrqCallback([this] { RaiseIrq(2); });
     m_dma->SetIrqCallback([this] { RaiseIrq(3); });
