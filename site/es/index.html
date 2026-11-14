@@ -156,11 +156,14 @@
             <p class="intro reveal">PersonaRM está en desarrollo activo y todavía no se puede jugar. El plan:
                 lograr una CPU demostrablemente correcta, terminar el núcleo de la máquina, arrancar el juego y después compilar su código por
                 adelantado.</p>
-            <p class="intro reveal"><strong>Fase actual: paso 4 de 6, recompilación estática (recién empezada).</strong> La CPU y el núcleo de la máquina
+            <p class="intro reveal"><strong>Fase actual: paso 4 de 6, recompilación estática (en curso).</strong> La CPU y el núcleo de la máquina
                 están terminados. El paso 3, primer arranque, sigue en curso para avanzar más en el juego. El disco 1 reproduce su intro con sonido, muestra la pantalla de título y, en una partida nueva, llega al movimiento
                 libre y al menú principal. El arranque coincide con el emulador de referencia PCSX-Redux hasta las primeras
-                cargas de overlays. Ya suenan la música y los efectos de sonido, con la SPU en tiempo emulado. El primer
-                recompilador traduce funciones MIPS a C++, pero todavía no ejecuta el juego. Siguiente: overlays y una comparación con el arranque real.</p>
+                cargas de overlays. Ya suenan la música y los efectos de sonido, con la SPU en tiempo emulado. El recompilador
+                ahora cubre también los overlays, cada uno validado con un hash de su código en RAM y con el intérprete como respaldo. En el disco 1 ejecuta
+                prácticamente el 100% de las instrucciones como código nativo, y la traza sigue coincidiendo exactamente con el intérprete hasta el movimiento
+                libre. La temporización de los dispositivos avanza ahora de forma perezosa, con resultados exactos: en un PC rápido, el intérprete pasó de unos 74 a 129 fps
+                y el modo recompilado de unos 100 a 370 fps. Siguiente: una comparación con el arranque real.</p>
             <div class="status-table reveal" role="table" aria-label="Estado de los subsistemas">
                 <div class="row head" role="row"><span role="columnheader">Subsistema</span><span
                         role="columnheader">Estado</span></div>
@@ -187,9 +190,9 @@
                 <div class="row" role="row"><span role="cell">Arranque del juego real</span><span role="cell"
                         class="tag progress">Movimiento libre y menú principal</span></div>
                 <div class="row" role="row"><span role="cell">Recompilador estático</span><span role="cell"
-                        class="tag progress">v0: generación de C++ por función, G2 sintético superado; todavía no ejecuta el juego</span></div>
+                        class="tag progress">v0: generación de C++ por función, G2 sintético superado; overlays cubiertos (verificados por hash del código); todavía no es jugable de principio a fin</span></div>
                 <div class="row" role="row"><span role="cell">Ventana, entrada y audio (SDL3)</span><span role="cell"
-                        class="tag progress">Funciona; mezcla completa de SPU y CD/XA en la ventana</span></div>
+                        class="tag progress">Funciona; mezcla completa de SPU y CD/XA en la ventana; interpolación de fotogramas opcional (desactivada por defecto)</span></div>
             </div>
         </section>
 

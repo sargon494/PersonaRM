@@ -158,10 +158,10 @@
             </header>
             <p class="intro reveal">PersonaRM は開発中で、まだプレイはできません。計画は次のとおりです。
                 CPU の正しさを検証できる状態にし、マシンの中核を完成させ、ゲームを起動し、その後ゲームのコードを事前にコンパイルします。</p>
-            <p class="intro reveal"><strong>現在のフェーズ:全 6 ステップ中のステップ 4、静的再コンパイル(着手したばかり)。</strong> CPU とマシンの中核は完成しています。ステップ 3(初回起動)は、さらに先へ進めるために継続中です。
+            <p class="intro reveal"><strong>現在のフェーズ:全 6 ステップ中のステップ 4、静的再コンパイル(進行中)。</strong> CPU とマシンの中核は完成しています。ステップ 3(初回起動)は、さらに先へ進めるために継続中です。
                 ディスク 1 は音声付きでイントロを再生し、タイトル画面を表示し、ニューゲームでは自由移動とメインメニューまで到達します。
                 起動の挙動は、最初のオーバーレイのロードまで、リファレンスエミュレーターの PCSX-Redux と一致しています。
-                音楽と効果音が再生されるようになり、SPU はエミュレートされた時間(44,100 Hz)で動作します。最初のリコンパイラは関数を C++ へ変換しますが、まだゲームは実行していません。次は、オーバーレイと実起動との比較です。</p>
+                音楽と効果音が再生されるようになり、SPU はエミュレートされた時間(44,100 Hz)で動作します。リコンパイラはオーバーレイも対象になり、それぞれ RAM 上のコードのハッシュで検証され、上書きされた場合はインタプリタにフォールバックします。ディスク 1 では命令のほぼ 100% がネイティブコードとして実行され、トレースは自由移動までインタプリタと完全に一致したままです。デバイスのタイミングは遅延して進むようになり、結果は正確なまま、高速な PC でインタプリタは約 74 から 129 fps、再コンパイル版は約 100 から 370 fps に向上しました。次は、実起動との比較です。</p>
             <div class="status-table reveal" role="table" aria-label="サブシステムの進捗">
                 <div class="row head" role="row"><span role="columnheader">サブシステム</span><span
                         role="columnheader">状況</span></div>
@@ -188,9 +188,9 @@
                 <div class="row" role="row"><span role="cell">実ゲームの起動</span><span role="cell"
                         class="tag progress">自由移動とメインメニュー</span></div>
                 <div class="row" role="row"><span role="cell">静的リコンパイラ</span><span role="cell"
-                        class="tag progress">v0:関数単位の C++ 生成、合成テスト G2 合格。まだゲームは実行していません</span></div>
+                        class="tag progress">v0:関数単位の C++ 生成、合成テスト G2 合格。オーバーレイも対象(コードのハッシュで検証)。まだ端から端までプレイはできません</span></div>
                 <div class="row" role="row"><span role="cell">ウィンドウ、入力、オーディオ(SDL3)</span><span role="cell"
-                        class="tag progress">動作中。ウィンドウで SPU と CD/XA の全ミックスを再生</span></div>
+                        class="tag progress">動作中。ウィンドウで SPU と CD/XA の全ミックスを再生。フレーム補間は任意(既定でオフ)</span></div>
             </div>
         </section>
 

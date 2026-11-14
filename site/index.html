@@ -156,11 +156,14 @@
             <p class="intro reveal">PersonaRM is in active development and not playable yet. The plan:
                 get the CPU provably correct, finish the machine core, boot the game, then compile its code ahead of
                 time.</p>
-            <p class="intro reveal"><strong>Current phase: step 4 of 6, static recompilation (just started).</strong> The CPU and the machine core
+            <p class="intro reveal"><strong>Current phase: step 4 of 6, static recompilation (in progress).</strong> The CPU and the machine core
                 are done. Step 3, first boot, continues for playing further. Disc 1 plays its intro with sound, shows the title screen and, on a new game, reaches free
                 movement and the main menu. The boot matches the PCSX-Redux reference emulator up to the first
-                overlay loads. Music and sound effects now play, with the SPU on emulated time. The first recompiler
-                translates MIPS functions to C++ but does not run the game yet. Next: overlays and a real-boot comparison.</p>
+                overlay loads. Music and sound effects now play, with the SPU on emulated time. The recompiler now covers
+                overlays too, each validated by a hash of its code in RAM, with the interpreter as fallback. On disc 1 it
+                runs essentially 100% of instructions as native code, and the trace still matches the interpreter exactly
+                up to free movement. Device timing now advances lazily, with exact results: on a fast PC the interpreter
+                went from about 74 to 129 fps, and the recompiled mode from about 100 to 370 fps. Next: a real-boot comparison.</p>
             <div class="status-table reveal" role="table" aria-label="Subsystem status">
                 <div class="row head" role="row"><span role="columnheader">Subsystem</span><span
                         role="columnheader">Status</span></div>
@@ -187,9 +190,9 @@
                 <div class="row" role="row"><span role="cell">Real-game boot</span><span role="cell"
                         class="tag progress">Free movement and main menu</span></div>
                 <div class="row" role="row"><span role="cell">Static recompiler</span><span role="cell"
-                        class="tag progress">v0: function-level C++ generation, synthetic G2 passing; not yet running the game</span></div>
+                        class="tag progress">v0: function-level C++ generation, synthetic G2 passing; overlays covered (code-hash checked); not yet playable end to end</span></div>
                 <div class="row" role="row"><span role="cell">Window, input and audio (SDL3)</span><span role="cell"
-                        class="tag progress">Works; full SPU and CD/XA mix in the window</span></div>
+                        class="tag progress">Works; full SPU and CD/XA mix in the window; optional frame interpolation (off by default)</span></div>
             </div>
         </section>
 
