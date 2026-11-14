@@ -143,6 +143,15 @@ static const DiscFileEntry* FindIso(const std::vector<DiscFileEntry>& files, uin
     return nullptr;
 }
 
+bool DiscFiles::Open(const std::string& disc) { return d_.Open(disc) && LoadFilepos(d_, fp_, files_); }
+
+bool DiscFiles::Read(uint32_t index, std::vector<uint8_t>& out) {
+    if (index >= fp_.size() || (!fp_[index].lba && !fp_[index].size)) return false;
+    const DiscFileEntry* iso = FindIso(files_, index, fp_[index].lba);
+    if (!iso || iso->sector_lba != fp_[index].lba || IsExt(iso->name)) return false;
+    return d_.ReadFile(iso->name, out);
+}
+
 int RunFilepos(const std::string& disc) {
     DiscReader d;
     if (!d.Open(disc)) { std::cerr << "No se pudo abrir " << disc << "\n"; return 2; }
