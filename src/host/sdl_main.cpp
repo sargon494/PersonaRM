@@ -5,6 +5,7 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdio>
 #include <cstdlib>
@@ -30,6 +31,8 @@ static void Usage() {
                          "  --input-script file  scripted pad presses (<frame> <button> [<hold>] per line)\n"
                          "  --interp HZ          present HZ pictures/s (multiple of 60, e.g. 120), synthesizing the\n"
                          "                       ones between the game's frames (display only, one game frame late)\n"
+                         "  --resolution-scale N internal resolution N x 320x240 (1-4, default 1 = native); display\n"
+                         "                       only, the game still sees the native VRAM. Not with --interp\n"
                          "  --dump-dir D --dump-from F --dump-to G   every presented picture of frames F..G as PNG\n"
                          "  --texture-dump D     write every VRAM texture the game samples as <HASH>_<bits>bit_<WxH>.png into D\n"
                          "  --mods D             HD texture mods: D/<mod>/textures/<HASH>.png (+ manifest.json priority/serial)\n"
@@ -80,7 +83,9 @@ int main(int argc, char** argv) {
     }
     SDL_Window* window = nullptr;
     SDL_Renderer* renderer = nullptr;
-    if (!SDL_CreateWindowAndRenderer("PersonaRM", 960, 720, SDL_WINDOW_RESIZABLE | (hidden ? SDL_WINDOW_HIDDEN : 0),
+    const int scale = int(opt.resolution_scale);
+    if (!SDL_CreateWindowAndRenderer("PersonaRM", std::max(960, 320 * scale), std::max(720, 240 * scale),
+                                     SDL_WINDOW_RESIZABLE | (hidden ? SDL_WINDOW_HIDDEN : 0),
                                      &window, &renderer)) {
         std::fprintf(stderr, "SDL_CreateWindowAndRenderer: %s\n", SDL_GetError());
         SDL_Quit();
@@ -123,6 +128,7 @@ int main(int argc, char** argv) {
         if (!patches.empty()) std::printf("[gameplay] text_speed=%s\n", TextSpeedName(gameplay.text_speed));
         engine.SetGamePatches(std::move(patches));
     }
+    engine.GetGpu().SetResolutionScale(opt.resolution_scale);
     engine.SetPadScript(presses);
     for (int slot = 0; slot < 2; ++slot)
         if (!opt.memcard[slot].empty()) engine.SetMemoryCard(slot, &cards[slot]);
@@ -230,8 +236,11 @@ int main(int argc, char** argv) {
                 if (t > 0 && t < 1 && interp.PairOk()) interp_ns += SDL_GetTicksNS() - t0, ++interp_frames;
                 off = false;
             }
-            const uint32_t w = d.width ? d.width : 320, h = d.height ? d.height : 240;
+            // 24bpp (FMV) is shown at 1x and stretched by the presenter.
+            const uint32_t hs = scale > 1 && !d.is_24bit ? uint32_t(scale) : 1;
+            const uint32_t w = (d.width ? d.width : 320) * hs, h = (d.height ? d.height : 240) * hs;
             if (off) rgba.assign(size_t(w) * h, 0xFF000000u);  // display disabled
+            else if (hs > 1) host::DisplayToRgba(gpu.GetScaledVram(), d.x, d.y, w / hs, h / hs, false, rgba, hs);
             else host::DisplayToRgba(*vram, d.x, d.y, w, h, d.is_24bit, rgba);
             for (uint32_t p : rgba)
                 if (p & 0xFFFFFFu) { ++lit_frames; break; }

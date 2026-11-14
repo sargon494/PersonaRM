@@ -20,10 +20,33 @@ void Ps1Gpu::SetTextureHook(VramTextureHook* hook) {
 void Ps1Gpu::SetVram(const std::vector<uint16_t>& vram) {
     m_vram = vram;
     if (m_hook) m_hook->ClearTags();
+    UpscaleRect(0, 0, PS1_VRAM_WIDTH, PS1_VRAM_HEIGHT);
+}
+
+void Ps1Gpu::SetResolutionScale(uint32_t scale) {
+    m_scale = std::clamp<uint32_t>(scale, 1, 4);
+    if (m_scale == 1) { std::vector<uint16_t>().swap(m_vram_hi); return; }
+    m_vram_hi.assign(PS1_VRAM_WORDS * m_scale * m_scale, 0);
+    UpscaleRect(0, 0, PS1_VRAM_WIDTH, PS1_VRAM_HEIGHT);
+}
+
+void Ps1Gpu::UpscaleRect(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
+    if (m_scale == 1) return;
+    const uint32_t s = m_scale, stride = PS1_VRAM_WIDTH * s;
+    w = std::min(w, PS1_VRAM_WIDTH), h = std::min(h, PS1_VRAM_HEIGHT);
+    for (uint32_t cy = 0; cy < h; ++cy) {
+        const uint32_t py = (y + cy) & (PS1_VRAM_HEIGHT - 1);
+        for (uint32_t cx = 0; cx < w; ++cx) {
+            const uint32_t px = (x + cx) & (PS1_VRAM_WIDTH - 1);
+            const uint16_t p = m_vram[py * PS1_VRAM_WIDTH + px];
+            for (uint32_t j = 0; j < s; ++j) std::fill_n(&m_vram_hi[(py * s + j) * stride + px * s], s, p);
+        }
+    }
 }
 
 void Ps1Gpu::Reset() {
     std::fill(m_vram.begin(), m_vram.end(), static_cast<uint16_t>(0));
+    std::fill(m_vram_hi.begin(), m_vram_hi.end(), static_cast<uint16_t>(0));
     if (m_hook) m_hook->ClearTags();
 
     m_display.x = 0;
@@ -80,6 +103,7 @@ void Ps1Gpu::WriteVram(uint32_t x, uint32_t y, uint16_t pixel) {
     y &= (PS1_VRAM_HEIGHT - 1);
     m_vram[y * PS1_VRAM_WIDTH + x] = pixel;
     if (m_hook) m_hook->Invalidate(x, y, 1, 1);
+    UpscaleRect(x, y, 1, 1);
 }
 
 void Ps1Gpu::FillVramRect(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t color16) {
@@ -91,6 +115,7 @@ void Ps1Gpu::FillVramRect(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16
             m_vram[py * PS1_VRAM_WIDTH + px] = color16;
         }
     }
+    UpscaleRect(x, y, w, h);
 }
 
 bool Ps1Gpu::LoadTimToVram(const TimImage& tim) {
@@ -117,6 +142,7 @@ bool Ps1Gpu::LoadTimToVram(const TimImage& tim) {
             m_vram[py * PS1_VRAM_WIDTH + px] = ps1_pixel;
         }
     }
+    UpscaleRect(vram_x, vram_y, tim.width, tim.height);
 
     PRM_LOG_INFO("GPU", "Loaded TIM texture into VRAM at (" + std::to_string(vram_x) +
                         "," + std::to_string(vram_y) + ") Size: " +
@@ -259,6 +285,7 @@ void Ps1Gpu::WriteGP0(uint32_t word) {
         if (m_transfer_words_left == 0) {
             m_in_vram_transfer = false;
             if (m_hook) m_hook->OnUpload(m_vram, m_transfer_x, m_transfer_y, m_transfer_w, m_transfer_h);
+            UpscaleRect(m_transfer_x, m_transfer_y, m_transfer_w, m_transfer_h);
         }
         return;
     }
@@ -396,8 +423,17 @@ void Ps1Gpu::ExecuteGP0Command() {
             for (uint32_t cy = 0; cy < h; ++cy) {
                 for (uint32_t cx = 0; cx < w; ++cx) {
                     uint16_t p = ReadVram(sx + cx, sy + cy);
-                    WriteVram(dx + cx, dy + cy, p);
+                    const uint32_t x = (dx + cx) & (PS1_VRAM_WIDTH - 1), y = (dy + cy) & (PS1_VRAM_HEIGHT - 1);
+                    m_vram[y * PS1_VRAM_WIDTH + x] = p;
+                    if (m_hook) m_hook->Invalidate(x, y, 1, 1);
                 }
+            }
+            if (m_scale > 1) {  // copy the scaled pixels (keeps render-to-texture detail), same order as 1x
+                const uint32_t s = m_scale, W = PS1_VRAM_WIDTH * s, H = PS1_VRAM_HEIGHT * s;
+                for (uint32_t cy = 0; cy < h * s; ++cy)
+                    for (uint32_t cx = 0; cx < w * s; ++cx)
+                        m_vram_hi[((dy * s + cy) % H) * W + (dx * s + cx) % W] =
+                            m_vram_hi[((sy * s + cy) % H) * W + (sx * s + cx) % W];
             }
             break;
         }
@@ -519,16 +555,28 @@ void Ps1Gpu::DrawPolygon(uint8_t cmd) {
     f.dither = ((m_texpage >> 9) & 1) && (gouraud || (f.textured && !f.raw));
 
     // psx-spx "GPU Render Polygon Commands": a quad is drawn as triangles (v0,v1,v2) and (v1,v2,v3).
-    DrawTriangle(v[0], v[1], v[2], gouraud, f);
-    if (quad) DrawTriangle(v[1], v[2], v[3], gouraud, f);
+    // Scaled pass first so that it samples the same VRAM the 1x pass starts from.
+    if (m_scale > 1) {
+        const int32_t s = int32_t(m_scale);
+        Vertex hv[4];
+        for (int i = 0; i < n; ++i) {
+            hv[i] = v[i];
+            hv[i].x *= s, hv[i].y *= s, hv[i].u *= s, hv[i].v *= s;
+        }
+        const Target hi{m_vram_hi.data(), s};
+        DrawTriangle(hi, hv[0], hv[1], hv[2], gouraud, f);
+        if (quad) DrawTriangle(hi, hv[1], hv[2], hv[3], gouraud, f);
+    }
+    DrawTriangle(Vram1x(), v[0], v[1], v[2], gouraud, f);
+    if (quad) DrawTriangle(Vram1x(), v[1], v[2], v[3], gouraud, f);
 }
 
-void Ps1Gpu::DrawTriangle(const Vertex& a, const Vertex& b_in, const Vertex& c_in,
+void Ps1Gpu::DrawTriangle(const Target& t, const Vertex& a, const Vertex& b_in, const Vertex& c_in,
                           bool gouraud, const DrawFlags& f) {
     // psx-spx: max vertex distance is 1023 horizontally / 511 vertically; larger polygons are skipped.
     int32_t min_x = std::min({a.x, b_in.x, c_in.x}), max_x = std::max({a.x, b_in.x, c_in.x});
     int32_t min_y = std::min({a.y, b_in.y, c_in.y}), max_y = std::max({a.y, b_in.y, c_in.y});
-    if (max_x - min_x > 1023 || max_y - min_y > 511) return;
+    if (max_x - min_x > 1023 * t.s || max_y - min_y > 511 * t.s) return;
 
     auto edge = [](const Vertex& p, const Vertex& q, int64_t x, int64_t y) -> int64_t {
         return static_cast<int64_t>(q.x - p.x) * (y - p.y) - static_cast<int64_t>(q.y - p.y) * (x - p.x);
@@ -555,8 +603,8 @@ void Ps1Gpu::DrawTriangle(const Vertex& a, const Vertex& b_in, const Vertex& c_i
         return static_cast<int32_t>((2 * s + area) / (2 * area));
     };
 
-    const int32_t x0 = std::max(min_x, m_drawing.x1), x1 = std::min(max_x, m_drawing.x2);
-    const int32_t y0 = std::max(min_y, m_drawing.y1), y1 = std::min(max_y, m_drawing.y2);
+    const int32_t x0 = std::max(min_x, m_drawing.x1 * t.s), x1 = std::min(max_x, m_drawing.x2 * t.s + t.s - 1);
+    const int32_t y0 = std::max(min_y, m_drawing.y1 * t.s), y1 = std::min(max_y, m_drawing.y2 * t.s + t.s - 1);
     for (int32_t y = y0; y <= y1; ++y) {
         for (int32_t x = x0; x <= x1; ++x) {
             int64_t w0 = edge(b, c, x, y), w1 = edge(c, a, x, y), w2 = edge(a, b, x, y);
@@ -572,7 +620,7 @@ void Ps1Gpu::DrawTriangle(const Vertex& a, const Vertex& b_in, const Vertex& c_i
                 u = lerp(w0, w1, w2, a.u, b.u, c.u);
                 v = lerp(w0, w1, w2, a.v, b.v, c.v);
             }
-            PlotPixel(x, y, r, g, bl, u, v, f);
+            PlotPixel(t, x, y, r, g, bl, u, v, f);
         }
     }
 }
@@ -596,13 +644,20 @@ void Ps1Gpu::DrawLineCommand(uint8_t cmd) {
 }
 
 void Ps1Gpu::DrawLine(const Vertex& a, const Vertex& b, bool gouraud, bool semi) {
-    const int32_t dx = b.x - a.x, dy = b.y - a.y;
     // psx-spx "GPU Render Line Commands": lines longer than 1023/511 are not drawn.
-    if (std::abs(dx) > 1023 || std::abs(dy) > 511) return;
+    if (std::abs(b.x - a.x) > 1023 || std::abs(b.y - a.y) > 511) return;
 
     DrawFlags f;
     f.semi = semi;
     f.dither = ((m_texpage >> 9) & 1) && gouraud;
+    if (m_scale > 1) DrawLineOn({m_vram_hi.data(), int32_t(m_scale)}, a, b, gouraud, f);
+    DrawLineOn(Vram1x(), a, b, gouraud, f);
+}
+
+// shortcut: the scaled target gets the 1x line with each pixel as an s x s block (thick, stair-stepped
+// like the original); a sub-pixel line rasterizer would be needed for thin smooth lines.
+void Ps1Gpu::DrawLineOn(const Target& t, const Vertex& a, const Vertex& b, bool gouraud, const DrawFlags& f) {
+    const int32_t dx = b.x - a.x, dy = b.y - a.y;
 
     // approximate: DDA with round-to-nearest; both endpoints drawn.
     // unverified: hardware line stepping and end-point inclusion.
@@ -622,7 +677,8 @@ void Ps1Gpu::DrawLine(const Vertex& a, const Vertex& b, bool gouraud, bool semi)
             g = step(a.g, b.g, i);
             bl = step(a.b, b.b, i);
         }
-        PlotPixel(x, y, r, g, bl, 0, 0, f);
+        for (int32_t sy = 0; sy < t.s; ++sy)
+            for (int32_t sx = 0; sx < t.s; ++sx) PlotPixel(t, x * t.s + sx, y * t.s + sy, r, g, bl, 0, 0, f);
     }
 }
 
@@ -652,21 +708,26 @@ void Ps1Gpu::DrawRectangle(uint8_t cmd) {
     }
     // E1h bits 12/13: textured rectangle X/Y flip. unverified: flipped texcoords simply decrement from u0/v0.
     const bool flip_x = (m_texpage >> 12) & 1, flip_y = (m_texpage >> 13) & 1;
-    for (int32_t dy = 0; dy < h; ++dy) {
-        int32_t y = o.y + dy;
-        if (y < m_drawing.y1 || y > m_drawing.y2) continue;
-        for (int32_t dx = 0; dx < w; ++dx) {
-            int32_t x = o.x + dx;
-            if (x < m_drawing.x1 || x > m_drawing.x2) continue;
-            int32_t u = flip_x ? u0 - dx : u0 + dx;
-            int32_t v = flip_y ? v0 - dy : v0 + dy;
-            PlotPixel(x, y, o.r, o.g, o.b, u, v, f);
+    auto draw = [&](const Target& t) {  // target units; a flipped UV keeps texel u0 for the first s pixels
+        const int32_t s = t.s, us = u0 * s + (flip_x ? s - 1 : 0), vs = v0 * s + (flip_y ? s - 1 : 0);
+        for (int32_t dy = 0; dy < h * s; ++dy) {
+            int32_t y = o.y * s + dy;
+            if (y < m_drawing.y1 * s || y > m_drawing.y2 * s + s - 1) continue;
+            for (int32_t dx = 0; dx < w * s; ++dx) {
+                int32_t x = o.x * s + dx;
+                if (x < m_drawing.x1 * s || x > m_drawing.x2 * s + s - 1) continue;
+                int32_t u = flip_x ? us - dx : us + dx;
+                int32_t v = flip_y ? vs - dy : vs + dy;
+                PlotPixel(t, x, y, o.r, o.g, o.b, u, v, f);
+            }
         }
-    }
+    };
+    if (m_scale > 1) draw({m_vram_hi.data(), int32_t(m_scale)});
+    draw(Vram1x());
 }
 
 // Texture lookup with texture window (psx-spx "GPU Texture Window", "GPU Texture Page/CLUT").
-uint16_t Ps1Gpu::FetchTexel(int32_t u, int32_t v, uint16_t clut) const {
+uint16_t Ps1Gpu::FetchTexel(int32_t u, int32_t v, uint32_t fu, uint32_t fv, uint32_t s, uint16_t clut) const {
     const uint32_t mask_x = m_texwindow & 0x1F, mask_y = (m_texwindow >> 5) & 0x1F;
     const uint32_t off_x = (m_texwindow >> 10) & 0x1F, off_y = (m_texwindow >> 15) & 0x1F;
     uint32_t tu = static_cast<uint32_t>(u) & 0xFF, tv = static_cast<uint32_t>(v) & 0xFF;
@@ -700,13 +761,13 @@ uint16_t Ps1Gpu::FetchTexel(int32_t u, int32_t v, uint16_t clut) const {
             texel = ReadVram(wx, wy);
             break;
     }
-    if (m_hook) texel = m_hook->Texel(m_vram, wx & 1023, wy & 511, mode, sub, clut_x, clut_y, texel);
+    if (m_hook) texel = m_hook->Texel(m_vram, wx & 1023, wy & 511, mode, sub, clut_x, clut_y, texel, fu, fv, s);
     return texel;
 }
 
 // Shade, blend and write one pixel already inside the drawing area
 // (psx-spx "GPU Rendering Attributes", "GPU Semi-Transparency", "GPU Dithering", "GPU Mask Bit").
-void Ps1Gpu::PlotPixel(int32_t x, int32_t y, int32_t r, int32_t g, int32_t b,
+void Ps1Gpu::PlotPixel(const Target& t, int32_t x, int32_t y, int32_t r, int32_t g, int32_t b,
                        int32_t u, int32_t v, const DrawFlags& f) {
     static const int8_t kDither[4][4] = {
         {-4, +0, -3, +1},
@@ -714,15 +775,25 @@ void Ps1Gpu::PlotPixel(int32_t x, int32_t y, int32_t r, int32_t g, int32_t b,
         {-3, +1, -4, +0},
         {+3, -1, +2, -2},
     };
-    const uint32_t addr = (static_cast<uint32_t>(y) & 511) * PS1_VRAM_WIDTH + (static_cast<uint32_t>(x) & 1023);
-    const uint16_t bg = m_vram[addr];
+    const bool hi = t.s != 1;
+    // Callers clip to the drawing area, so (x, y) is inside the target; the 1x masks are kept as before.
+    const uint32_t addr = hi ? uint32_t(y) * PS1_VRAM_WIDTH * uint32_t(t.s) + uint32_t(x)
+                             : (static_cast<uint32_t>(y) & 511) * PS1_VRAM_WIDTH + (static_cast<uint32_t>(x) & 1023);
+    const uint16_t bg = t.px[addr];
     if (m_mask_check && (bg & 0x8000)) return;
 
     bool blend = f.semi;
     uint16_t stp = 0;
     int32_t c8[3] = {r, g, b}; // 8-bit-scale color before dithering/truncation
     if (f.textured) {
-        uint16_t texel = FetchTexel(u, v, f.clut);
+        uint16_t texel;
+        if (hi) {  // u, v in 1/s texel steps: texel (wrapped like the 8-bit UV) and sub-texel position
+            const int32_t m = 256 * t.s;
+            u = ((u % m) + m) % m, v = ((v % m) + m) % m;
+            texel = FetchTexel(u / t.s, v / t.s, uint32_t(u % t.s), uint32_t(v % t.s), uint32_t(t.s), f.clut);
+        } else {
+            texel = FetchTexel(u, v, 0, 0, 1, f.clut);
+        }
         if (texel == 0) return; // 0000h is the fully transparent texel
         stp = texel & 0x8000;
         blend = f.semi && stp; // textured: only texels with bit 15 set are semi-transparent
@@ -733,7 +804,7 @@ void Ps1Gpu::PlotPixel(int32_t x, int32_t y, int32_t r, int32_t g, int32_t b,
         }
     }
     int32_t c5[3];
-    const int32_t d = f.dither ? kDither[y & 3][x & 3] : 0;
+    const int32_t d = !f.dither ? 0 : hi ? kDither[(y / t.s) & 3][(x / t.s) & 3] : kDither[y & 3][x & 3];
     for (int i = 0; i < 3; ++i) {
         c5[i] = std::clamp(c8[i] + d, 0, 255) >> 3;
     }
@@ -755,8 +826,8 @@ void Ps1Gpu::PlotPixel(int32_t x, int32_t y, int32_t r, int32_t g, int32_t b,
 
     uint16_t pixel = static_cast<uint16_t>(c5[0] | (c5[1] << 5) | (c5[2] << 10)) | stp;
     if (m_mask_set) pixel |= 0x8000;
-    m_vram[addr] = pixel;
-    if (m_hook) m_hook->Invalidate(x & 1023, y & 511, 1, 1);
+    t.px[addr] = pixel;
+    if (m_hook && !hi) m_hook->Invalidate(x & 1023, y & 511, 1, 1);
 }
 
 void Ps1Gpu::OutputFrameToRGBA(std::vector<uint32_t>& out_rgba, uint32_t& out_w, uint32_t& out_h) const {
