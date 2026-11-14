@@ -21,8 +21,8 @@ Dialogue is not Shift-JIS. It is a sequence of `u16` codes: values below `0x1000
 ## Commands
 
 ```
-p2text extract (--disc <img.cue|bin|iso> [--index N] | --file <F0057.bin>) --out <dir> [--map glyphs.txt]
-p2text insert  --file <F0057.bin> --tsv <F0057.tsv> --out <patched.bin> [--map glyphs.txt] [--recompress]
+p2text extract (--disc <img.cue|bin|iso> [--index N] | --file <F0057.bin>) --out <dir> [--map glyphs.txt] [--us|--jp]
+p2text insert  --file <F0057.bin> --tsv <F0057.tsv> --out <patched.bin> [--map glyphs.txt] [--recompress] [--us|--jp]
 p2text verify  (--disc <img> [--index N] | --file <F.bin>)
 p2text font-sheet (--disc <img> | --font <F0041.bin>) --out sheet.bmp [--first N] [--count N]
 ```
@@ -43,6 +43,15 @@ Text syntax:
 | `<c:1331 0001 0002>` | any other control: hex words, the first word `0x1Lxx` with `L` words in total |
 
 Every message must end with exactly one `<end>`.
+
+### US release (SLUS-01158): packed ASCII text
+
+The US build stores English text packed: control `0x1136`, then `u16` words that each hold two ASCII bytes (low byte first). The run ends at the first NUL byte: an odd-length string ends in a word whose high byte is 0, an even-length string is followed by a `0x0000` word. Names, `<color=N>`, `<br>`, `<page>`, `<end>` and the other controls stay separate `u16` codes between runs, so one message has several runs. No other control packs text. `p2text` detects the format per file (any `0x1136` in a bank), so `extract` writes plain English and `insert` packs it again; `--us` / `--jp` force the mode (needed only to add text to a US file that has no packed run yet). The TSV header says `us-packed`.
+
+* `<` in text is written `<lt>`. Only printable ASCII fits; anything else is an error.
+* A run that is not canonical (empty, a control byte inside, a NUL in the wrong half) is kept as raw `<c:1136><c:xxxx>...` tokens. In a packed file a bare glyph index below `0x1000` (some debug messages) renders as `<gNNNN>`, not as a character.
+* The US font (`F0041`/`F0013` chunk 0) is 8x12, 1 bpp, ASCII order from `0x20`, proportional. The width table is not known yet (see `research/DISC_US_FORENSICS.md`, OQ-US1), so `insert` does not warn about lines that overflow the window. TODO: add that warning once the widths are found.
+* Check on a real US disc: `verify --disc <us.cue>` gives 0 failures over 11 020 messages; the JP disc still gives 0 failures over 11 385. Edited F0057 message 0 as plain text, served it with `--mods` (`MOD_FILES.md`), and the line shows in the shrine dialogue (frame ~6750-6800).
 
 ### Glyph mapping
 
@@ -66,5 +75,5 @@ Read-only self-check on real data: for every bank, LZ compress/decompress round 
 ## Limits
 
 * Only field-event banks are covered (menus, battle text and the other font chunk of `F0013` are not).
-* No glyph-to-character table is included; no width/VWF handling (the engine advances a fixed 12 px).
+* No glyph-to-character table is included. JP: the engine advances a fixed 12 px. US: proportional widths are not modelled (no overflow warning yet).
 * `0x1106`/`0x1107` and other controls are preserved verbatim but their meaning is unknown.

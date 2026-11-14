@@ -117,6 +117,24 @@ static std::vector<uint8_t> MakeFile(const std::vector<uint8_t>& dec) {
     return f;
 }
 
+static void TestPacked() {
+    GlyphMap m; m.packed = true;
+    std::vector<uint16_t> codes; std::vector<std::string> err;
+    // odd length: last word has a zero high byte; even length: extra 0x0000 word; '<' escaped
+    CHECK(Encode("<color=1>Abc<br>Hi<lt>!<end>", m, codes, err));
+    const std::vector<uint16_t> want{0x122E, 1, 0x1136, 0x6241, 0x0063, 0x1101, 0x1136, 0x6948, 0x213C, 0x0000, 0x1103};
+    CHECK(codes == want);
+    CHECK(Render(codes, m) == "<color=1>Abc<br>Hi<lt>!<end>");
+    // non-canonical runs and bare glyphs stay raw
+    CHECK(Render({0x1136, 0x4100, 0x1103}, m) == "<c:1136><c:4100><end>");
+    CHECK(Render({0x1136, 0x0000, 0x1103}, m) == "<c:1136><g0000><end>");
+    CHECK(Render({0x41, 0x1103}, m) == "<g0065><end>");
+    CHECK(UsesPackedText(Messages{{Message{0, 0, {0x1136, 0x0041, 0x1103}, 0}}, {}, 0, 0}));
+    CHECK(!UsesPackedText(Messages{{Message{0, 0, {0x41, 0x1103}, 0}}, {}, 0, 0}));
+    codes.clear(); err.clear();
+    CHECK(!Encode("ã<end>", m, codes, err));              // non-ASCII has no packed form
+}
+
 static void TestBank() {
     const std::vector<std::vector<uint16_t>> msgs{
         {'A', 0x1101, 'B', 0x1102, 0x1103},
@@ -187,6 +205,7 @@ static void TestFont() {
 int main() {
     TestLz();
     TestText();
+    TestPacked();
     TestBank();
     TestFont();
     std::printf("unit_test_p2text: %d checks OK\n", g_checks);

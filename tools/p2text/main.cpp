@@ -24,9 +24,10 @@ using Args = std::map<std::string, std::string>;
 void Usage() {
     std::puts(
         "p2text <comando> [opciones]\n"
-        "  extract    (--disc <img> [--index N] | --file <F.bin>) --out <dir> [--map glifos.txt]\n"
+        "  extract    (--disc <img> [--index N] | --file <F.bin>) --out <dir> [--map glifos.txt] [--us|--jp]\n"
         "             escribe <dir>/<Fnnnn>.tsv por fichero con bancos; imprime recuentos\n"
-        "  insert     --file <F.bin> --tsv <Fnnnn.tsv> --out <parcheado.bin> [--map glifos.txt] [--recompress]\n"
+        "  insert     --file <F.bin> --tsv <Fnnnn.tsv> --out <parcheado.bin> [--map glifos.txt] [--recompress] [--us|--jp]\n"
+        "             US (SLUS): texto empaquetado 0x1136 (2 bytes ASCII por u16), detectado por fichero; --us/--jp lo fuerzan\n"
         "  verify     (--disc <img> [--index N] | --file <F.bin>)   ida y vuelta LZ/banco/fichero (solo lectura)\n"
         "  font-sheet (--disc <img> | --font <F0041.bin>) --out <hoja.bmp> [--first N] [--count N]\n"
         "El mapa de glifos: lineas 'id<TAB>caracter' (id decimal o 0xHEX); semilla ASCII 0x20-0x7E.");
@@ -86,16 +87,19 @@ bool Load(const std::vector<uint8_t>& file, const BankRef& r, Loaded& l) {
 }
 
 int CmdExtract(const Args& a) {
-    GlyphMap map;
-    if (!LoadMap(a, map)) return 2;
+    GlyphMap base;
+    if (!LoadMap(a, base)) return 2;
     if (!a.count("out")) { Usage(); return 2; }
     fs::create_directories(a.at("out"));
     size_t files = 0, banks = 0, msgs = 0, orphans = 0, bad = 0, glyph_unmapped = 0;
     int rc = ForEachFile(a, [&](const std::string& name, const std::vector<uint8_t>& file) {
         const auto found = FindBanks(file);
         if (found.empty()) return;
+        GlyphMap map = base;
+        if (!a.count("jp")) for (const auto& r : found) { Loaded l; if (Load(file, r, l) && UsesPackedText(l.msgs)) map.packed = true; }
+        if (a.count("us")) map.packed = true;
         std::ostringstream o;
-        o << "# p2text v1 " << name << " | bank, msg, offset, original codes (hex u16), text. Edit only the text column.\n";
+        o << "# p2text v1 " << name << (map.packed ? " us-packed" : "") << " | bank, msg, offset, original codes (hex u16), text. Edit only the text column.\n";
         o << "# bank\tmsg\toffset\tcodes\ttext\n";
         for (const auto& r : found) {
             Loaded l;
@@ -110,7 +114,7 @@ int CmdExtract(const Args& a) {
                     char b[8];
                     std::snprintf(b, sizeof b, i ? " %04x" : "%04x", m.codes[i]);
                     o << b;
-                    if (m.codes[i] < 0x1000 && !map.to_text.count(m.codes[i])) ++glyph_unmapped;
+                    if (m.codes[i] < 0x1000 && !map.to_text.count(m.codes[i]) && !map.packed) ++glyph_unmapped;
                 }
                 o << '\t' << Render(m.codes, map) << '\n';
             }
@@ -141,8 +145,11 @@ int CmdInsert(const Args& a) {
         if (!Load(file, r, l)) continue;
         auto& v = out_codes[r.pos];
         for (const auto& m : l.msgs.list) v.push_back(m.codes);
+        if (UsesPackedText(l.msgs)) map.packed = true;
         loaded[r.pos] = std::move(l);
     }
+    if (a.count("us")) map.packed = true;
+    if (a.count("jp")) map.packed = false;
     std::vector<std::string> errors;
     std::string line;
     for (int ln = 1; std::getline(t, line); ++ln) {
@@ -210,6 +217,7 @@ int CmdVerify(const Args& a) {
         if (found.empty()) return;
         ++files;
         GlyphMap map;
+        for (const auto& r : found) { Loaded l; if (Load(file, r, l) && UsesPackedText(l.msgs)) map.packed = true; }
         std::vector<std::vector<uint8_t>> want;
         for (const auto& r : found) {
             Loaded l;

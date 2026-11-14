@@ -216,6 +216,28 @@ static const char* Named(uint16_t c, size_t n) {
     return nullptr;
 }
 
+// Decodes a canonical packed run at codes[i]==0x1136 into escaped text; returns words used, 0 if not canonical.
+static size_t PackedRun(const std::vector<uint16_t>& codes, size_t i, std::string& text) {
+    std::string raw;
+    size_t j = i + 1;
+    for (; j < codes.size(); ++j) {
+        const uint8_t lo = uint8_t(codes[j] & 0xFF), hi = uint8_t(codes[j] >> 8);
+        if (!lo) { if (hi) return 0; break; }                       // 0x0000 = even-length terminator
+        raw += char(lo);
+        if (!hi) break;                                             // odd-length terminator
+        raw += char(hi);
+    }
+    if (j >= codes.size() || raw.empty()) return 0;
+    for (char ch : raw) if (uint8_t(ch) < 0x20 || uint8_t(ch) > 0x7E) return 0;
+    for (char ch : raw) { if (ch == '<') text += "<lt>"; else text += ch; }
+    return j + 1 - i;
+}
+
+bool UsesPackedText(const Messages& m) {
+    for (const auto& x : m.list) for (uint16_t c : x.codes) if (c == 0x1136) return true;
+    return false;
+}
+
 std::string Render(const std::vector<uint16_t>& codes, const GlyphMap& m) {
     std::string s;
     char buf[32];
@@ -223,12 +245,17 @@ std::string Render(const std::vector<uint16_t>& codes, const GlyphMap& m) {
         const uint16_t c = codes[i];
         if (c < 0x1000) {
             auto it = m.to_text.find(c);
-            const bool safe = it != m.to_text.end() && it->second.find_first_of("<\t\r\n") == std::string::npos;
+            const bool safe = !m.packed && it != m.to_text.end() && it->second.find_first_of("<\t\r\n") == std::string::npos;
             if (safe) s += it->second; else { std::snprintf(buf, sizeof buf, "<g%04u>", c); s += buf; }
             ++i;
             continue;
         }
         const size_t n = std::min(CodeLength(c), codes.size() - i);
+        if (c == 0x1136 && m.packed) {
+            std::string run;
+            const size_t used = PackedRun(codes, i, run);
+            if (used) { s += run; i += used; continue; }
+        }
         if (const char* nm = Named(c, n)) s += nm;
         else if (c == 0x122E && n == 2) { std::snprintf(buf, sizeof buf, "<color=%u>", codes[i + 1]); s += buf; }
         else {
@@ -245,6 +272,15 @@ std::string Render(const std::vector<uint16_t>& codes, const GlyphMap& m) {
 bool Encode(const std::string& text, const GlyphMap& m, std::vector<uint16_t>& out, std::vector<std::string>& errors) {
     const size_t first = out.size(), nerr = errors.size();
     char buf[64];
+    std::string pk;                                   // pending packed ASCII run (map.packed)
+    auto flush = [&]() {
+        if (pk.empty()) return;
+        out.push_back(0x1136);
+        for (size_t k = 0; k < pk.size(); k += 2)
+            out.push_back(uint16_t(uint8_t(pk[k]) | (k + 1 < pk.size() ? uint16_t(uint8_t(pk[k + 1])) << 8 : 0)));
+        if (pk.size() % 2 == 0) out.push_back(0);
+        pk.clear();
+    };
     for (size_t i = 0; i < text.size();) {
         if (text[i] == '<') {
             const size_t e = text.find('>', i);
@@ -253,7 +289,9 @@ bool Encode(const std::string& text, const GlyphMap& m, std::vector<uint16_t>& o
             i = e + 1;
             unsigned v = 0;
             char tail = 0;
-            if (t == "br") out.push_back(0x1101);
+            if (!(t == "lt" && m.packed)) flush();
+            if (t == "lt" && m.packed) pk += '<';
+            else if (t == "br") out.push_back(0x1101);
             else if (t == "page") out.push_back(0x1102);
             else if (t == "end") out.push_back(0x1103);
             else if (t == "indent") out.push_back(0x1131);
@@ -279,6 +317,7 @@ bool Encode(const std::string& text, const GlyphMap& m, std::vector<uint16_t>& o
         uint32_t cp = 0;
         const int n = Utf8Decode(text, i, cp);
         if (!n) { errors.push_back("UTF-8 invalido"); break; }
+        if (m.packed && n == 1 && cp >= 0x20 && cp <= 0x7E) { pk += char(cp); ++i; continue; }
         auto it = m.to_glyph.find(text.substr(i, size_t(n)));
         if (it == m.to_glyph.end()) {
             std::snprintf(buf, sizeof buf, "U+%04X '", cp);
@@ -286,6 +325,7 @@ bool Encode(const std::string& text, const GlyphMap& m, std::vector<uint16_t>& o
         } else out.push_back(uint16_t(it->second));
         i += size_t(n);
     }
+    flush();
     if (errors.size() == nerr) {
         const auto ends = std::count(out.begin() + long(first), out.end(), uint16_t(0x1103));
         if (out.size() == first || out.back() != 0x1103 || ends != 1) errors.push_back("el mensaje debe terminar con <end> (una sola vez)");
