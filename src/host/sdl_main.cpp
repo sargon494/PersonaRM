@@ -8,6 +8,7 @@
 #include <array>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -16,6 +17,7 @@
 #include "engine/engine.h"
 #include "engine/gameplay_patches.h"
 #include "host/host_logic.h"
+#include "host/settings.h"
 #include "loader/png_codec.h"
 #include "recomp/runtime/generated_modules.h"
 #include "rendering/frame_interp.h"
@@ -40,7 +42,13 @@ static void Usage() {
                          "                       formatted if missing, rewritten atomically when the game saves\n"
                          "  --recomp             run the recompiled code linked into this build (local\n"
                          "                       -DPRM_RECOMP_GENERATED_DIR builds)   --recomp-quantum N (default 1)\n"
-                         "  --unthrottled        no 60 Hz pacing    --hidden  no visible window\n");
+                         "  --unthrottled        no 60 Hz pacing    --hidden  no visible window\n"
+                         "  --settings F         settings file (default: per-user config dir; docs/SETTINGS.md);\n"
+                         "                       command line options override it\n"
+                         "  --save-settings      write the effective settings (file + command line) back to the file\n"
+                         "  --window-mode M      windowed, fullscreen or borderless (Alt+Enter toggles)\n"
+                         "  --window-scale N     windowed size = 320x240 * N (1..8)\n"
+                         "  --volume N, --mute   master volume 0..100 / silence\n");
 }
 
 int main(int argc, char** argv) {
@@ -49,21 +57,19 @@ int main(int argc, char** argv) {
     const std::string &disc = opt.disc, &screenshot = opt.screenshot, &input_script = opt.input_script,
                       &dump_dir = opt.dump_dir;
     const uint64_t max_frames = opt.max_frames, dump_from = opt.dump_from, dump_to = opt.dump_to;
-    const int interp_hz = opt.interp_hz;
     const bool stats = opt.stats, unthrottled = opt.unthrottled, hidden = opt.hidden;
-    if (opt.recomp && recomp::GeneratedModules().empty()) {
-        std::fprintf(stderr, "--recomp: this build has no recompiled code (configure with "
-                             "-DPRM_RECOMP_GENERATED_DIR=<dir outside the repo>)\n");
-        return EXIT_FAILURE;
+    std::string settings_path = opt.settings_path;
+    if (settings_path.empty()) {
+        if (const char* pref = SDL_GetPrefPath("PersonaRM", "PersonaRM")) settings_path = std::string(pref) + "settings.json";
     }
+    std::vector<std::string> warnings;
+    const host::Settings file = settings_path.empty() ? host::DefaultSettings() : host::LoadSettings(settings_path, &warnings);
+    for (const std::string& w : warnings) std::fprintf(stderr, "[settings] %s\n", w.c_str());
+    const host::Settings cfg = host::ApplyCli(file, opt, "");  // everything but the per-game part
+    const int interp_hz = host::InterpHz(cfg.video);
+    if (cfg.video.fps_target == 30 || cfg.video.fps_target == 90)
+        std::fprintf(stderr, "[settings] video.fps_target %d is not supported yet, running at 60\n", cfg.video.fps_target);
     std::array<MemoryCard, 2> cards;
-    for (int slot = 0; slot < 2; ++slot) {
-        std::string err;
-        if (!opt.memcard[slot].empty() && !cards[slot].Open(opt.memcard[slot], &err)) {
-            std::fprintf(stderr, "--memcard%d: %s\n", slot + 1, err.c_str());
-            return EXIT_FAILURE;
-        }
-    }
     std::vector<Engine::PadPress> presses;
     if (!input_script.empty()) {
         std::ifstream in(input_script);
@@ -80,15 +86,36 @@ int main(int argc, char** argv) {
     }
     SDL_Window* window = nullptr;
     SDL_Renderer* renderer = nullptr;
-    if (!SDL_CreateWindowAndRenderer("PersonaRM", 960, 720, SDL_WINDOW_RESIZABLE | (hidden ? SDL_WINDOW_HIDDEN : 0),
-                                     &window, &renderer)) {
+    if (!SDL_CreateWindowAndRenderer("PersonaRM", 320 * cfg.video.window_scale, 240 * cfg.video.window_scale,
+                                     SDL_WINDOW_RESIZABLE | (hidden ? SDL_WINDOW_HIDDEN : 0), &window, &renderer)) {
         std::fprintf(stderr, "SDL_CreateWindowAndRenderer: %s\n", SDL_GetError());
         SDL_Quit();
         return EXIT_FAILURE;
     }
+    // Vsync would throttle a 120 Hz --interp to the display rate (game at half speed) and defeats --unthrottled.
+    const bool vsync = cfg.video.vsync && !interp_hz && !unthrottled;
+    if (!SDL_SetRenderVSync(renderer, vsync ? 1 : 0)) std::fprintf(stderr, "vsync: %s\n", SDL_GetError());
+    std::string window_mode = hidden ? "windowed" : cfg.video.window_mode;
+    auto apply_mode = [&](const std::string& m) {
+        if (m == "fullscreen") {  // exclusive at the desktop resolution
+            SDL_SetWindowFullscreenMode(window, SDL_GetDesktopDisplayMode(SDL_GetDisplayForWindow(window)));
+            SDL_SetWindowFullscreen(window, true);
+        } else if (m == "borderless") {  // desktop-sized, no mode change
+            SDL_SetWindowFullscreenMode(window, nullptr);
+            SDL_SetWindowFullscreen(window, true);
+        } else SDL_SetWindowFullscreen(window, false);
+    };
+    apply_mode(window_mode);
+    std::printf("[settings] file=%s window=%s x%d integer=%d aspect=%s vsync=%d interp=%d volume=%d mute=%d pause_on_focus_loss=%d\n",
+                settings_path.c_str(), window_mode.c_str(), cfg.video.window_scale, cfg.video.integer_scaling,
+                cfg.video.aspect.c_str(), vsync, interp_hz, cfg.audio.master_volume, cfg.audio.mute, cfg.pause_on_focus_loss);
     // SPU output: 44.1 kHz stereo s16. No stream = run silent.
     const SDL_AudioSpec spec{SDL_AUDIO_S16, 2, 44100};
     SDL_AudioStream* audio = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, nullptr, nullptr);
+    auto set_gain = [&](bool silent) {
+        if (audio) SDL_SetAudioStreamGain(audio, silent || cfg.audio.mute ? 0.0f : cfg.audio.master_volume / 100.0f);
+    };
+    set_gain(false);
     if (audio) SDL_ResumeAudioStreamDevice(audio);
     else std::fprintf(stderr, "no audio: %s\n", SDL_GetError());
 
@@ -96,26 +123,56 @@ int main(int argc, char** argv) {
     EngineBootConfig config;
     config.enable_bios_hle = true;
     engine.Initialize(config);
-    if (opt.recomp) engine.SetRecompModules(recomp::GeneratedModules(), opt.recomp_quantum);
     if (!engine.BootFromDisc(disc)) {
         std::fprintf(stderr, "cannot boot %s\n", disc.c_str());
         SDL_Quit();
         return EXIT_FAILURE;
     }
+    // Per-game options (file section "game"/<serial>, then the command line), known once the disc is.
+    const host::Settings eff = host::ApplyCli(file, opt, engine.DiscSerial());
+    const host::GameSettings game = host::GameFor(eff, engine.DiscSerial());
+    if (opt.save_settings && !settings_path.empty()) {
+        std::string err;
+        if (host::SaveSettings(settings_path, eff, &err)) std::printf("[settings] saved %s\n", settings_path.c_str());
+        else std::fprintf(stderr, "[settings] %s\n", err.c_str());
+    }
+    if (game.recomp.value_or(false)) {
+        if (recomp::GeneratedModules().empty()) {
+            std::fprintf(stderr, "recomp: this build has no recompiled code (configure with "
+                                 "-DPRM_RECOMP_GENERATED_DIR=<dir outside the repo>)\n");
+            SDL_Quit();
+            return EXIT_FAILURE;
+        }
+        engine.SetRecompModules(recomp::GeneratedModules(), opt.recomp_quantum);
+    }
+    std::string card_path[2];
+    for (int slot = 0; slot < 2; ++slot) {
+        std::string err;
+        card_path[slot] = host::MemcardFor(eff, game, engine.DiscSerial(), slot);
+        if (!card_path[slot].empty()) {
+            std::error_code ec;
+            std::filesystem::create_directories(std::filesystem::path(card_path[slot]).parent_path(), ec);
+        }
+        if (!card_path[slot].empty() && !cards[slot].Open(card_path[slot], &err)) {
+            std::fprintf(stderr, "memcard%d: %s\n", slot + 1, err.c_str());
+            SDL_Quit();
+            return EXIT_FAILURE;
+        }
+    }
     // Texture dump / HD replacement: off unless asked; the GPU then runs its untouched path.
     VramTextureHook texture_hook;
-    if (!opt.texture_dump.empty() || !opt.mods.empty()) {
+    if (!opt.texture_dump.empty() || !game.mods.empty()) {
         if (!opt.texture_dump.empty()) texture_hook.SetDumpDir(opt.texture_dump);
-        if (!opt.mods.empty())
-            std::printf("[textures] %zu replacement textures indexed from %s\n", texture_hook.LoadMods(opt.mods),
-                        opt.mods.c_str());
+        if (!game.mods.empty())
+            std::printf("[textures] %zu replacement textures indexed from %s\n", texture_hook.LoadMods(game.mods),
+                        game.mods.c_str());
         engine.GetGpu().SetTextureHook(&texture_hook);
     }
     // Gameplay options (mod manifests, then the command line): no option = no patch = untouched engine.
     {
         GameplayOptions gameplay;
-        if (!opt.mods.empty()) gameplay = LoadGameplayMods(opt.mods, engine.DiscSerial());
-        if (!opt.text_speed.empty()) ParseTextSpeed(opt.text_speed, gameplay.text_speed);
+        if (!game.mods.empty()) gameplay = LoadGameplayMods(game.mods, engine.DiscSerial());
+        if (!game.text_speed.empty()) ParseTextSpeed(game.text_speed, gameplay.text_speed);
         std::vector<GamePatch> patches = BuildGamePatches(engine.DiscSerial(), gameplay);
         if (gameplay.text_speed != TextSpeed::Normal && patches.empty())
             std::fprintf(stderr, "[gameplay] text_speed=%s: no patch for disc %s, ignored\n", TextSpeedName(gameplay.text_speed),
@@ -125,17 +182,23 @@ int main(int argc, char** argv) {
     }
     engine.SetPadScript(presses);
     for (int slot = 0; slot < 2; ++slot)
-        if (!opt.memcard[slot].empty()) engine.SetMemoryCard(slot, &cards[slot]);
+        if (!card_path[slot].empty()) engine.SetMemoryCard(slot, &cards[slot]);
 
     // Resolve the name tables to SDL codes once.
     struct KeyBit { SDL_Scancode code; uint16_t bit; };
     std::vector<KeyBit> keys;
-    for (const auto& m : host::KeyboardMap())
-        if (SDL_Scancode sc = SDL_GetScancodeFromName(m.name); sc != SDL_SCANCODE_UNKNOWN) keys.push_back({sc, m.bit});
+    for (const auto& m : host::FlattenBindings(cfg.keyboard)) {
+        if (SDL_Scancode sc = SDL_GetScancodeFromName(m.name.c_str()); sc != SDL_SCANCODE_UNKNOWN) keys.push_back({sc, m.bit});
+        else std::fprintf(stderr, "[settings] input.keyboard: unknown key \"%s\"\n", m.name.c_str());
+    }
     struct PadBit { SDL_GamepadButton button; SDL_GamepadAxis axis; uint16_t bit; };
     std::vector<PadBit> pad_bits;
-    for (const auto& m : host::GamepadMap())
-        pad_bits.push_back({SDL_GetGamepadButtonFromString(m.name), SDL_GetGamepadAxisFromString(m.name), m.bit});
+    for (const auto& m : host::FlattenBindings(cfg.gamepad)) {
+        const PadBit p{SDL_GetGamepadButtonFromString(m.name.c_str()), SDL_GetGamepadAxisFromString(m.name.c_str()), m.bit};
+        if (p.button == SDL_GAMEPAD_BUTTON_INVALID && p.axis == SDL_GAMEPAD_AXIS_INVALID)
+            std::fprintf(stderr, "[settings] input.gamepad: unknown button \"%s\"\n", m.name.c_str());
+        else pad_bits.push_back(p);
+    }
     std::vector<SDL_Gamepad*> gamepads;
 
     SDL_Texture* texture = nullptr;
@@ -145,7 +208,7 @@ int main(int argc, char** argv) {
     uint64_t audio_samples = 0, lit_frames = 0;
     const uint64_t frame_ns = SDL_NS_PER_SECOND / 60;  // engine frame = 564480 cycles = 1/60 s
     uint64_t next = SDL_GetTicksNS();
-    bool quit = false;
+    bool quit = false, paused = false;
     // --interp: the GPU logs its packets (display-only capture, emulation unchanged) for the interpolator.
     interp::FrameInterpolator interp;
     std::vector<uint32_t> cmd_log;
@@ -159,7 +222,20 @@ int main(int argc, char** argv) {
         while (SDL_PollEvent(&ev)) {
             if (ev.type == SDL_EVENT_QUIT) quit = true;
             else if (ev.type == SDL_EVENT_KEY_DOWN && ev.key.scancode == SDL_SCANCODE_ESCAPE) quit = true;
-            else if (ev.type == SDL_EVENT_GAMEPAD_ADDED) {
+            else if (ev.type == SDL_EVENT_KEY_DOWN && ev.key.scancode == SDL_SCANCODE_RETURN && (ev.key.mod & SDL_KMOD_ALT) &&
+                     !ev.key.repeat && !hidden) {  // Alt+Enter: leave fullscreen / enter the configured (else borderless) one
+                if (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) window_mode = "windowed";
+                else window_mode = cfg.video.window_mode == "windowed" ? "borderless" : cfg.video.window_mode;
+                apply_mode(window_mode);
+            } else if (ev.type == SDL_EVENT_WINDOW_FOCUS_LOST && cfg.pause_on_focus_loss) {
+                paused = true;  // never minimize or grab focus back: just stop emulating and go quiet
+                set_gain(true);
+                if (audio) SDL_ClearAudioStream(audio);
+            } else if (ev.type == SDL_EVENT_WINDOW_FOCUS_GAINED && paused) {
+                paused = false;
+                set_gain(false);
+                next = SDL_GetTicksNS();
+            } else if (ev.type == SDL_EVENT_GAMEPAD_ADDED) {
                 if (SDL_Gamepad* g = SDL_OpenGamepad(ev.gdevice.which)) gamepads.push_back(g);
             } else if (ev.type == SDL_EVENT_GAMEPAD_REMOVED) {
                 for (size_t i = 0; i < gamepads.size(); ++i)
@@ -170,6 +246,8 @@ int main(int argc, char** argv) {
                     }
             }
         }
+
+        if (paused) { SDL_Delay(16); continue; }
 
         uint16_t mask = 0;  // all 16 digital pad buttons
         const bool* ks = SDL_GetKeyboardState(nullptr);
@@ -251,7 +329,7 @@ int main(int argc, char** argv) {
 
             int win_w = 0, win_h = 0;
             SDL_GetRenderOutputSize(renderer, &win_w, &win_h);
-            const host::Rect r = host::Letterbox4x3(win_w, win_h);
+            const host::Rect r = host::PresentRect(win_w, win_h, cfg.video.aspect == "stretch", cfg.video.integer_scaling, int(h));
             const SDL_FRect dst{float(r.x), float(r.y), float(r.w), float(r.h)};
             SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
             SDL_RenderClear(renderer);
@@ -279,7 +357,7 @@ int main(int argc, char** argv) {
     std::printf("[SDL] frames=%llu non-black=%llu audio_samples=%llu\n", (unsigned long long)engine.GetFrameCount(),
                 (unsigned long long)lit_frames, (unsigned long long)audio_samples);
     engine.GetGpu().SetCommandLog(nullptr);
-    if (!opt.texture_dump.empty() || !opt.mods.empty()) {
+    if (!opt.texture_dump.empty() || !game.mods.empty()) {
         std::printf("[textures] uploads=%zu dumped=%zu replaced=%zu\n", texture_hook.UploadCount(),
                     texture_hook.DumpedCount(), texture_hook.ReplacedUploadCount());
         engine.GetGpu().SetTextureHook(nullptr);
