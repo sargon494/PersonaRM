@@ -56,10 +56,26 @@ struct HostOptions {
     bool interp_given = false;      // --interp was on the command line (even --interp 0)
     bool resolution_scale_given = false;  // --resolution-scale was on the command line
     bool save_settings = false;     // --save-settings: write the effective settings back to the file
+    std::string record_input;       // --record-input F: write the played pad presses as an --input-script
     bool stats = false, unthrottled = false, hidden = false;
 };
 /// False on an unknown option, a missing value, no disc, --interp not a multiple of 60, a resolution scale
 /// outside 1-4, or --interp with a resolution scale above 1 (the interpolator replays at 1x only).
 bool ParseHostArgs(int argc, const char* const* argv, HostOptions& out);
+
+/// --record-input: turns the pad mask of each emulated frame into --input-script lines.
+class InputRecorder {
+public:
+    /// Pad mask in force on emulated frame `frame` (call once per frame, frames increasing).
+    void Frame(uint64_t frame, uint16_t mask);
+    /// "<frame> <button> <hold>" lines, ordered by frame then bit; buttons still held at `end_frame` are
+    /// closed there (non-destructive, so it can be called again later).
+    std::string Script(uint64_t end_frame) const;
+private:
+    struct Press { uint64_t frame, hold; int bit; };
+    std::vector<Press> done_;
+    uint64_t start_[16] = {};
+    uint16_t held_ = 0;
+};
 
 } // namespace personarm::host

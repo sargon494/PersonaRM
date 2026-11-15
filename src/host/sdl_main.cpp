@@ -9,6 +9,7 @@
 #include <array>
 #include <cstdio>
 #include <cstdlib>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -32,6 +33,8 @@ static void Usage() {
                          "  --frames N           quit after N emulated frames\n"
                          "  --screenshot file    save the last presented frame as BMP on quit\n"
                          "  --input-script file  scripted pad presses (<frame> <button> [<hold>] per line)\n"
+                         "  --record-input file  write the pad presses you play as an --input-script (flushed every 600\n"
+                         "                       frames and on quit; also records the scripted presses of --input-script)\n"
                          "  --interp HZ          present HZ pictures/s (multiple of 60, e.g. 120), synthesizing the\n"
                          "                       ones between the game's frames (display only, one game frame late)\n"
                          "  --resolution-scale N internal resolution N x 320x240 (1-4, default 1 = native); display\n"
@@ -217,6 +220,20 @@ int main(int argc, char** argv) {
     }
     std::vector<SDL_Gamepad*> gamepads;
 
+    // --record-input: the effective pad mask of every emulated frame (paused frames never get here).
+    host::InputRecorder recorder;
+    auto write_recording = [&](uint64_t end_frame) {
+        if (opt.record_input.empty()) return;
+        std::time_t now = std::time(nullptr);
+        char date[32] = "";
+        std::strftime(date, sizeof date, "%Y-%m-%d %H:%M:%S", std::localtime(&now));
+        std::ofstream out(opt.record_input, std::ios::trunc);
+        out << "# personarm_sdl --record-input: disc " << (engine.DiscSerial().empty() ? "(unrecognized)" : engine.DiscSerial())
+            << ", " << date << ", memcard1 " << (card_path[0].empty() ? "none" : card_path[0]) << ", memcard2 "
+            << (card_path[1].empty() ? "none" : card_path[1]) << "\n# replay: personarm --boot <cue> --input-script <this file> --max-frames "
+            << end_frame << "\n" << recorder.Script(end_frame);
+        if (!out) std::fprintf(stderr, "cannot write %s\n", opt.record_input.c_str());
+    };
     SDL_Texture* texture = nullptr;
     int tex_w = 0, tex_h = 0;
     std::vector<uint32_t> rgba;
@@ -282,6 +299,10 @@ int main(int argc, char** argv) {
         for (SDL_Gamepad* g : gamepads)  // the game reads a digital pad: the left stick drives the d-pad too
             mask |= host::StickToDpad(SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_LEFTX), SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_LEFTY));
         engine.SetPadButtons(mask);
+        if (!opt.record_input.empty()) {
+            recorder.Frame(engine.GetFrameCount(), mask | engine.ScriptedButtons());
+            if (engine.GetFrameCount() % 600 == 599) write_recording(engine.GetFrameCount() + 1);
+        }
 
         const uint64_t run_t0 = SDL_GetTicksNS();
         engine.RunFrame();  // with --resolution-scale this includes the scaled raster pass
@@ -379,6 +400,7 @@ int main(int argc, char** argv) {
         }
     }
 
+    write_recording(engine.GetFrameCount());
     if (interp_frames)
         std::printf("[interp] %llu synthesized pictures, %.3f ms each\n", (unsigned long long)interp_frames,
                     double(interp_ns) / 1e6 / double(interp_frames));
