@@ -5,6 +5,8 @@
 
 namespace personarm {
 
+class Widescreen2D;
+
 // -----------------------------------------------------------------------------
 // PlayStation 1 Geometry Transformation Engine (GTE - Coprocessor 2)
 // Reference: psx-spx "Geometry Transformation Engine (GTE)" and its sub-sections
@@ -40,6 +42,8 @@ public:
     void SetWidescreen(int32_t num, int32_t den) { m_ws_num = num; m_ws_den = den > 0 ? den : 1; }
     // RTPS/RTPT vectors projected since construction: lets the host tell 3D frames from 2D-only ones.
     uint64_t ProjectionCount() const { return m_projections; }
+    /// Widescreen: each RTPS/RTPT screen XY is noted here so the GPU can tell 3D from 2D (null = off).
+    void SetProjectionTracker(Widescreen2D* t) { m_tracker = t; }
 
     // psx-spx "GTE Division Inaccuracy": UNR Newton-Raphson division.
     // Returns min(1FFFFh, H*10000h/SZ3) as the hardware computes it; sets
@@ -55,6 +59,7 @@ private:
     int m_shift = 0; // sf*12
     int32_t m_ws_num = 1, m_ws_den = 1;
     uint64_t m_projections = 0;
+    Widescreen2D* m_tracker = nullptr;
     bool m_lm = false;
 
     // Register field helpers

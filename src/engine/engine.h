@@ -11,6 +11,7 @@
 
 #include "cpu/cpu_context.h"
 #include "rendering/ps1_gpu.h"
+#include "rendering/widescreen_2d.h"
 #include "audio/spu_emulator.h"
 #include "loader/ps1_bios_hle.h"
 #include "loader/disc_reader.h"
@@ -102,6 +103,11 @@ public:
     CpuContext& GetCpu() { return m_cpu; }
     const CpuContext& GetCpu() const { return m_cpu; }
     Ps1Gpu& GetGpu() { return m_gpu; }
+    /// Widescreen (docs/WIDESCREEN.md): the GTE widens 3D by num/den = 4H/3W and the GPU squeezes 2D drawn
+    /// on a 3D scene by the same factor. num == den: off.
+    void SetWidescreen(int32_t num, int32_t den);
+    /// Null when widescreen is off.
+    const Widescreen2D* GetWidescreen2D() const { return m_ws2d.get(); }
     const Ps1Gpu& GetGpu() const { return m_gpu; }
     SpuEmulator& GetSpu() { return m_spu; }
     const SpuEmulator& GetSpu() const { return m_spu; }
@@ -317,6 +323,7 @@ private:
     // Subsystems
     CpuContext m_cpu;
     Ps1Gpu m_gpu;
+    std::unique_ptr<Widescreen2D> m_ws2d;
     SpuEmulator m_spu;
     Ps1BiosHle& m_bios;
     DiscReader m_disc_reader;

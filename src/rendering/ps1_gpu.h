@@ -9,6 +9,7 @@
 namespace personarm {
 
 class VramTextureHook;
+class Widescreen2D;
 class StateIO;
 class Ps1Gpu;
 
@@ -117,6 +118,10 @@ public:
     /// pixels; dithering uses the 1x pattern (scaled). Enabling it upscales the current VRAM.
     void SetResolutionScale(uint32_t scale);
     uint32_t GetResolutionScale() const { return m_scale; }
+    /// Widescreen: squeeze 2D primitives (no GTE vertex) while a 3D scene is up (rendering/widescreen_2d.h).
+    /// Null = off (default): drawing is unchanged.
+    void SetWidescreen2D(Widescreen2D* ws) { m_ws2d = ws; }
+
     /// The scaled VRAM, row stride 1024*scale; empty at scale 1.
     const std::vector<uint16_t>& GetScaledVram() const { return m_vram_hi; }
     /// Save state: VRAM, registers, packet/transfer state (the scaled mirror is rebuilt on load).
@@ -178,6 +183,7 @@ private:
     uint64_t m_polygon_count = 0;
     std::vector<uint32_t>* m_cmd_log = nullptr;
     VramTextureHook* m_hook = nullptr;
+    Widescreen2D* m_ws2d = nullptr;
     GpuDrawListener* m_listener = nullptr;
     void LogWords(const uint32_t* w, size_t n) {
         m_cmd_log->push_back(static_cast<uint32_t>(n));
@@ -191,6 +197,7 @@ private:
     Vertex m_polyline_last;
     uint32_t m_polyline_pending_color = 0;
     bool m_polyline_have_color = false;
+    int32_t m_polyline_cx = INT32_MIN;  // widescreen: centre the polyline's 2D vertices are squeezed around (or kNone)
 
     // VRAM to CPU (C0h) transfer state
     uint32_t m_read_x = 0, m_read_y = 0, m_read_w = 0, m_read_h = 0;
