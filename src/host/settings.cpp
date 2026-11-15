@@ -109,6 +109,7 @@ Settings ParseSettings(const std::string& text, std::vector<std::string>* w) {
     GetBool(video, "video", "vsync", s.video.vsync, w);
     GetInt(video, "video", "resolution_scale", 1, 4, s.video.resolution_scale, w);
     GetInt(video, "video", "fps_target", 30, 120, s.video.fps_target, w);
+    GetInt(video, "video", "fast_forward_max", 2, 16, s.video.fast_forward_max, w);
     if (s.video.fps_target != 30 && s.video.fps_target != 60 && s.video.fps_target != 90 && s.video.fps_target != 120) {
         Warn(w, "video.fps_target: expected 30, 60, 90 or 120, using 60");
         s.video.fps_target = 60;
@@ -161,6 +162,7 @@ std::string DumpSettings(const Settings& s) {
     v.Set("vsync", s.video.vsync);
     v.Set("fps_target", s.video.fps_target);
     v.Set("resolution_scale", s.video.resolution_scale);
+    v.Set("fast_forward_max", s.video.fast_forward_max);
     doc.Set("video", v);
     JsonValue a = Sub(doc, "audio");
     a.Set("master_volume", s.audio.master_volume);

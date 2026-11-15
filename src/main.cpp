@@ -88,6 +88,9 @@ static void PrintUsage(const char* prog) {
               << "                                            and formatted if missing, rewritten atomically on change\n"
               << "                     --eager-devices        tick devices after every instruction (reference for\n"
               << "                                            the lazy device time; same results, slower)\n"
+              << "                     --save-state-at <N> <file>  write a save state at the end of frame N\n"
+              << "                     --load-state <file>    start from a save state (same disc and build) instead\n"
+              << "                                            of power-on; the run continues to --max-frames\n"
               << "  --config           Open interactive settings menu\n"
               << "  --scan [dir]       Scan directory for legal game disc images (.iso/.bin/.cue)\n"
               << "  --diagnostics      Run full diagnostic suite\n"
@@ -817,6 +820,8 @@ struct BootOptions {
     bool eager_devices = false;      // --eager-devices: per-instruction device ticks (reference)
     std::string memcard[2];          // --memcard1/2: raw .mcd image per slot (empty = no card)
     std::string mods;                // --mods: mod folders (only file mods here, docs/MOD_FILES.md)
+    uint64_t save_state_at = 0;      // --save-state-at N file: state at the end of frame N (0 = off)
+    std::string save_state, load_state;  // --save-state-at file / --load-state file
 };
 
 // Overlay slots (OVERLAY_MAP OV-010, discs 1 and 2): code loaded above the resident EXE text.
@@ -900,6 +905,26 @@ static int RunBootHarness(const std::string& disc_path, const BootOptions& opt) 
         }
         engine.SetMemoryCard(slot, &cards[slot]);
     }
+    if (!opt.load_state.empty()) {
+        std::ifstream f(opt.load_state, std::ios::binary);
+        const std::vector<uint8_t> state((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+        std::string err;
+        if (!f || !engine.LoadState(state, &err)) {
+            std::cerr << "[BOOT] --load-state " << opt.load_state << ": " << (err.empty() ? "cannot read" : err) << "\n";
+            return EXIT_FAILURE;
+        }
+        std::cout << "[BOOT] loaded state " << opt.load_state << " at frame " << engine.GetFrameCount() << "\n";
+    }
+    auto save_state_at_frame = [&] {  // end of the frame's harness work: a loaded run repeats what follows
+        if (!opt.save_state_at || engine.GetFrameCount() != opt.save_state_at) return;
+        std::vector<uint8_t> state;
+        engine.SaveState(state);
+        std::ofstream f(opt.save_state, std::ios::binary);  // keep it out of the repo
+        f.write(reinterpret_cast<const char*>(state.data()), static_cast<std::streamsize>(state.size()));
+        if (!f) std::cerr << "[BOOT] cannot write " << opt.save_state << "\n";
+        else std::cout << "[BOOT f=" << engine.GetFrameCount() << "] saved state " << opt.save_state << " (" << state.size() << " bytes)\n";
+    };
+    save_state_at_frame();  // --load-state + --save-state-at <its frame>: round trip
     personarm::DiscReader probe;
     probe.Open(disc_path);
     const auto disc = personarm::DiscReader::IdentifyPersona2(probe.DetectBootExecutable());
@@ -973,6 +998,17 @@ static int RunBootHarness(const std::string& disc_path, const BootOptions& opt) 
     bool seen_poly = false, seen_image = false;
     uint64_t last_calls = 0;
     uint32_t scene_mode = 0xDEADBEEF, scene_req = 0xDEADBEEF;
+    if (!opt.load_state.empty()) {
+        // The watch reads below go through the bus and stall like guest loads (and one more read follows a
+        // change): start from the loaded RAM, read without the bus, so the run repeats the saving run exactly.
+        auto peek = [&](uint32_t a) {
+            const auto& ram = engine.GetRam();
+            a &= 0x1FFFFCu;
+            return uint32_t(ram[a]) | uint32_t(ram[a + 1]) << 8 | uint32_t(ram[a + 2]) << 16 | uint32_t(ram[a + 3]) << 24;
+        };
+        if (ms.scene_mode) scene_mode = peek(ms.scene_mode);
+        scene_req = peek(ms.scene_req);
+    }
     personarm::GpuDisplayArea disp{};
     uint32_t disp_off = 2;
     std::set<uint32_t> disp_starts;
@@ -1039,6 +1075,7 @@ static int RunBootHarness(const std::string& disc_path, const BootOptions& opt) 
                       << " bios_calls=" << calls << " (+" << (calls - last_calls) << ") polys=" << gpu.GetPolygonCount() << "\n";
             last_calls = calls;
         }
+        save_state_at_frame();
     }
     const double wall = std::chrono::duration<double>(std::chrono::steady_clock::now() - wall_start).count();
     engine.SetStepHook(nullptr);
@@ -1169,6 +1206,11 @@ int main(int argc, char* argv[]) {
                     if (std::strcmp(argv[k], "--watch-pc") == 0) opt.watch_pcs.push_back(std::strtoul(argv[k + 1], nullptr, 16));
                     if (std::strcmp(argv[k], "--memcard1") == 0) opt.memcard[0] = argv[k + 1];
                     if (std::strcmp(argv[k], "--mods") == 0) opt.mods = argv[k + 1];
+                    if (std::strcmp(argv[k], "--load-state") == 0) opt.load_state = argv[k + 1];
+                    if (std::strcmp(argv[k], "--save-state-at") == 0 && k + 2 < argc) {
+                        opt.save_state_at = std::strtoull(argv[k + 1], nullptr, 10);
+                        opt.save_state = argv[k + 2];
+                    }
                     if (std::strcmp(argv[k], "--memcard2") == 0) opt.memcard[1] = argv[k + 1];
                     if (std::strcmp(argv[k], "--recomp-quantum") == 0)
                         opt.recomp_quantum = static_cast<uint32_t>(std::strtoul(argv[k + 1], nullptr, 10));
@@ -1203,7 +1245,8 @@ int main(int argc, char* argv[]) {
                 std::strcmp(argv[i], "--input-script") == 0 ||
                 std::strcmp(argv[i], "--watch-pc") == 0 || std::strcmp(argv[i], "--recomp-quantum") == 0 ||
                 std::strcmp(argv[i], "--memcard1") == 0 || std::strcmp(argv[i], "--memcard2") == 0 ||
-                std::strcmp(argv[i], "--mods") == 0) { ++i; continue; } // read by --boot
+                std::strcmp(argv[i], "--mods") == 0 || std::strcmp(argv[i], "--load-state") == 0) { ++i; continue; } // read by --boot
+            if (std::strcmp(argv[i], "--save-state-at") == 0) { i += 2; continue; } // read by --boot
             if (std::strcmp(argv[i], "--launch") == 0) {
                 return launcher.LaunchGame();
             }

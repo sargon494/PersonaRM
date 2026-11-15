@@ -8,6 +8,8 @@
 
 namespace personarm {
 
+class StateIO;
+
 // PS1 SPU. Reference: psx-spx "Sound Processing Unit (SPU)" sections:
 // "SPU Overview", "SPU Voice Registers", "SPU Control Registers", "SPU ADPCM Samples",
 // "SPU ADSR Generator", "SPU Interpolation", "SPU Reverb Formulas".
@@ -88,6 +90,8 @@ public:
     const SpuVoice& GetVoice(uint32_t index) const { return m_voices[index < SPU_NUM_VOICES ? index : 0]; }
     uint32_t GetActiveVoiceMask() const;
     uint32_t GetEndx() const { return m_endx; }
+    /// Save state: sound RAM, voices, registers, reverb, CD audio queue (audio not yet taken is dropped on load).
+    void Serialize(StateIO& io);
 
 private:
     void MixFrame(int16_t& out_l, int16_t& out_r);

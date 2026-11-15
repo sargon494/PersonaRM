@@ -9,6 +9,7 @@
 namespace personarm {
 
 class VramTextureHook;
+class StateIO;
 
 // ───────────────────────────────────────────────────────────────────────────
 // PlayStation 1 GPU Hardware Dimensions & Standards
@@ -105,6 +106,8 @@ public:
     uint32_t GetResolutionScale() const { return m_scale; }
     /// The scaled VRAM, row stride 1024*scale; empty at scale 1.
     const std::vector<uint16_t>& GetScaledVram() const { return m_vram_hi; }
+    /// Save state: VRAM, registers, packet/transfer state (the scaled mirror is rebuilt on load).
+    void Serialize(StateIO& io);
 
 private:
     // One rasterizer vertex: VRAM-space position (drawing offset applied), 24-bit color, texcoord.

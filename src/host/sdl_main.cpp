@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -52,7 +53,10 @@ static void Usage() {
                          "  --save-settings      write the effective settings (file + command line) back to the file\n"
                          "  --window-mode M      windowed, fullscreen or borderless (Alt+Enter toggles)\n"
                          "  --window-scale N     windowed size = 320x240 * N (1..8)\n"
-                         "  --volume N, --mute   master volume 0..100 / silence\n");
+                         "  --volume N, --mute   master volume 0..100 / silence\n"
+                         "Keys: F5 save state, F8 load state, F6/F7 previous/next slot (0-9; files\n"
+                         "  <save_dir>/<serial>.state<N>), Tab or gamepad right-stick click held = fast-forward\n"
+                         "  (up to video.fast_forward_max x, audio muted), Alt+Enter fullscreen, Esc quit\n");
 }
 
 int main(int argc, char** argv) {
@@ -233,6 +237,56 @@ int main(int argc, char** argv) {
     uint64_t run_ns = 0, interp_ns = 0, interp_frames = 0, last_hash = 0;
     uint32_t flips = 0, changes = 0, pairs = 0, pairs_ok = 0, last_start = ~0u;
 
+    // Save states: F5 save, F8 load, F6/F7 slot. <save_dir>/<serial>.state<N>, else the settings directory.
+    namespace fs = std::filesystem;
+    std::string state_dir = eff.save_dir;
+    if (state_dir.empty()) {
+        if (const char* pref = SDL_GetPrefPath("PersonaRM", "PersonaRM")) state_dir = pref;
+    }
+    int state_slot = 0;
+    uint64_t title_until = 0;
+    auto state_path = [&] {
+        return (fs::path(state_dir) / ((engine.DiscSerial().empty() ? std::string("unknown") : engine.DiscSerial()) +
+                                       ".state" + std::to_string(state_slot))).string();
+    };
+    auto notify = [&](const std::string& m) {  // stderr + window title for a few seconds
+        std::fprintf(stderr, "[state] %s\n", m.c_str());
+        SDL_SetWindowTitle(window, ("PersonaRM - " + m).c_str());
+        title_until = SDL_GetTicksNS() + 3 * SDL_NS_PER_SECOND;
+    };
+    auto save_state = [&] {
+        std::vector<uint8_t> buf;
+        engine.SaveState(buf);
+        const std::string path = state_path(), tmp = path + ".tmp";
+        std::error_code ec;
+        fs::create_directories(fs::path(path).parent_path(), ec);
+        bool ok;
+        {
+            std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
+            f.write(reinterpret_cast<const char*>(buf.data()), std::streamsize(buf.size()));
+            ok = bool(f);
+        }
+        if (ok) fs::rename(tmp, path, ec);  // atomic: a crash never leaves half a state
+        if (!ok || ec) { fs::remove(tmp, ec); notify("cannot write " + path); return; }
+        notify("saved slot " + std::to_string(state_slot) + " (" + path + ")");
+    };
+    auto load_state = [&] {
+        const std::string path = state_path();
+        std::ifstream f(path, std::ios::binary);
+        if (!f) { notify("slot " + std::to_string(state_slot) + " is empty"); return; }
+        const std::vector<uint8_t> buf((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+        std::string err;
+        if (!engine.LoadState(buf, &err)) { notify("slot " + std::to_string(state_slot) + ": " + err); return; }
+        if (audio) SDL_ClearAudioStream(audio);
+        cmd_log.clear();
+        interp = interp::FrameInterpolator();
+        next = SDL_GetTicksNS();
+        notify("loaded slot " + std::to_string(state_slot) + " (frame " + std::to_string(engine.GetFrameCount()) + ")");
+    };
+    // Fast-forward (held): up to fast_forward_max emulated frames per 1/60 s, one picture each, audio dropped.
+    const int ff_max = std::clamp(cfg.video.fast_forward_max, 2, 16);
+    uint64_t ff_frames = 0;
+
     while (!quit && engine.GetState() == EngineState::Running && (!max_frames || engine.GetFrameCount() < max_frames)) {
         SDL_Event ev;
         while (SDL_PollEvent(&ev)) {
@@ -243,6 +297,13 @@ int main(int argc, char** argv) {
                 if (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) window_mode = "windowed";
                 else window_mode = cfg.video.window_mode == "windowed" ? "borderless" : cfg.video.window_mode;
                 apply_mode(window_mode);
+            } else if (ev.type == SDL_EVENT_KEY_DOWN && !ev.key.repeat && ev.key.scancode == SDL_SCANCODE_F5) {
+                save_state();
+            } else if (ev.type == SDL_EVENT_KEY_DOWN && !ev.key.repeat && ev.key.scancode == SDL_SCANCODE_F8) {
+                load_state();
+            } else if (ev.type == SDL_EVENT_KEY_DOWN && (ev.key.scancode == SDL_SCANCODE_F6 || ev.key.scancode == SDL_SCANCODE_F7)) {
+                state_slot = (state_slot + (ev.key.scancode == SDL_SCANCODE_F7 ? 1 : 9)) % 10;
+                notify("slot " + std::to_string(state_slot));
             } else if (ev.type == SDL_EVENT_WINDOW_FOCUS_LOST && cfg.pause_on_focus_loss) {
                 paused = true;  // never minimize or grab focus back: just stop emulating and go quiet
                 set_gain(true);
@@ -282,6 +343,17 @@ int main(int argc, char** argv) {
         for (SDL_Gamepad* g : gamepads)  // the game reads a digital pad: the left stick drives the d-pad too
             mask |= host::StickToDpad(SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_LEFTX), SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_LEFTY));
         engine.SetPadButtons(mask);
+        bool ff = ks[SDL_SCANCODE_TAB];
+        for (SDL_Gamepad* g : gamepads) ff |= SDL_GetGamepadButton(g, SDL_GAMEPAD_BUTTON_RIGHT_STICK);
+        if (title_until && SDL_GetTicksNS() > title_until) { SDL_SetWindowTitle(window, "PersonaRM"); title_until = 0; }
+        const uint64_t slot_ns = frame_ns / uint64_t(ff ? ff_max : 1);  // wall time per emulated frame
+        auto pace = [&](uint64_t ns) {
+            if (unthrottled) return;
+            next += ns;
+            const uint64_t now = SDL_GetTicksNS();
+            if (now < next) SDL_DelayPrecise(next - now);
+            else if (now - next > 6 * frame_ns) next = now;  // too far behind: drop the debt instead of racing
+        };
 
         const uint64_t run_t0 = SDL_GetTicksNS();
         engine.RunFrame();  // with --resolution-scale this includes the scaled raster pass
@@ -289,7 +361,7 @@ int main(int argc, char** argv) {
 
         engine.TakeAudio(pcm);
         audio_samples += pcm.size();
-        if (audio && !pcm.empty()) {
+        if (audio && !pcm.empty() && !ff) {  // fast-forward: dropped (no pitched or broken audio)
             // Keep latency bounded if the emulator ran ahead of the device clock (> 0.25 s queued).
             if (SDL_GetAudioStreamQueued(audio) > 44100 * 4 / 4) SDL_ClearAudioStream(audio);
             SDL_PutAudioStreamData(audio, pcm.data(), int(pcm.size() * sizeof(int16_t)));
@@ -321,6 +393,11 @@ int main(int argc, char** argv) {
             }
         }
 
+        // Fast-forward presents one emulated frame out of ff_max (the display rate stays ~60 Hz, vsync or not).
+        if (ff && ++ff_frames % uint64_t(ff_max) != 0 && !(max_frames && frame >= max_frames)) {
+            pace(slot_ns);
+            continue;
+        }
         for (int s = 0; s < sub; ++s) {
             const std::vector<uint16_t>* vram = &gpu.GetVram();
             GpuDisplayArea d = gpu.GetDisplayArea();
@@ -370,12 +447,7 @@ int main(int argc, char** argv) {
                 }
             }
             SDL_RenderPresent(renderer);
-
-            if (unthrottled) continue;
-            next += frame_ns / sub;
-            const uint64_t now = SDL_GetTicksNS();
-            if (now < next) SDL_DelayPrecise(next - now);
-            else if (now - next > 6 * frame_ns) next = now;  // too far behind: drop the debt instead of racing
+            pace(slot_ns / uint64_t(sub));
         }
     }
 

@@ -186,3 +186,13 @@ void Dma::Tick(uint32_t cycles) {
 }
 
 } // namespace personarm::hw
+
+#include "core/state_io.h"
+
+namespace personarm::hw {
+void Dma::Serialize(StateIO& io) {
+    io.Tag("DMA ");
+    for (Chan& c : m_ch) io(c.madr, c.bcr, c.chcr, c.pending, c.running, c.paced);
+    io(m_dpcr, m_dicr);
+}
+} // namespace personarm::hw

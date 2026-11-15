@@ -30,7 +30,8 @@ PersonaRM follows a strict **Bring Your Own Copy (BYOC)** model:
 
 - **No game content is distributed.** The repository contains no game binaries, ROMs, or assets.
 - **You supply your own disc.** Provide an image (`.cue`/`.bin`, `.iso`, or `.img`) from a copy you own.
-- **Planned enhancements.** Widescreen viewports, controller glyphs for PlayStation, Xbox, and Nintendo layouts, turbo speed up to 16×, and quicksave.
+- **Quality of life.** Save states (F5 save, F8 load, ten slots) and hold-to-fast-forward up to 16× are in the window build ([settings](docs/SETTINGS.md#save-states-and-fast-forward)).
+- **Planned enhancements.** Widescreen viewports and controller glyphs for PlayStation, Xbox, and Nintendo layouts.
 
 New to the codebase? Start with the [Developer Guide](docs/DEVELOPER_GUIDE.md) and the [Architecture overview](ARCHITECTURE.md).
 

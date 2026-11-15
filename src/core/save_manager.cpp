@@ -423,3 +423,11 @@ bool SaveManager::RestoreQuickSave(Engine& engine, const uint8_t* snapshot_data,
 }
 
 } // namespace personarm
+
+#include "core/state_io.h"
+
+namespace personarm {
+void MemoryCard::SerializeProtocol(StateIO& io) {
+    io(m_flag, m_step, m_cmd, m_prev, m_chk, m_sector, m_buf);
+}
+} // namespace personarm

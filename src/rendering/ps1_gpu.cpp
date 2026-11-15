@@ -880,3 +880,22 @@ void Ps1Gpu::OutputFrameToRGBA(std::vector<uint32_t>& out_rgba, uint32_t& out_w,
 
 } // namespace personarm
 
+
+#include "core/state_io.h"
+
+namespace personarm {
+void Ps1Gpu::Serialize(StateIO& io) {
+    io.Tag("GPU ");
+    io(m_texpage, m_texwindow, m_mask_set, m_mask_check, m_polygon_count);
+    io(m_in_polyline, m_polyline_gouraud, m_polyline_semi, m_polyline_last, m_polyline_pending_color, m_polyline_have_color);
+    io(m_read_x, m_read_y, m_read_w, m_read_h, m_read_cur_x, m_read_cur_y, m_read_words_left, m_gpuread_latch);
+    io(m_display, m_drawing, m_gpustat, m_display_disabled, m_dma_direction);
+    io.Seq(m_gp0_packet);
+    io(m_gp0_words_remaining);
+    io(m_in_vram_transfer, m_transfer_x, m_transfer_y, m_transfer_w, m_transfer_h, m_transfer_cur_x,
+       m_transfer_cur_y, m_transfer_words_left);
+    io.Seq(m_vram);
+    if (io.Loading() && m_vram.size() != PS1_VRAM_WORDS) { io.Fail(); m_vram.resize(PS1_VRAM_WORDS); }
+    if (io.Loading()) UpscaleRect(0, 0, PS1_VRAM_WIDTH, PS1_VRAM_HEIGHT);  // display-only mirror (no-op at 1x)
+}
+} // namespace personarm

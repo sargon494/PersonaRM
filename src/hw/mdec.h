@@ -11,6 +11,8 @@
 
 #include "rendering/mdec_decoder.h"
 
+namespace personarm { class StateIO; }
+
 namespace personarm::hw {
 
 class Mdec {
@@ -40,6 +42,7 @@ public:
     bool DataInRequest() const { return (Status() >> 28) & 1; }
     bool DataOutRequest() const { return (Status() >> 27) & 1; }
     size_t ReadyWords() const { return m_ready; }
+    void Serialize(StateIO& io);  // save state
 
 private:
     void Command(uint32_t word);
