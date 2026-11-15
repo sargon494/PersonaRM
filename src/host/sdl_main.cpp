@@ -253,6 +253,11 @@ int main(int argc, char** argv) {
                 next = SDL_GetTicksNS();
             } else if (ev.type == SDL_EVENT_GAMEPAD_ADDED) {
                 if (SDL_Gamepad* g = SDL_OpenGamepad(ev.gdevice.which)) gamepads.push_back(g);
+            } else if (ev.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
+                bool mapped = false;
+                for (const PadBit& p : pad_bits) mapped |= p.button == SDL_GamepadButton(ev.gbutton.button);
+                std::printf("[pad] %s%s\n", SDL_GetGamepadStringForButton(SDL_GamepadButton(ev.gbutton.button)),
+                            mapped ? "" : " (not mapped; see input.gamepad in docs/SETTINGS.md)");
             } else if (ev.type == SDL_EVENT_GAMEPAD_REMOVED) {
                 for (size_t i = 0; i < gamepads.size(); ++i)
                     if (SDL_GetGamepadID(gamepads[i]) == ev.gdevice.which) {
@@ -274,6 +279,8 @@ int main(int argc, char** argv) {
                 if (p.button != SDL_GAMEPAD_BUTTON_INVALID && SDL_GetGamepadButton(g, p.button)) mask |= p.bit;
                 if (p.axis != SDL_GAMEPAD_AXIS_INVALID && SDL_GetGamepadAxis(g, p.axis) > 16384) mask |= p.bit;
             }
+        for (SDL_Gamepad* g : gamepads)  // the game reads a digital pad: the left stick drives the d-pad too
+            mask |= host::StickToDpad(SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_LEFTX), SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_LEFTY));
         engine.SetPadButtons(mask);
 
         const uint64_t run_t0 = SDL_GetTicksNS();

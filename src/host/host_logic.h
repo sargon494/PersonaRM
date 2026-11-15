@@ -28,6 +28,8 @@ struct NamedBit { const char* name; uint16_t bit; };
 /// spelling, e.g. "a", "lefttrigger"). The host resolves the names to SDL codes once at start.
 const std::vector<NamedBit>& KeyboardMap();
 const std::vector<NamedBit>& GamepadMap();
+/// Analog stick (SDL axis values, y down) -> d-pad bits, with a half-travel dead zone.
+uint16_t StickToDpad(int x, int y);
 /// Action names (the keys of the settings file's input maps) -> pad bit: up down left right cross circle
 /// square triangle start select l1 r1 l2 r2. Usable with PadBitForName.
 const std::vector<NamedBit>& ActionNames();

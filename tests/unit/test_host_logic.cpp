@@ -20,6 +20,11 @@ int main() {
     CHECK(r.x == 0 && r.y == 0 && r.w == 640 && r.h == 480);
     r = Letterbox4x3(0, 480);
     CHECK(r.w == 0 && r.h == 0);
+    // Left stick -> d-pad: centre and small tilts press nothing; diagonals press two directions.
+    CHECK(StickToDpad(0, 0) == 0 && StickToDpad(10000, -10000) == 0);
+    CHECK(StickToDpad(-32768, 0) == (1u << 7) && StickToDpad(32767, 0) == (1u << 5));
+    CHECK(StickToDpad(0, -32768) == (1u << 4) && StickToDpad(0, 32767) == (1u << 6));
+    CHECK(StickToDpad(32767, 32767) == ((1u << 5) | (1u << 6)));
 
     std::vector<uint16_t> vram(1024 * 512, 0);
     std::vector<uint32_t> out;

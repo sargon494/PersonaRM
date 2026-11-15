@@ -69,6 +69,11 @@ const std::vector<NamedBit>& KeyboardMap() {
     return map;
 }
 
+uint16_t StickToDpad(int x, int y) {
+    constexpr int kDead = 16384;
+    return uint16_t((x < -kDead ? kLeft : 0) | (x > kDead ? kRight : 0) | (y < -kDead ? kUp : 0) | (y > kDead ? kDown : 0));
+}
+
 const std::vector<NamedBit>& GamepadMap() {
     // SDL3 names face buttons by position: a/b/x/y = south/east/west/north = Cross/Circle/Square/Triangle.
     static const std::vector<NamedBit> map = {
