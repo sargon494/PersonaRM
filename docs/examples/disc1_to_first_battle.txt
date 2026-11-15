@@ -1,0 +1,209 @@
+# personarm --boot <disc1.cue> --memcard1 <card.mcd> --input-script docs/examples/disc1_to_first_battle.txt --max-frames 14000
+# Disc 1 (JP), slot 1 holding a save made in Seven Sisters High School (七姉妹学園) 3F, corridor 3-A, after the
+# opening at Kismet. Getting there from disc1_continue_from_card1.txt (editor's office): walk up+right to the
+# door and press circle (it opens); on the newsroom floor every colleague must be talked to before the
+# reception exit opens (Yukino otherwise says "まだ内線無いし"), then the elevator, Ulala, the school.
+# This script: CONTINUE, walk the corridor until the first encounter (~f4135, Slime contact tutorial,
+# circle through it; back in the field ~f11100), then walk with circle held down until the next encounter
+# (~f12290): one turn of the default tactics wins it and RESULT (EXP 2, 140 yen) shows ~f13750, field ~f13900.
+# Lines: <frame> <button> [<hold frames, default 5>].
+300 start
+1350 start
+1600 start
+# START / CONTINUE: CONTINUE, slot 1, FILE 1, はい
+1900 circle
+2200 circle
+2500 circle
+2800 circle
+# 3F corridor: up and down until the first encounter
+3200 up 180
+3400 down 180
+3600 up 180
+3800 down 180
+4000 up 180
+# Slime contact tutorial: advance its dialogue
+4700 circle
+4760 circle
+4820 circle
+4880 circle
+4940 circle
+5000 circle
+5060 circle
+5120 circle
+5180 circle
+5240 circle
+5300 circle
+5360 circle
+5420 circle
+5480 circle
+5540 circle
+5600 circle
+5660 circle
+5720 circle
+5780 circle
+5840 circle
+5900 circle
+5960 circle
+6020 circle
+6080 circle
+6140 circle
+6200 circle
+6260 circle
+6320 circle
+6380 circle
+6440 circle
+6500 circle
+6560 circle
+6620 circle
+6680 circle
+6740 circle
+6800 circle
+6860 circle
+6920 circle
+6980 circle
+7040 circle
+7100 circle
+7160 circle
+7220 circle
+7280 circle
+7340 circle
+7400 circle
+7460 circle
+7520 circle
+7580 circle
+7640 circle
+7700 circle
+7760 circle
+7820 circle
+7880 circle
+7940 circle
+8000 circle
+8060 circle
+8120 circle
+8180 circle
+8240 circle
+8300 circle
+8360 circle
+8420 circle
+8480 circle
+8540 circle
+8600 circle
+8660 circle
+8720 circle
+8780 circle
+8840 circle
+8900 circle
+8960 circle
+9020 circle
+9080 circle
+9140 circle
+9200 circle
+9260 circle
+9320 circle
+9380 circle
+9440 circle
+9500 circle
+9560 circle
+9620 circle
+9680 circle
+9740 circle
+9800 circle
+9860 circle
+9920 circle
+9980 circle
+10040 circle
+10100 circle
+10160 circle
+10220 circle
+10280 circle
+10340 circle
+10400 circle
+10460 circle
+10520 circle
+10580 circle
+10640 circle
+10700 circle
+10760 circle
+10820 circle
+10880 circle
+10940 circle
+11000 circle
+# field again: walk, circle every 40 frames (starts the battle turn with the default tactics)
+11400 up 180
+11415 circle 3
+11455 circle 3
+11495 circle 3
+11535 circle 3
+11575 circle 3
+11600 down 180
+11615 circle 3
+11655 circle 3
+11695 circle 3
+11735 circle 3
+11775 circle 3
+11800 up 180
+11815 circle 3
+11855 circle 3
+11895 circle 3
+11935 circle 3
+11975 circle 3
+12000 down 180
+12015 circle 3
+12055 circle 3
+12095 circle 3
+12135 circle 3
+12175 circle 3
+12200 up 180
+12215 circle 3
+12255 circle 3
+12295 circle 3
+12335 circle 3
+12375 circle 3
+12400 down 180
+12415 circle 3
+12455 circle 3
+12495 circle 3
+12535 circle 3
+12575 circle 3
+12600 up 180
+12615 circle 3
+12655 circle 3
+12695 circle 3
+12735 circle 3
+12775 circle 3
+12800 down 180
+12815 circle 3
+12855 circle 3
+12895 circle 3
+12935 circle 3
+12975 circle 3
+13000 up 180
+13015 circle 3
+13055 circle 3
+13095 circle 3
+13135 circle 3
+13175 circle 3
+13200 down 180
+13215 circle 3
+13255 circle 3
+13295 circle 3
+13335 circle 3
+13375 circle 3
+13400 up 180
+13415 circle 3
+13455 circle 3
+13495 circle 3
+13535 circle 3
+13575 circle 3
+13600 down 180
+13615 circle 3
+13655 circle 3
+13695 circle 3
+13735 circle 3
+13775 circle 3
+13800 up 180
+13815 circle 3
+13855 circle 3
+13895 circle 3
+13935 circle 3
+13975 circle 3
