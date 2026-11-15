@@ -31,6 +31,7 @@ void Ps1Gpu::SetResolutionScale(uint32_t scale) {
 }
 
 void Ps1Gpu::UpscaleRect(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
+    if (m_listener) m_listener->OnVramWrite(*this, x, y, w, h);
     if (m_scale == 1) return;
     const uint32_t s = m_scale, stride = PS1_VRAM_WIDTH * s;
     w = std::min(w, PS1_VRAM_WIDTH), h = std::min(h, PS1_VRAM_HEIGHT);
@@ -339,6 +340,7 @@ void Ps1Gpu::ExecuteGP0Command() {
     uint32_t w0 = m_gp0_packet[0];
     uint8_t cmd = (w0 >> 24) & 0xFF;
     if (m_cmd_log && !(cmd >= 0xA0 && cmd <= 0xDF)) LogWords(m_gp0_packet.data(), m_gp0_packet.size());
+    if (m_listener) m_listener->OnGp0(*this, m_gp0_packet.data(), m_gp0_packet.size());
 
     if (cmd >= 0x20 && cmd <= 0x3F) { DrawPolygon(cmd); return; }
     if (cmd >= 0x40 && cmd <= 0x5F) { DrawLineCommand(cmd); return; }

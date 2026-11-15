@@ -25,6 +25,7 @@
 #include "loader/png_codec.h"
 #include "recomp/runtime/generated_modules.h"
 #include "rendering/frame_interp.h"
+#include "rendering/gpu_renderer.h"
 #include "rendering/vram_texture_hook.h"
 
 using namespace personarm;
@@ -40,6 +41,8 @@ static void Usage() {
                          "                       ones between the game's frames (display only, one game frame late)\n"
                          "  --resolution-scale N internal resolution N x 320x240 (1-4, default 1 = native); display\n"
                          "                       only, the game still sees the native VRAM. Not with --interp\n"
+                         "  --renderer R         software (default) or gpu: draw the scaled picture on the host GPU\n"
+                         "                       (SDL_gpu, D3D12; docs/GPU_RENDERER.md); then --resolution-scale 1-9 or auto\n"
                          "  --widescreen A       off (default), 16:9, 21:9 or W:H: wider 3D view, shown at that aspect\n"
                          "                       (2D-only and FMV frames stay 4:3; docs/WIDESCREEN.md)\n"
                          "  --dump-dir D --dump-from F --dump-to G   every presented picture of frames F..G as PNG\n"
@@ -85,6 +88,12 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "[settings] video.resolution_scale %d is ignored while fps_target > 60\n", scale);
         scale = 1;
     }
+    bool use_gpu = opt.renderer == "gpu";
+    if (use_gpu && interp_hz) {  // shortcut: the interpolator replays at 1x only (docs/GPU_RENDERER.md)
+        std::fprintf(stderr, "[gpu] --renderer gpu is not combined with --interp yet: software renderer\n");
+        use_gpu = false;
+    }
+    if (!use_gpu) scale = std::clamp(scale, 1, 4);
     if (cfg.video.fps_target == 30 || cfg.video.fps_target == 90)
         std::fprintf(stderr, "[settings] video.fps_target %d is not supported yet, running at 60\n", cfg.video.fps_target);
     std::array<MemoryCard, 2> cards;
@@ -104,9 +113,14 @@ int main(int argc, char** argv) {
     }
     SDL_Window* window = nullptr;
     SDL_Renderer* renderer = nullptr;
+    if (use_gpu && scale == 0) {  // auto: enough lines for the display (240 x 9 = 2160, 4K)
+        const SDL_DisplayMode* dm = SDL_GetDesktopDisplayMode(SDL_GetPrimaryDisplay());
+        scale = std::clamp(dm ? (dm->h + 239) / 240 : 4, 1, 9);
+    }
+    const int win_scale = std::max(cfg.video.window_scale, std::min(scale, 4));
     int win_aw = 4, win_ah = 3;  // the window opens at the widescreen aspect when one is set
     host::ParseWidescreen(cfg.video.widescreen, win_aw, win_ah);
-    const int win_h0 = 240 * std::max(cfg.video.window_scale, scale);
+    const int win_h0 = 240 * win_scale;
     if (!SDL_CreateWindowAndRenderer("PersonaRM", win_h0 * win_aw / win_ah, win_h0,
                                      SDL_WINDOW_RESIZABLE | (hidden ? SDL_WINDOW_HIDDEN : 0), &window, &renderer)) {
         std::fprintf(stderr, "SDL_CreateWindowAndRenderer: %s\n", SDL_GetError());
@@ -207,7 +221,16 @@ int main(int argc, char** argv) {
         }
         engine.SetGamePatches(std::move(patches));
     }
-    engine.GetGpu().SetResolutionScale(uint32_t(scale));
+    GpuRenderer gpu_renderer;  // --renderer gpu: the CPU keeps rasterizing at 1x only
+    if (use_gpu) {
+        std::string err;
+        if (!gpu_renderer.Init(engine.GetGpu(), uint32_t(scale), &err)) {
+            std::fprintf(stderr, "[gpu] renderer unavailable (%s): software renderer\n", err.c_str());
+            use_gpu = false;
+            scale = std::clamp(scale, 1, 4);
+        }
+    }
+    engine.GetGpu().SetResolutionScale(uint32_t(use_gpu ? 1 : scale));
     const bool widescreen = win_aw * 3 != win_ah * 4;
     if (widescreen) {
         engine.GetCpu().GetGTE().SetWidescreen(4 * win_ah, 3 * win_aw);
@@ -263,7 +286,8 @@ int main(int argc, char** argv) {
     std::vector<uint32_t> cmd_log;
     if (interp_hz) engine.GetGpu().SetCommandLog(&cmd_log);
     const int sub = interp_hz ? interp_hz / 60 : 1;  // presents per emulated frame
-    uint64_t run_ns = 0, interp_ns = 0, interp_frames = 0, last_hash = 0;
+    uint64_t run_ns = 0, interp_ns = 0, interp_frames = 0, last_hash = 0, gpu_ns = 0;
+    uint32_t gpu_draws = 0;  // most draw calls in one picture this second
     uint32_t flips = 0, changes = 0, pairs = 0, pairs_ok = 0, last_start = ~0u;
 
     // Save states: F5 save, F8 load, F6/F7 slot. <save_dir>/<serial>.state<N>, else the settings directory.
@@ -423,11 +447,14 @@ int main(int argc, char** argv) {
             flips += start != last_start;
             last_start = start;
             if (frame % 60 == 0) {
-                std::printf("[stats] f=%llu flips/s=%u pictures/s=%u interp_pairs=%u/%u %ux%u%s frame_ms=%.2f\n",
+                std::printf("[stats] f=%llu flips/s=%u pictures/s=%u interp_pairs=%u/%u %ux%u%s frame_ms=%.2f",
                             (unsigned long long)frame, flips, changes, pairs_ok, pairs, d.width, d.height,
                             d.is_24bit ? " 24bpp" : "", double(run_ns) / 60e6);
+                if (use_gpu)  // host GPU work per presented picture: submit + wait + readback
+                    std::printf(" gpu_ms=%.2f max_draws=%u", double(gpu_ns) / 60e6, gpu_draws);
+                std::printf("\n");
                 std::fflush(stdout);
-                flips = changes = pairs_ok = pairs = 0, run_ns = 0;
+                flips = changes = pairs_ok = pairs = 0, run_ns = 0, gpu_ns = 0, gpu_draws = 0;
             }
         }
 
@@ -449,9 +476,22 @@ int main(int argc, char** argv) {
                 off = false;
             }
             // 24bpp (FMV) is shown at 1x and stretched by the presenter.
+            bool gpu_frame = use_gpu && !d.is_24bit;  // 24bpp (FMV): software at 1x, GPU work only flushed
+            if (use_gpu) {  // runs even with the display off: the recorded work must be flushed
+                const uint64_t gpu_t0 = SDL_GetTicksNS();
+                if (!gpu_renderer.Present(d, gpu_frame ? &rgba : nullptr)) {
+                    std::fprintf(stderr, "[gpu] present failed (%s): software renderer at 1x\n", SDL_GetError());
+                    gpu_renderer.Shutdown();
+                    use_gpu = gpu_frame = false;
+                    scale = 1;
+                }
+                gpu_ns += SDL_GetTicksNS() - gpu_t0;
+                gpu_draws = std::max(gpu_draws, gpu_renderer.LastDrawCalls());
+            }
             const uint32_t hs = scale > 1 && !d.is_24bit ? uint32_t(scale) : 1;
             const uint32_t w = (d.width ? d.width : 320) * hs, h = (d.height ? d.height : 240) * hs;
             if (off) rgba.assign(size_t(w) * h, 0xFF000000u);  // display disabled
+            else if (gpu_frame) {}  // rgba already holds the GPU picture
             else if (hs > 1) host::DisplayToRgba(gpu.GetScaledVram(), d.x, d.y, w / hs, h / hs, false, rgba, hs);
             else host::DisplayToRgba(*vram, d.x, d.y, w, h, d.is_24bit, rgba);
             for (uint32_t p : rgba)
@@ -497,6 +537,7 @@ int main(int argc, char** argv) {
     std::printf("[SDL] frames=%llu non-black=%llu audio_samples=%llu\n", (unsigned long long)engine.GetFrameCount(),
                 (unsigned long long)lit_frames, (unsigned long long)audio_samples);
     engine.GetGpu().SetCommandLog(nullptr);
+    gpu_renderer.Shutdown();
     if (!opt.texture_dump.empty() || !game.mods.empty()) {
         std::printf("[textures] uploads=%zu dumped=%zu replaced=%zu\n", texture_hook.UploadCount(),
                     texture_hook.DumpedCount(), texture_hook.ReplacedUploadCount());

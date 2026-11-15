@@ -238,6 +238,8 @@ if(PRM_WITH_SDL3)
         host/host_logic.h
         host/settings.cpp
         host/settings.h
+        rendering/gpu_renderer.cpp
+        rendering/gpu_renderer.h
     )
     target_link_libraries(personarm_sdl PRIVATE personarm_core personarm_recomp_modules SDL3::SDL3)
     if(MSVC)
