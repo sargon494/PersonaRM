@@ -1,8 +1,10 @@
 #include "host/host_logic.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 
 namespace personarm::host {
 
@@ -13,24 +15,36 @@ constexpr uint16_t kSelect = 1u << 0, kStart = 1u << 3, kUp = 1u << 4, kRight = 
                    kTriangle = 1u << 12, kCircle = 1u << 13, kCross = 1u << 14, kSquare = 1u << 15;
 } // namespace
 
-Rect Letterbox4x3(int win_w, int win_h) {
-    if (win_w <= 0 || win_h <= 0) return {};
+Rect LetterboxAspect(int win_w, int win_h, int aw, int ah) {
+    if (win_w <= 0 || win_h <= 0 || aw <= 0 || ah <= 0) return {};
     Rect r;
-    if (win_w * 3 >= win_h * 4) { r.h = win_h; r.w = win_h * 4 / 3; }  // wider than 4:3: pillarbox
-    else { r.w = win_w; r.h = win_w * 3 / 4; }                          // taller: letterbox
+    if (win_w * ah >= win_h * aw) { r.h = win_h; r.w = win_h * aw / ah; }  // wider than aw:ah: pillarbox
+    else { r.w = win_w; r.h = win_w * ah / aw; }                          // taller: letterbox
     r.x = (win_w - r.w) / 2;
     r.y = (win_h - r.h) / 2;
     return r;
 }
 
-Rect PresentRect(int win_w, int win_h, bool stretch, bool integer, int tex_h) {
+Rect Letterbox4x3(int win_w, int win_h) { return LetterboxAspect(win_w, win_h, 4, 3); }
+
+Rect PresentRect(int win_w, int win_h, bool stretch, bool integer, int tex_h, int aw, int ah) {
     if (win_w <= 0 || win_h <= 0) return {};
     if (stretch) return {0, 0, win_w, win_h};
     if (integer && tex_h > 0) {
-        const int bw = tex_h * 4 / 3, k = std::min(win_w / bw, win_h / tex_h);
+        const int bw = tex_h * aw / ah, k = std::min(win_w / bw, win_h / tex_h);
         if (k >= 1) return {(win_w - bw * k) / 2, (win_h - tex_h * k) / 2, bw * k, tex_h * k};
     }
-    return Letterbox4x3(win_w, win_h);
+    return LetterboxAspect(win_w, win_h, aw, ah);
+}
+
+bool ParseWidescreen(const std::string& s, int& aw, int& ah) {
+    if (s == "off") { aw = 4, ah = 3; return true; }
+    int w = 0, h = 0;
+    char tail = 0;
+    if (std::sscanf(s.c_str(), "%d:%d%c", &w, &h, &tail) != 2 || w < 1 || h < 1 || w > 64 || h > 64 || w * 3 < h * 4)
+        return false;
+    aw = w, ah = h;
+    return true;
 }
 
 void DisplayToRgba(const std::vector<uint16_t>& vram, uint32_t x, uint32_t y, uint32_t w, uint32_t h,
@@ -122,6 +136,7 @@ bool ParseHostArgs(int argc, const char* const* argv, HostOptions& o) {
             if (is("--frames")) o.max_frames = std::strtoull(v, nullptr, 10);
             else if (is("--screenshot")) o.screenshot = v;
             else if (is("--input-script")) o.input_script = v;
+            else if (is("--record-input")) o.record_input = v;
             else if (is("--interp")) o.interp_hz = std::atoi(v), o.interp_given = true;
             else if (is("--settings")) o.settings_path = v;
             else if (is("--window-mode")) {
@@ -135,6 +150,11 @@ bool ParseHostArgs(int argc, const char* const* argv, HostOptions& o) {
             else if (is("--renderer")) {
                 if (std::strcmp(v, "software") && std::strcmp(v, "gpu")) return false;
                 o.renderer = v;
+            }
+            else if (is("--widescreen")) {
+                int aw = 0, ah = 0;
+                if (!ParseWidescreen(v, aw, ah)) return false;
+                o.widescreen = v;
             }
             else if (is("--dump-dir")) o.dump_dir = v;
             else if (is("--texture-dump")) o.texture_dump = v;
@@ -154,6 +174,33 @@ bool ParseHostArgs(int argc, const char* const* argv, HostOptions& o) {
     return !o.disc.empty() && o.interp_hz >= 0 && o.interp_hz % 60 == 0 && o.recomp_quantum > 0 &&
            o.resolution_scale >= (o.renderer == "gpu" ? 0u : 1u) && o.resolution_scale <= (o.renderer == "gpu" ? 9u : 4u) &&
            !(o.interp_hz && o.resolution_scale != 1);
+}
+
+namespace {
+const char* const kButtonNames[16] = {"select", "l3", "r3", "start", "up", "right", "down", "left",
+                                      "l2", "r2", "l1", "r1", "triangle", "circle", "cross", "square"};  // = Engine::ParsePadPress
+}
+
+void InputRecorder::Frame(uint64_t frame, uint16_t mask) {
+    for (int b = 0; b < 16; ++b) {
+        const uint16_t bit = uint16_t(1u << b);
+        if ((mask & bit) && !(held_ & bit)) start_[b] = frame;
+        else if (!(mask & bit) && (held_ & bit)) done_.push_back({start_[b], frame - start_[b], b});
+    }
+    held_ = mask;
+}
+
+std::string InputRecorder::Script(uint64_t end_frame) const {
+    std::vector<Press> all = done_;
+    for (int b = 0; b < 16; ++b)
+        if ((held_ >> b) & 1u) all.push_back({start_[b], end_frame - start_[b], b});
+    std::stable_sort(all.begin(), all.end(), [](const Press& a, const Press& c) {
+        return a.frame != c.frame ? a.frame < c.frame : a.bit < c.bit;
+    });
+    std::string out;
+    for (const Press& p : all)
+        out += std::to_string(p.frame) + " " + kButtonNames[p.bit] + " " + std::to_string(std::max<uint64_t>(p.hold, 1)) + "\n";
+    return out;
 }
 
 } // namespace personarm::host

@@ -12,9 +12,15 @@ struct Rect { int x = 0, y = 0, w = 0, h = 0; };
 /// Largest 4:3 rectangle centred in a win_w x win_h window (letterbox / pillarbox bars).
 Rect Letterbox4x3(int win_w, int win_h);
 
-/// Where the picture goes: whole window if `stretch`, else the 4:3 box; with `integer` the box is the
-/// largest whole multiple of (tex_h*4/3) x tex_h that fits (falls back to the plain fit if even 1x does not).
-Rect PresentRect(int win_w, int win_h, bool stretch, bool integer, int tex_h);
+/// Largest aw:ah rectangle centred in the window.
+Rect LetterboxAspect(int win_w, int win_h, int aw, int ah);
+
+/// Where the picture goes: whole window if `stretch`, else the aw:ah box (default 4:3); with `integer` the
+/// box is the largest whole multiple of (tex_h*aw/ah) x tex_h that fits (else the plain fit).
+Rect PresentRect(int win_w, int win_h, bool stretch, bool integer, int tex_h, int aw = 4, int ah = 3);
+
+/// Widescreen aspect "W:H" (W:H at least 4:3, both 1..64) or "off" (= 4:3). False on anything else.
+bool ParseWidescreen(const std::string& s, int& aw, int& ah);
 
 /// Display area of a 1024x512 16-bit VRAM to 0xAABBGGRR (bytes R,G,B,A in memory). 15bpp: BGR555 words;
 /// 24bpp: packed RGB888 bytes starting at VRAM column x. Wraps at the VRAM edges like the GPU.
@@ -41,6 +47,7 @@ struct HostOptions {
     std::string disc, screenshot, input_script, dump_dir;
     std::string texture_dump, mods; // --texture-dump D (dump used VRAM textures as PNG), --mods D (HD replacement)
     std::string text_speed;         // --text-speed normal|fast|instant (empty = the mods manifests decide)
+    std::string widescreen;         // --widescreen off|16:9|21:9|W:H (empty = the settings file decides)
     std::string memcard[2];         // --memcard1/2: raw .mcd per slot, empty = no card
     uint64_t max_frames = 0, dump_from = 0, dump_to = 0;
     int interp_hz = 0;
@@ -57,10 +64,26 @@ struct HostOptions {
     bool interp_given = false;      // --interp was on the command line (even --interp 0)
     bool resolution_scale_given = false;  // --resolution-scale was on the command line
     bool save_settings = false;     // --save-settings: write the effective settings back to the file
+    std::string record_input;       // --record-input F: write the played pad presses as an --input-script
     bool stats = false, unthrottled = false, hidden = false;
 };
 /// False on an unknown option, a missing value, no disc, --interp not a multiple of 60, a resolution scale
 /// outside 1-4 (--renderer gpu: 1-9 or auto), or --interp with a resolution scale above 1 (the interpolator replays at 1x only).
 bool ParseHostArgs(int argc, const char* const* argv, HostOptions& out);
+
+/// --record-input: turns the pad mask of each emulated frame into --input-script lines.
+class InputRecorder {
+public:
+    /// Pad mask in force on emulated frame `frame` (call once per frame, frames increasing).
+    void Frame(uint64_t frame, uint16_t mask);
+    /// "<frame> <button> <hold>" lines, ordered by frame then bit; buttons still held at `end_frame` are
+    /// closed there (non-destructive, so it can be called again later).
+    std::string Script(uint64_t end_frame) const;
+private:
+    struct Press { uint64_t frame, hold; int bit; };
+    std::vector<Press> done_;
+    uint64_t start_[16] = {};
+    uint16_t held_ = 0;
+};
 
 } // namespace personarm::host

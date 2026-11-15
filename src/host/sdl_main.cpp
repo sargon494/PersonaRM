@@ -9,6 +9,7 @@
 #include <array>
 #include <cstdio>
 #include <cstdlib>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -33,12 +34,16 @@ static void Usage() {
                          "  --frames N           quit after N emulated frames\n"
                          "  --screenshot file    save the last presented frame as BMP on quit\n"
                          "  --input-script file  scripted pad presses (<frame> <button> [<hold>] per line)\n"
+                         "  --record-input file  write the pad presses you play as an --input-script (flushed every 600\n"
+                         "                       frames and on quit; also records the scripted presses of --input-script)\n"
                          "  --interp HZ          present HZ pictures/s (multiple of 60, e.g. 120), synthesizing the\n"
                          "                       ones between the game's frames (display only, one game frame late)\n"
                          "  --resolution-scale N internal resolution N x 320x240 (1-4, default 1 = native); display\n"
                          "                       only, the game still sees the native VRAM. Not with --interp\n"
                          "  --renderer R         software (default) or gpu: draw the scaled picture on the host GPU\n"
                          "                       (SDL_gpu, D3D12; docs/GPU_RENDERER.md); then --resolution-scale 1-9 or auto\n"
+                         "  --widescreen A       off (default), 16:9, 21:9 or W:H: wider 3D view, shown at that aspect\n"
+                         "                       (2D-only and FMV frames stay 4:3; docs/WIDESCREEN.md)\n"
                          "  --dump-dir D --dump-from F --dump-to G   every presented picture of frames F..G as PNG\n"
                          "  --texture-dump D     write every VRAM texture the game samples as <HASH>_<bits>bit_<WxH>.png into D\n"
                          "  --mods D             mods: D/<mod>/textures/<HASH>.png, D/<mod>/files/Fnnnn.BIN (+ manifest.json priority/serial)\n"
@@ -109,7 +114,10 @@ int main(int argc, char** argv) {
         scale = std::clamp(dm ? (dm->h + 239) / 240 : 4, 1, 9);
     }
     const int win_scale = std::max(cfg.video.window_scale, std::min(scale, 4));
-    if (!SDL_CreateWindowAndRenderer("PersonaRM", 320 * win_scale, 240 * win_scale,
+    int win_aw = 4, win_ah = 3;  // the window opens at the widescreen aspect when one is set
+    host::ParseWidescreen(cfg.video.widescreen, win_aw, win_ah);
+    const int win_h0 = 240 * win_scale;
+    if (!SDL_CreateWindowAndRenderer("PersonaRM", win_h0 * win_aw / win_ah, win_h0,
                                      SDL_WINDOW_RESIZABLE | (hidden ? SDL_WINDOW_HIDDEN : 0), &window, &renderer)) {
         std::fprintf(stderr, "SDL_CreateWindowAndRenderer: %s\n", SDL_GetError());
         SDL_Quit();
@@ -219,6 +227,13 @@ int main(int argc, char** argv) {
         }
     }
     engine.GetGpu().SetResolutionScale(uint32_t(use_gpu ? 1 : scale));
+    const bool widescreen = win_aw * 3 != win_ah * 4;
+    if (widescreen) {
+        engine.GetCpu().GetGTE().SetWidescreen(4 * win_ah, 3 * win_aw);
+        std::printf("[video] widescreen %d:%d\n", win_aw, win_ah);
+    }
+    uint64_t last_projections = 0, last_3d_frame = 0;
+    bool seen_3d = false;
     engine.SetPadScript(presses);
     for (int slot = 0; slot < 2; ++slot)
         if (!card_path[slot].empty()) engine.SetMemoryCard(slot, &cards[slot]);
@@ -240,6 +255,20 @@ int main(int argc, char** argv) {
     }
     std::vector<SDL_Gamepad*> gamepads;
 
+    // --record-input: the effective pad mask of every emulated frame (paused frames never get here).
+    host::InputRecorder recorder;
+    auto write_recording = [&](uint64_t end_frame) {
+        if (opt.record_input.empty()) return;
+        std::time_t now = std::time(nullptr);
+        char date[32] = "";
+        std::strftime(date, sizeof date, "%Y-%m-%d %H:%M:%S", std::localtime(&now));
+        std::ofstream out(opt.record_input, std::ios::trunc);
+        out << "# personarm_sdl --record-input: disc " << (engine.DiscSerial().empty() ? "(unrecognized)" : engine.DiscSerial())
+            << ", " << date << ", memcard1 " << (card_path[0].empty() ? "none" : card_path[0]) << ", memcard2 "
+            << (card_path[1].empty() ? "none" : card_path[1]) << "\n# replay: personarm --boot <cue> --input-script <this file> --max-frames "
+            << end_frame << "\n" << recorder.Script(end_frame);
+        if (!out) std::fprintf(stderr, "cannot write %s\n", opt.record_input.c_str());
+    };
     SDL_Texture* texture = nullptr;
     int tex_w = 0, tex_h = 0;
     std::vector<uint32_t> rgba;
@@ -306,6 +335,10 @@ int main(int argc, char** argv) {
         for (SDL_Gamepad* g : gamepads)  // the game reads a digital pad: the left stick drives the d-pad too
             mask |= host::StickToDpad(SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_LEFTX), SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_LEFTY));
         engine.SetPadButtons(mask);
+        if (!opt.record_input.empty()) {
+            recorder.Frame(engine.GetFrameCount(), mask | engine.ScriptedButtons());
+            if (engine.GetFrameCount() % 600 == 599) write_recording(engine.GetFrameCount() + 1);
+        }
 
         const uint64_t run_t0 = SDL_GetTicksNS();
         engine.RunFrame();  // with --resolution-scale this includes the scaled raster pass
@@ -321,6 +354,11 @@ int main(int argc, char** argv) {
 
         Ps1Gpu& gpu = engine.GetGpu();
         const uint64_t frame = engine.GetFrameCount();
+        if (const uint64_t n = engine.GetCpu().GetGTE().ProjectionCount(); n != last_projections)
+            last_projections = n, last_3d_frame = frame, seen_3d = true;
+        // shortcut: a frame is "3D" if the GTE projected anything in the last 30 frames; 2D-only screens
+        // (title, FMV, menus without a scene) keep their 4:3 picture. Overlays on a 3D scene still stretch.
+        const bool wide_now = widescreen && seen_3d && frame - last_3d_frame < 30 && !gpu.GetDisplayArea().is_24bit;
         if (interp_hz && interp.Consume(cmd_log, gpu, frame) && interp.Active(frame)) {
             ++pairs;
             pairs_ok += interp.PairOk();
@@ -397,7 +435,8 @@ int main(int argc, char** argv) {
 
             int win_w = 0, win_h = 0;
             SDL_GetRenderOutputSize(renderer, &win_w, &win_h);
-            const host::Rect r = host::PresentRect(win_w, win_h, cfg.video.aspect == "stretch", cfg.video.integer_scaling, int(h));
+            const host::Rect r = host::PresentRect(win_w, win_h, cfg.video.aspect == "stretch", cfg.video.integer_scaling, int(h),
+                                                   wide_now ? win_aw : 4, wide_now ? win_ah : 3);
             const SDL_FRect dst{float(r.x), float(r.y), float(r.w), float(r.h)};
             SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
             SDL_RenderClear(renderer);
@@ -419,6 +458,7 @@ int main(int argc, char** argv) {
         }
     }
 
+    write_recording(engine.GetFrameCount());
     if (interp_frames)
         std::printf("[interp] %llu synthesized pictures, %.3f ms each\n", (unsigned long long)interp_frames,
                     double(interp_ns) / 1e6 / double(interp_frames));

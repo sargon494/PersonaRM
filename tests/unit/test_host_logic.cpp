@@ -103,6 +103,17 @@ int main() {
     const char* two[] = {"personarm_sdl", "d.cue", "e.cue"};
     CHECK(!ParseHostArgs(3, two, o));
 
+    // Recorder: simultaneous presses, a re-press, a button still held at the end, an idle gap.
+    {
+        InputRecorder rec;
+        const uint16_t cross = 1u << 14, up = 1u << 4, start = 1u << 3;
+        const uint16_t seq[] = {0, cross | up, cross | up, up, 0, 0, start, 0, cross, cross};
+        for (uint64_t f = 0; f < 10; ++f) rec.Frame(f, seq[f]);
+        CHECK(rec.Script(10) == "1 up 3\n1 cross 2\n6 start 1\n8 cross 2\n");
+        CHECK(rec.Script(12) == "1 up 3\n1 cross 2\n6 start 1\n8 cross 4\n");
+        CHECK(InputRecorder().Script(5).empty());
+    }
+
     std::puts("test_host_logic: OK");
     return 0;
 }
