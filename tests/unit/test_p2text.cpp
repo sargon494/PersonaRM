@@ -202,12 +202,69 @@ static void TestFont() {
     CHECK(bmp.size() > 1078 && bmp[0] == 'B' && bmp[1] == 'M');
 }
 
+static std::vector<uint16_t> Enc(const std::string& t, bool packed) {
+    GlyphMap m; m.packed = packed;
+    std::vector<uint16_t> c; std::vector<std::string> e;
+    CHECK(Encode(t, m, c, e));
+    return c;
+}
+
+// Synthetic EXE with the US width-routine signature and made-up tables (no game data).
+static std::vector<uint8_t> FakeUsExe(uint8_t width_of_class5) {
+    std::vector<uint8_t> x(0x800 + 0x10000, 0);
+    std::memcpy(x.data(), "PS-X EXE", 8);
+    const uint32_t base = 0x80010000, size = 0x10000;
+    std::memcpy(x.data() + 0x18, &base, 4); std::memcpy(x.data() + 0x1C, &size, 4);
+    auto at = [&](uint32_t a) { return x.data() + 0x800 + (a - base); };
+    const uint32_t w1 = 0x24480464, w2 = 0x24470444;
+    std::memcpy(at(0x8001BF48), &w1, 4); std::memcpy(at(0x8001BF50), &w2, 4);
+    for (int c = 0; c < 16; ++c) { at(0x80010444)[2 * c] = 0; at(0x80010444)[2 * c + 1] = uint8_t(c == 5 ? width_of_class5 : 3); }
+    for (int i = 0; i < 96; ++i) at(0x80010464)[i] = (i == 'a' - 0x20) ? 5 : 0;   // 'a' = class 5, everything else class 0 (width 3)
+    return x;
+}
+
+static void TestLayout() {
+    Metrics m;
+    std::string err;
+    CHECK(UsMetricsFromExe(FakeUsExe(6), m, err) && m.us);
+    CHECK(m.adv['a' - 0x20] == 7 && m.adv['b' - 0x20] == 4 && m.adv[0] == 4);   // width + 1
+    auto bad = FakeUsExe(6); bad[0x800 + 0x8001BF48 - 0x80010000] ^= 1;
+    Metrics m2;
+    CHECK(!UsMetricsFromExe(bad, m2, err) && !m2.us);                  // unknown build: no widths guessed
+    CHECK(!UsMetricsFromExe(std::vector<uint8_t>(16, 0), m2, err));
+
+    m.max_px = 20; m.max_lines = 2;
+    const auto c = Enc("<color=1>ab<br>aaa<br>bbbbb<br>bbbbbb<page>a<end>", true);
+    const auto ls = MeasureLines(c, m);
+    CHECK(ls.size() == 5);
+    CHECK(ls[0].page == 1 && ls[0].line == 1 && ls[0].px == 11);        // a(7) + b(4)
+    CHECK(ls[1].line == 2 && ls[1].px == 21);                           // 3 x 7
+    CHECK(ls[2].line == 3 && ls[2].px == 20);                           // 5 x 4: exactly at the limit
+    CHECK(ls[3].px == 24 && ls[4].page == 2 && ls[4].line == 1 && ls[4].px == 7);
+    const auto w = CheckLayout(c, m, "F0001 msg 3");
+    CHECK(w.size() == 3);                                               // lines 2 and 4 too wide, page 1 has 4 lines > 2
+    CHECK(w[0].find("F0001 msg 3 pag 1 linea 2: 21 px > 20") == 0);
+    CHECK(w[1].find("linea 4: 24 px") != std::string::npos);
+    CHECK(w[2].find("pag 1: 4 lineas > 2") != std::string::npos);
+    m.max_px = 0;                                                       // unknown widths: only lines per page
+    CHECK(CheckLayout(c, m, "x").size() == 1);
+    CHECK(CheckLayout(Enc("a<br><page><end>", true), m, "x").empty());  // control-only lines do not count
+
+    Metrics jp = DefaultMetrics(false);                                 // JP: fixed 12 px per glyph code
+    jp.max_px = 36; jp.max_lines = 4;
+    std::vector<uint16_t> j{0x41, 0x42, 0x43, 0x1101, 0x41, 0x42, 0x43, 0x44, 0x1103};
+    const auto jl = MeasureLines(j, jp);
+    CHECK(jl.size() == 2 && jl[0].px == 36 && jl[1].px == 48);
+    CHECK(CheckLayout(j, jp, "F").size() == 1);
+}
+
 int main() {
     TestLz();
     TestText();
     TestPacked();
     TestBank();
     TestFont();
+    TestLayout();
     std::printf("unit_test_p2text: %d checks OK\n", g_checks);
     return 0;
 }

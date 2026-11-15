@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <map>
 #include <set>
 
 namespace personarm::tools::p2text {
@@ -15,6 +16,11 @@ static uint32_t Rd32(const uint8_t* p) { uint32_t v; std::memcpy(&v, p, 4); retu
 static void Wr32(uint8_t* p, uint32_t v) { std::memcpy(p, &v, 4); }
 static uint16_t Rd16(const uint8_t* p) { uint16_t v; std::memcpy(&v, p, 2); return v; }
 static size_t Align(size_t v, size_t a) { return (v + a - 1) / a * a; }
+
+// Dialogue window limits, measured on frames of the game's own window (docs/TRANSLATION_TOOLS.md): lines start at x=16, the
+// inside of the box ends at x=303 (US: 288 px); the box shows the speaker-name line plus 3 text lines (4 per page). Text past
+// either limit is not clipped or wrapped: it is drawn over the border / below the box.
+static constexpr unsigned kUsMaxPx = 288, kUsMaxLines = 4, kJpMaxPx = 288, kJpMaxLines = 4;
 
 // â”€â”€ LZ â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -402,6 +408,84 @@ bool PatchFile(const std::vector<uint8_t>& file, const BankRef& r, const std::ve
 }
 
 // â”€â”€ Font preview â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+// US resident code at 0x8001BF2C: per char `idx[c - 0x20]` (96 B at 0x80010464) selects a {left, width} pair (16 at 0x80010444);
+// advance = width + 1. The tables are read from the user's own EXE, never embedded.
+bool UsMetricsFromExe(const std::vector<uint8_t>& exe, Metrics& m, std::string& error) {
+    constexpr uint32_t kPairs = 0x80010444, kIdx = 0x80010464, kCode = 0x8001BF48;
+    if (exe.size() < 0x800 || std::memcmp(exe.data(), "PS-X EXE", 8)) { error = "no es un PS-X EXE"; return false; }
+    const uint32_t base = Rd32(exe.data() + 0x18), size = Rd32(exe.data() + 0x1C);
+    auto at = [&](uint32_t a, size_t n) -> const uint8_t* {
+        return a >= base && a - base + n <= size && 0x800 + (a - base) + n <= exe.size() ? exe.data() + 0x800 + (a - base) : nullptr;
+    };
+    // the routine loads both table addresses here (`addiu t0,v0,0x464`, `addiu a3,v0,0x444`): ties the offsets to the US build
+    const uint8_t* code = at(kCode, 12);
+    if (!code || Rd32(code) != 0x24480464 || Rd32(code + 8) != 0x24470444) { error = "el ejecutable no es el de SLUS-01158 (rutina de anchos no reconocida)"; return false; }
+    const uint8_t* pairs = at(kPairs, 32);
+    const uint8_t* idx = at(kIdx, 96);
+    if (!pairs || !idx) { error = "tabla de anchos fuera del ejecutable"; return false; }
+    for (int i = 0; i < 96; ++i) {
+        if (idx[i] > 15) { error = "tabla de anchos invalida"; return false; }
+        m.adv[i] = uint8_t(pairs[2 * idx[i] + 1] + 1);
+    }
+    m.us = true;
+    return true;
+}
+
+// Measured on the game's own text window (US: f7000+ frames of F0057; see docs/TRANSLATION_TOOLS.md).
+Metrics DefaultMetrics(bool us) {
+    Metrics m;
+    m.max_px = us ? kUsMaxPx : kJpMaxPx;
+    m.max_lines = us ? kUsMaxLines : kJpMaxLines;
+    return m;
+}
+
+std::vector<LineWidth> MeasureLines(const std::vector<uint16_t>& codes, const Metrics& m) {
+    std::vector<LineWidth> out;
+    LineWidth cur{1, 1, 0};
+    bool visible = false;                                // line has at least one glyph/char (control-only lines do not count)
+    auto close = [&](bool new_page) {
+        if (visible) out.push_back(cur);
+        if (new_page) { cur.page++; cur.line = 1; } else cur.line++;
+        cur.px = 0;
+        visible = false;
+    };
+    for (size_t i = 0; i < codes.size();) {
+        const uint16_t c = codes[i];
+        if (c == 0x1136) {                               // packed ASCII run: two chars per u16, ends at the first NUL byte
+            size_t j = i + 1;
+            for (bool stop = false; j < codes.size() && !stop; ++j)
+                for (uint8_t ch : {uint8_t(codes[j] & 0xFF), uint8_t(codes[j] >> 8)}) {
+                    if (!ch) { stop = true; break; }
+                    visible = true;
+                    cur.px += (m.us && ch >= 0x20 && ch < 0x80) ? m.adv[ch - 0x20] : 0;
+                }
+            i = j;
+            continue;
+        }
+        if (c < 0x1000) { visible = true; cur.px += 12; ++i; continue; }
+        if (c == 0x1101) close(false);
+        else if (c == 0x1102 || c == 0x1103) close(true);
+        i += std::min(CodeLength(c), codes.size() - i);
+    }
+    close(false);
+    return out;
+}
+
+std::vector<std::string> CheckLayout(const std::vector<uint16_t>& codes, const Metrics& m, const std::string& where) {
+    std::vector<std::string> w;
+    std::map<unsigned, unsigned> lines;
+    for (const auto& l : MeasureLines(codes, m)) {
+        ++lines[l.page];
+        if (m.max_px && l.px > m.max_px)
+            w.push_back(where + " pag " + std::to_string(l.page) + " linea " + std::to_string(l.line) + ": " + std::to_string(l.px) +
+                        " px > " + std::to_string(m.max_px) + " px de ventana");
+    }
+    for (const auto& [pg, n] : lines)
+        if (m.max_lines && n > m.max_lines)
+            w.push_back(where + " pag " + std::to_string(pg) + ": " + std::to_string(n) + " lineas > " + std::to_string(m.max_lines) + " por pagina");
+    return w;
+}
 
 std::vector<uint8_t> FontSheetBmp(const std::vector<uint8_t>& font, unsigned first, unsigned count) {
     const unsigned cols = 32, cell = 13, sc = 2, rows = (count + cols - 1) / cols;
