@@ -203,11 +203,9 @@ int main(int argc, char** argv) {
     engine.GetGpu().SetResolutionScale(uint32_t(scale));
     const bool widescreen = win_aw * 3 != win_ah * 4;
     if (widescreen) {
-        engine.GetCpu().GetGTE().SetWidescreen(4 * win_ah, 3 * win_aw);
+        engine.SetWidescreen(4 * win_ah, 3 * win_aw);
         std::printf("[video] widescreen %d:%d\n", win_aw, win_ah);
     }
-    uint64_t last_projections = 0, last_3d_frame = 0;
-    bool seen_3d = false;
     engine.SetPadScript(presses);
     for (int slot = 0; slot < 2; ++slot)
         if (!card_path[slot].empty()) engine.SetMemoryCard(slot, &cards[slot]);
@@ -309,11 +307,10 @@ int main(int argc, char** argv) {
 
         Ps1Gpu& gpu = engine.GetGpu();
         const uint64_t frame = engine.GetFrameCount();
-        if (const uint64_t n = engine.GetCpu().GetGTE().ProjectionCount(); n != last_projections)
-            last_projections = n, last_3d_frame = frame, seen_3d = true;
-        // shortcut: a frame is "3D" if the GTE projected anything in the last 30 frames; 2D-only screens
-        // (title, FMV, menus without a scene) keep their 4:3 picture. Overlays on a 3D scene still stretch.
-        const bool wide_now = widescreen && seen_3d && frame - last_3d_frame < 30 && !gpu.GetDisplayArea().is_24bit;
+        // shortcut: a frame is "3D" if the GTE projected anything in the last 30 frames (the same rule the
+        // GPU uses to squeeze 2D); 2D-only screens (title, FMV, menus without a scene) keep their 4:3 picture.
+        const Widescreen2D* ws = engine.GetWidescreen2D();
+        const bool wide_now = ws && ws->Wide() && !gpu.GetDisplayArea().is_24bit;
         if (interp_hz && interp.Consume(cmd_log, gpu, frame) && interp.Active(frame)) {
             ++pairs;
             pairs_ok += interp.PairOk();

@@ -61,7 +61,7 @@ as-is, unknown ones preserved) with a warning.
 | `vsync` | bool | false | honoured; ignored while interpolation or `--unthrottled` is on (it would slow the game down) |
 | `fps_target` | `30`, `60`, `90`, `120` | 60 | `60` = native, `120` = frame interpolation (same as `--interp 120`; `--interp N` sets it to N, `--interp 0` to 60). `30` and `90` are valid and stored but not supported yet: they run at 60 with a warning |
 | `resolution_scale` | integer 1..4 | 1 | internal resolution (display only); same as `--resolution-scale`. Ignored (with a warning) when `fps_target` > 60 |
-| `widescreen` | `off`, or `W:H` at least 4:3 (`16:9`, `21:9`, ...) | `off` | honoured; same as `--widescreen`. Wider 3D view (GTE hack) shown at W:H; 2D-only and FMV frames stay 4:3. HUD/dialogue drawn over 3D is stretched. See [WIDESCREEN.md](WIDESCREEN.md) |
+| `widescreen` | `off`, or `W:H` at least 4:3 (`16:9`, `21:9`, ...) | `off` | honoured; same as `--widescreen`. Wider 3D view (GTE hack) shown at W:H; 2D-only and FMV frames stay 4:3; dialogue boxes, text and portraits over 3D keep 4:3 proportions. See [WIDESCREEN.md](WIDESCREEN.md) |
 
 ### audio
 

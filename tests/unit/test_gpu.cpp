@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <initializer_list>
 #include "rendering/ps1_gpu.h"
+#include "rendering/widescreen_2d.h"
 
 using personarm::Ps1Gpu;
 
@@ -290,7 +291,67 @@ static void TestGp1ResetKeepsVram() {
     CHECK_EQ("power-on vram", gpu.ReadVram(960, 256), 0);
 }
 
+// Widescreen 16:9 (squeeze 3/4), drawing area x 0..319 (centre 160). A primitive with 2+ GTE vertices is
+// 3D and drawn as sent; 2D before the frame's first 3D (background) and full-width 2D too. Textured 2D
+// right after 3D (a scene sprite) is squeezed around its own centre, other 2D (HUD) toward x=160.
+static void TestWidescreen2D() {
+    using personarm::Widescreen2D;
+    Widescreen2D ws(3, 4);
+    CHECK_EQ("ws 2D-only screen", ws.Wide(), 0);
+    ws.NoteProjected(XY(10, 10));
+    ws.NoteProjected(XY(50, 10));
+    CHECK_EQ("ws wide", ws.Wide(), 1);
+    CHECK_EQ("ws projected", ws.Projected(XY(10, 10)), 1);
+    CHECK_EQ("ws other xy", ws.Projected(XY(11, 10)), 0);
+    CHECK_EQ("ws -1 (11-bit)", ws.Projected(XY(-1, 0)), 0);
+    ws.NoteProjected(XY(-1, 0));
+    CHECK_EQ("ws -1 matches 7FF", ws.Projected(0x000007FF), 1);
+
+    Ps1Gpu gpu;
+    gpu.SetWidescreen2D(&ws);
+    Send(gpu, {0x02FFFFFF, XY(640, 0), XY(64, 64)});  // white 15-bit texture at (640,0)
+    Send(gpu, {0xE100010A, 0xE3000000, 0xE4000000 | 319 | (239 << 10), 0xE5000000});
+    Send(gpu, {0x60FFFFFF, XY(0, 0), XY(40, 1)});     // background (no 3D yet): x 0..39 as sent
+    CHECK_EQ("background rect", CountSet(gpu, 0, 0, 320, 1), 40);
+    Send(gpu, {0x200000FF, XY(10, 10), XY(50, 10), XY(10, 50)});  // 3D, unchanged
+    CHECK_EQ("3D tri", gpu.ReadVram(10, 10) != 0 && gpu.ReadVram(48, 11) != 0, 1);
+    // Scene sprite right after it: textured x 100..140 around its centre 120 -> 105..135; a touching
+    // second part (140..160) keeps the same centre -> 135..150.
+    Send(gpu, {0x25000000, XY(100, 100), 0, XY(140, 100), 0x010A0000, XY(100, 140), 0});
+    CHECK_EQ("sprite", gpu.ReadVram(104, 101) == 0 && gpu.ReadVram(105, 101) != 0 && gpu.ReadVram(133, 100) != 0, 1);
+    CHECK_EQ("sprite right", gpu.ReadVram(135, 100), 0);
+    Send(gpu, {0x65000000, XY(140, 150), 0, XY(20, 1)});
+    CHECK_EQ("sprite part", CountSet(gpu, 0, 150, 320, 1), 15);
+    CHECK_EQ("sprite part left", gpu.ReadVram(135, 150) != 0 && gpu.ReadVram(134, 150) == 0, 1);
+    // An untextured primitive ends the scene run: HUD line 0..40 -> 40..70
+    Send(gpu, {0x40FFFFFF, XY(0, 220), XY(40, 220)});
+    CHECK_EQ("HUD line", gpu.ReadVram(39, 220) == 0 && gpu.ReadVram(40, 220) != 0 && gpu.ReadVram(70, 220) != 0, 1);
+    Send(gpu, {0x65000000, XY(0, 2), 0, XY(40, 1)});   // textured HUD rect 0..39 -> 40..69
+    CHECK_EQ("HUD rect", CountSet(gpu, 0, 2, 320, 1), 30);
+    CHECK_EQ("HUD rect left", gpu.ReadVram(40, 2) != 0 && gpu.ReadVram(39, 2) == 0, 1);
+    Send(gpu, {0x60FFFFFF, XY(0, 1), XY(320, 1)});    // full width (fade), unchanged
+    CHECK_EQ("full-width rect", CountSet(gpu, 0, 1, 320, 1), 320);
+    Send(gpu, {0x200000FF, XY(10, 60), XY(50, 10), XY(10, 100)});  // one GTE vertex only: chance, HUD
+    CHECK_EQ("1-match tri", gpu.ReadVram(10, 61) == 0 && gpu.ReadVram(50, 61) != 0, 1);
+
+    // Textured HUD rect 4 -> 3 px: nearest texture columns 0, 1, 2 (x 157..159).
+    for (int i = 0; i < 4; ++i) gpu.WriteVram(640 + i, 0, static_cast<uint16_t>(i + 1));
+    Send(gpu, {0xE100010A, 0x65000000, XY(156, 200), 0, XY(4, 1)});
+    CHECK_EQ("tex rect 0", gpu.ReadVram(157, 200), 1);
+    CHECK_EQ("tex rect 1", gpu.ReadVram(158, 200), 2);
+    CHECK_EQ("tex rect 2", gpu.ReadVram(159, 200), 3);
+    CHECK_EQ("tex rect end", gpu.ReadVram(160, 200), 0);
+
+    Send(gpu, {0xE5000000, 0x60FFFFFF, XY(0, 3), XY(40, 1)});  // new drawing env: background again
+    CHECK_EQ("next frame background", CountSet(gpu, 0, 3, 320, 1), 40);
+    for (int i = 0; i <= Widescreen2D::kKeepFrames; ++i) ws.NextFrame();
+    CHECK_EQ("ws stale", ws.Projected(XY(10, 10)), 0);
+    for (int i = 0; i < 30; ++i) ws.NextFrame();
+    CHECK_EQ("ws back to 4:3", ws.Wide(), 0);
+}
+
 int main() {
+    TestWidescreen2D();
     TestFillRule();
     TestGouraud();
     TestTextures();

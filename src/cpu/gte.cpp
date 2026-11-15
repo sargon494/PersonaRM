@@ -1,4 +1,5 @@
 #include "cpu/gte.h"
+#include "rendering/widescreen_2d.h"
 #include <algorithm>
 
 namespace personarm {
@@ -320,6 +321,7 @@ void Gte::Rtp(int n, bool last) {
     const int64_t sx = SetMac0(px + static_cast<int32_t>(m_ctrl[24]));
     const int64_t sy = SetMac0(q * IR(2) + static_cast<int32_t>(m_ctrl[25]));
     PushSxy(sx >> 16, sy >> 16);
+    if (m_tracker) m_tracker->NoteProjected(m_data[14]);
     if (last) {
         const int64_t dq = SetMac0(q * static_cast<int16_t>(m_ctrl[27]) + static_cast<int32_t>(m_ctrl[28]));
         int64_t ir0 = dq >> 12;

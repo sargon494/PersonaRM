@@ -1,6 +1,7 @@
 #include "rendering/ps1_gpu.h"
 #include "core/logger.h"
 #include "rendering/vram_texture_hook.h"
+#include "rendering/widescreen_2d.h"
 #include <cstring>
 #include <algorithm>
 #include <cstdlib>
@@ -309,6 +310,7 @@ void Ps1Gpu::WriteGP0(uint32_t word) {
             return;
         }
         Vertex next = ParseVertex(word, m_polyline_pending_color);
+        if (m_polyline_cx != Widescreen2D::kNone) next.x = m_ws2d->Squeeze(next.x, m_polyline_cx);
         DrawLine(m_polyline_last, next, m_polyline_gouraud, m_polyline_semi);
         m_polyline_last = next;
         m_polyline_have_color = false;
@@ -340,6 +342,7 @@ void Ps1Gpu::ExecuteGP0Command() {
     uint8_t cmd = (w0 >> 24) & 0xFF;
     if (m_cmd_log && !(cmd >= 0xA0 && cmd <= 0xDF)) LogWords(m_gp0_packet.data(), m_gp0_packet.size());
 
+    if (m_ws2d && (cmd < 0x20 || cmd > 0x7F)) m_ws2d->OtherCommand(cmd >= 0xE3 && cmd <= 0xE5);
     if (cmd >= 0x20 && cmd <= 0x3F) { DrawPolygon(cmd); return; }
     if (cmd >= 0x40 && cmd <= 0x5F) { DrawLineCommand(cmd); return; }
     if (cmd >= 0x60 && cmd <= 0x7F) { DrawRectangle(cmd); return; }
@@ -541,10 +544,12 @@ void Ps1Gpu::DrawPolygon(uint8_t cmd) {
 
     const int n = quad ? 4 : 3;
     Vertex v[4];
+    uint32_t xyw[4];
     size_t idx = 1;
     uint32_t color = m_gp0_packet[0];
     for (int i = 0; i < n; ++i) {
         if (gouraud && i > 0) color = m_gp0_packet[idx++];
+        xyw[i] = m_gp0_packet[idx];
         v[i] = ParseVertex(m_gp0_packet[idx++], color);
         if (f.textured) {
             uint32_t uvw = m_gp0_packet[idx++];
@@ -561,6 +566,12 @@ void Ps1Gpu::DrawPolygon(uint8_t cmd) {
     // psx-spx "GPU Rendering Attributes" (E1h bit 9): dithering applies to gouraud-shaded
     // and texture-blended (modulated) primitives only.
     f.dither = ((m_texpage >> 9) & 1) && (gouraud || (f.textured && !f.raw));
+    if (m_ws2d && m_ws2d->Wide()) {
+        int32_t x[4];
+        for (int i = 0; i < n; ++i) x[i] = v[i].x;
+        if (m_ws2d->Squeeze2D(xyw, x, n, m_drawing.x1, m_drawing.x2, f.textured) != Widescreen2D::kNone)
+            for (int i = 0; i < n; ++i) v[i].x = x[i];
+    }
 
     // psx-spx "GPU Render Polygon Commands": a quad is drawn as triangles (v0,v1,v2) and (v1,v2,v3).
     // Scaled pass first so that it samples the same VRAM the 1x pass starts from.
@@ -642,7 +653,14 @@ void Ps1Gpu::DrawLineCommand(uint8_t cmd) {
     const bool semi = (cmd & 0x02) != 0;
     const uint32_t c0 = m_gp0_packet[0];
     Vertex a = ParseVertex(m_gp0_packet[1], c0);
-    Vertex b = gouraud ? ParseVertex(m_gp0_packet[3], m_gp0_packet[2]) : ParseVertex(m_gp0_packet[2], c0);
+    const uint32_t xy[2] = {m_gp0_packet[1], m_gp0_packet[gouraud ? 3 : 2]};
+    Vertex b = ParseVertex(xy[1], gouraud ? m_gp0_packet[2] : c0);
+    m_polyline_cx = Widescreen2D::kNone;
+    if (m_ws2d && m_ws2d->Wide()) {
+        int32_t x[2] = {a.x, b.x};
+        m_polyline_cx = m_ws2d->Squeeze2D(xy, x, 2, m_drawing.x1, m_drawing.x2, false);
+        if (m_polyline_cx != Widescreen2D::kNone) a.x = x[0], b.x = x[1];
+    }
     DrawLine(a, b, gouraud, semi);
 
     if (cmd & 0x08) { // polyline: keep streaming vertices until the terminator
@@ -718,6 +736,12 @@ void Ps1Gpu::DrawRectangle(uint8_t cmd) {
         case 2: w = h = 8; break;
         case 3: w = h = 16; break;
     }
+    // Widescreen 2D squeeze: draw dw pixels wide, sampling the w-wide texture by nearest neighbour.
+    int32_t dw = w;
+    if (m_ws2d && m_ws2d->Wide()) {
+        int32_t x[2] = {o.x, o.x + w};
+        if (m_ws2d->Squeeze2D(nullptr, x, 2, m_drawing.x1, m_drawing.x2, f.textured) != Widescreen2D::kNone) o.x = x[0], dw = std::max(1, x[1] - x[0]);
+    }
     // E1h bits 12/13: textured rectangle X/Y flip. unverified: flipped texcoords simply decrement from u0/v0.
     const bool flip_x = (m_texpage >> 12) & 1, flip_y = (m_texpage >> 13) & 1;
     auto draw = [&](const Target& t) {  // target units; a flipped UV keeps texel u0 for the first s pixels
@@ -726,10 +750,11 @@ void Ps1Gpu::DrawRectangle(uint8_t cmd) {
         for (int32_t dy = 0; dy < h * s; ++dy) {
             int32_t y = o.y * s + dy;
             if (y < m_drawing.y1 * s || y > m_drawing.y2 * s + s - 1) continue;
-            for (int32_t dx = 0; dx < w * s; ++dx) {
+            for (int32_t dx = 0; dx < dw * s; ++dx) {
                 int32_t x = o.x * s + dx;
                 if (x < m_drawing.x1 * s || x > m_drawing.x2 * s + s - 1) continue;
-                int32_t u = flip_x ? us - dx * k : us + dx * k;
+                const int32_t tx = dw == w ? dx : dx * w / dw;  // texture column
+                int32_t u = flip_x ? us - tx * k : us + tx * k;
                 int32_t v = flip_y ? vs - dy * k : vs + dy * k;
                 PlotPixel(t, x, y, o.r, o.g, o.b, u, v, f);
             }

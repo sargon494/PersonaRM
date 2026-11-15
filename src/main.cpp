@@ -894,7 +894,7 @@ static int RunBootHarness(const std::string& disc_path, const BootOptions& opt) 
     if (!opt.mods.empty()) engine.SetGamePatches(personarm::InstallFileMods(engine, file_redirect, opt.mods));
     engine.SetPadScript(opt.presses);
     if (opt.widescreen_w * 3 != opt.widescreen_h * 4)
-        engine.GetCpu().GetGTE().SetWidescreen(4 * opt.widescreen_h, 3 * opt.widescreen_w);
+        engine.SetWidescreen(4 * opt.widescreen_h, 3 * opt.widescreen_w);
     std::array<personarm::MemoryCard, 2> cards;
     for (int slot = 0; slot < 2; ++slot) {
         if (opt.memcard[slot].empty()) continue;
