@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 
 namespace personarm::host {
 
@@ -135,6 +136,7 @@ bool ParseHostArgs(int argc, const char* const* argv, HostOptions& o) {
             if (is("--frames")) o.max_frames = std::strtoull(v, nullptr, 10);
             else if (is("--screenshot")) o.screenshot = v;
             else if (is("--input-script")) o.input_script = v;
+            else if (is("--record-input")) o.record_input = v;
             else if (is("--interp")) o.interp_hz = std::atoi(v), o.interp_given = true;
             else if (is("--settings")) o.settings_path = v;
             else if (is("--window-mode")) {
@@ -166,6 +168,33 @@ bool ParseHostArgs(int argc, const char* const* argv, HostOptions& o) {
     }
     return !o.disc.empty() && o.interp_hz >= 0 && o.interp_hz % 60 == 0 && o.recomp_quantum > 0 &&
            o.resolution_scale >= 1 && o.resolution_scale <= 4 && !(o.interp_hz && o.resolution_scale > 1);
+}
+
+namespace {
+const char* const kButtonNames[16] = {"select", "l3", "r3", "start", "up", "right", "down", "left",
+                                      "l2", "r2", "l1", "r1", "triangle", "circle", "cross", "square"};  // = Engine::ParsePadPress
+}
+
+void InputRecorder::Frame(uint64_t frame, uint16_t mask) {
+    for (int b = 0; b < 16; ++b) {
+        const uint16_t bit = uint16_t(1u << b);
+        if ((mask & bit) && !(held_ & bit)) start_[b] = frame;
+        else if (!(mask & bit) && (held_ & bit)) done_.push_back({start_[b], frame - start_[b], b});
+    }
+    held_ = mask;
+}
+
+std::string InputRecorder::Script(uint64_t end_frame) const {
+    std::vector<Press> all = done_;
+    for (int b = 0; b < 16; ++b)
+        if ((held_ >> b) & 1u) all.push_back({start_[b], end_frame - start_[b], b});
+    std::stable_sort(all.begin(), all.end(), [](const Press& a, const Press& c) {
+        return a.frame != c.frame ? a.frame < c.frame : a.bit < c.bit;
+    });
+    std::string out;
+    for (const Press& p : all)
+        out += std::to_string(p.frame) + " " + kButtonNames[p.bit] + " " + std::to_string(std::max<uint64_t>(p.hold, 1)) + "\n";
+    return out;
 }
 
 } // namespace personarm::host
