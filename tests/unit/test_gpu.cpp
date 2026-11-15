@@ -278,6 +278,18 @@ static void TestGpuRead() {
     CHECK_EQ("info type", gpu.ReadGP0(), 2);
 }
 
+// psx-spx GP1(00h): the GPU reset clears registers, not VRAM (P2 JP's ResetGraph(0) after its system
+// texture upload left the menu cursor with no texture when the reset wiped VRAM).
+static void TestGp1ResetKeepsVram() {
+    Ps1Gpu gpu;
+    Send(gpu, {0xA0000000, XY(960, 256), XY(2, 1), 0x22221111, 0xE1000123});
+    gpu.WriteGP1(0x00000000);
+    CHECK_EQ("gp1 reset vram", gpu.ReadVram(960, 256), 0x1111);
+    CHECK_EQ("gp1 reset E1", gpu.ReadGPUSTAT() & 0x7FF, 0);
+    gpu.Reset();
+    CHECK_EQ("power-on vram", gpu.ReadVram(960, 256), 0);
+}
+
 int main() {
     TestFillRule();
     TestGouraud();
@@ -287,6 +299,7 @@ int main() {
     TestLines();
     TestSprites();
     TestGpuRead();
+    TestGp1ResetKeepsVram();
     std::printf("GPU rasterizer: %d/%d checks passed\n", g_checks - g_failures, g_checks);
     return g_failures == 0 ? 0 : 1;
 }

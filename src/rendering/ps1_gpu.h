@@ -53,7 +53,8 @@ public:
     Ps1Gpu();
     ~Ps1Gpu() = default;
 
-    void Reset();
+    void Reset();          // power-on: clears VRAM too
+    void ResetRegisters(); // GP1(00h): keeps VRAM
 
     // Hardware Register Access (0x1F801810 / 0x1F801814)
     void WriteGP0(uint32_t word);
