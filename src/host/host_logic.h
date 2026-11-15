@@ -44,7 +44,8 @@ struct HostOptions {
     std::string memcard[2];         // --memcard1/2: raw .mcd per slot, empty = no card
     uint64_t max_frames = 0, dump_from = 0, dump_to = 0;
     int interp_hz = 0;
-    uint32_t resolution_scale = 1;  // --resolution-scale 1-4 (display-only internal resolution)
+    uint32_t resolution_scale = 1;  // --resolution-scale 1-4 (display-only internal resolution); gpu: 1-9 or auto (0)
+    std::string renderer = "software";  // --renderer software|gpu (docs/GPU_RENDERER.md)
     bool recomp = false;            // --recomp: run the recompiled code linked into this build
     uint32_t recomp_quantum = 1;    // --recomp-quantum
     // Settings file (src/host/settings.h): "unset" = empty / 0 / -1, so the file's value stays.
@@ -59,7 +60,7 @@ struct HostOptions {
     bool stats = false, unthrottled = false, hidden = false;
 };
 /// False on an unknown option, a missing value, no disc, --interp not a multiple of 60, a resolution scale
-/// outside 1-4, or --interp with a resolution scale above 1 (the interpolator replays at 1x only).
+/// outside 1-4 (--renderer gpu: 1-9 or auto), or --interp with a resolution scale above 1 (the interpolator replays at 1x only).
 bool ParseHostArgs(int argc, const char* const* argv, HostOptions& out);
 
 } // namespace personarm::host
