@@ -115,8 +115,28 @@ with --interp" restriction and makes 4x@120 a GPU job. Not implemented yet; `--i
 CPU: the 1x rasterizer (unchanged) plus packet parsing (microseconds per frame). GPU: a few hundred draw
 calls per field frame; fill rate is trivial at 4x. The prototype reads every picture back to the CPU
 (fence wait + copy, feeding the existing `SDL_Renderer` streaming texture, `--screenshot`, `--dump-dir`):
-that stall is most of its present time. Measured numbers: see the PR / `--stats` (`frame_ms` = emulation
-incl. CPU raster, `gpu_ms` = submit + wait + readback).
+that stall is most of its present time.
+
+Measured on the developer machine (Windows 11, D3D12), `docs/examples/disc1_new_game_to_field.txt`,
+`--unthrottled --stats`, averages over the second before the frame. `frame_ms` = emulation including the
+CPU raster, `gpu_ms` = submit + wait + readback; total = both.
+
+| | field f18900 | dialogue f10020 |
+|---|---|---|
+| software 1x | 6.4 | 6.6 |
+| software 2x | 17.5 | 23.4 |
+| software 4x | 36.6 | 40.7 |
+| gpu 1x | 6.5 + 1.4 = 7.9 | 6.5 + 1.5 = 8.0 |
+| gpu 2x | 6.5 + 1.7 = 8.2 | 6.5 + 1.7 = 8.2 |
+| gpu 4x | 6.6 + 1.8 = 8.4 | 7.2 + 1.6 = 8.8 |
+| gpu 9x (2880×2160) | 6.6 + 5.8 = 12.4 | 7.7 + 5.7 = 13.4 |
+
+About 600 draw calls per field picture. At 9x the 25 MB readback dominates; the zero-copy present
+(Next steps, 1) removes it.
+
+Accuracy: the 4x GPU and 4x software pictures of f18900 differ in 0.83% of the pixels, 0.18% by more
+than one 5-bit step: single-pixel polygon edges (float vs integer edge functions), and the B/2+F/2
+rounding on the semi-transparent exit arrow. The title screen (f1000) is identical.
 
 ## Next steps
 
