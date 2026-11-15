@@ -89,6 +89,17 @@ int main() {
     CHECK(!ParseHostArgs(2, nodisc, o));
     const char* interp[] = {"personarm_sdl", "d.cue", "--interp", "90"};
     CHECK(!ParseHostArgs(4, interp, o));
+    const char* gpu9[] = {"personarm_sdl", "d.cue", "--renderer", "gpu", "--resolution-scale", "9"};
+    CHECK(ParseHostArgs(6, gpu9, o) && o.renderer == "gpu" && o.resolution_scale == 9);
+    const char* gpuauto[] = {"personarm_sdl", "d.cue", "--resolution-scale", "auto", "--renderer", "gpu"};
+    CHECK(ParseHostArgs(6, gpuauto, o) && o.resolution_scale == 0);
+    const char* sw9[] = {"personarm_sdl", "d.cue", "--resolution-scale", "9"};
+    CHECK(!ParseHostArgs(4, sw9, o));
+    const char* swauto[] = {"personarm_sdl", "d.cue", "--resolution-scale", "auto"};
+    CHECK(!ParseHostArgs(4, swauto, o));
+    const char* badr[] = {"personarm_sdl", "d.cue", "--renderer", "vulkan"};
+    CHECK(!ParseHostArgs(4, badr, o));
+    CHECK(ParseHostArgs(2, plain, o) && o.renderer == "software");
     const char* two[] = {"personarm_sdl", "d.cue", "e.cue"};
     CHECK(!ParseHostArgs(3, two, o));
 
