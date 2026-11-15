@@ -34,6 +34,13 @@ public:
 
     uint32_t GetFlag() const { return m_ctrl[31]; }
 
+    // Emulator-side widescreen (not hardware; DuckStation's "GTE widescreen hack"): RTPS/RTPT multiply the
+    // projected X offset H/SZ*IR1 by num/den before OFX is added, so a wider view fits the same 320 px
+    // and the host shows it at the wider aspect. 4:3 -> W:H is num/den = 4H/3W (16:9 = 3/4). 1/1 = off.
+    void SetWidescreen(int32_t num, int32_t den) { m_ws_num = num; m_ws_den = den > 0 ? den : 1; }
+    // RTPS/RTPT vectors projected since construction: lets the host tell 3D frames from 2D-only ones.
+    uint64_t ProjectionCount() const { return m_projections; }
+
     // psx-spx "GTE Division Inaccuracy": UNR Newton-Raphson division.
     // Returns min(1FFFFh, H*10000h/SZ3) as the hardware computes it; sets
     // FLAG.17 when H >= SZ3*2. Public for unit tests.
@@ -46,6 +53,8 @@ private:
 
     // Decoded fields of the command being executed.
     int m_shift = 0; // sf*12
+    int32_t m_ws_num = 1, m_ws_den = 1;
+    uint64_t m_projections = 0;
     bool m_lm = false;
 
     // Register field helpers
