@@ -30,6 +30,7 @@ can read and write the same file. Implementation: `src/host/settings.{h,cpp}`.
     "vsync": false,
     "fps_target": 60,
     "resolution_scale": 1,
+    "fast_forward_max": 4,
     "widescreen": "off"
   },
   "audio": { "master_volume": 100, "mute": false },
@@ -61,6 +62,7 @@ as-is, unknown ones preserved) with a warning.
 | `vsync` | bool | false | honoured; ignored while interpolation or `--unthrottled` is on (it would slow the game down) |
 | `fps_target` | `30`, `60`, `90`, `120` | 60 | `60` = native, `120` = frame interpolation (same as `--interp 120`; `--interp N` sets it to N, `--interp 0` to 60). `30` and `90` are valid and stored but not supported yet: they run at 60 with a warning |
 | `resolution_scale` | integer 1..4 | 1 | internal resolution (display only); same as `--resolution-scale`. Ignored (with a warning) when `fps_target` > 60 |
+| `fast_forward_max` | integer 2..16 | 4 | fast-forward speed cap (x real time), see [Save states and fast-forward](#save-states-and-fast-forward) |
 | `widescreen` | `off`, or `W:H` at least 4:3 (`16:9`, `21:9`, ...) | `off` | honoured; same as `--widescreen`. Wider 3D view (GTE hack) shown at W:H; 2D-only and FMV frames stay 4:3. HUD/dialogue drawn over 3D is stretched. See [WIDESCREEN.md](WIDESCREEN.md) |
 
 ### audio
@@ -72,7 +74,7 @@ as-is, unknown ones preserved) with a warning.
 | key | values | default | status |
 |---|---|---|---|
 | `pause_on_focus_loss` | bool | true | honoured: when the game window loses focus, emulation pauses and audio goes silent; both resume on focus. The window is never minimized and never steals focus |
-| `save_dir` | directory path | `""` | honoured: memory card directory. With a recognised disc and no explicit `memcard1`, slot 1 is `<save_dir>/<serial>-1.mcd` (created if missing). Slot 2 and explicit `game.<serial>.memcard1/2` are unaffected / win |
+| `save_dir` | directory path | `""` | honoured: memory card directory. With a recognised disc and no explicit `memcard1`, slot 1 is `<save_dir>/<serial>-1.mcd` (created if missing). Slot 2 and explicit `game.<serial>.memcard1/2` are unaffected / win. Save states go to `<save_dir>/<serial>.state<N>` (settings directory when empty) |
 | `language` | string | `"ja"` | **reserved**: stored only, no effect yet |
 
 ### input
@@ -97,6 +99,40 @@ One object per game, keyed by the disc serial the engine recognises (e.g. `SLPS-
 | `text_speed` | `normal`, `fast`, `instant` | `--text-speed` |
 | `mods` | mods directory | `--mods` |
 | `recomp` | run the recompiled code linked into the build | `--recomp` |
+
+## Save states and fast-forward
+
+Keys in `personarm_sdl` (fixed for now, not in `input`):
+
+| key | action |
+|---|---|
+| F5 | save the whole machine to the current slot |
+| F8 | load the current slot |
+| F6 / F7 | previous / next slot (0-9, starts at 0) |
+| Tab (held), gamepad right-stick click (held) | fast-forward |
+
+- **Files**: `<save_dir>/<serial>.state<N>` (e.g. `SLPS-02785.state0`); with an empty `save_dir`, the
+  settings directory. Written atomically (`.tmp` then rename). The result shows on stderr (`[state] ...`)
+  and in the window title for 3 s.
+- **What a state holds**: CPU (registers, delay slots, COP0), GTE, RAM, scratchpad, GPU (VRAM, registers,
+  packet and transfer state), DMA, interrupt controller, timers, CD-ROM (controller, position, pending
+  responses, sector buffers), XA decoder, MDEC, SPU (sound RAM, voices, reverb, queued CD audio), the
+  SIO0 pad/memory-card protocol position, the HLE kernel (open files, card handles, IRQ chain position;
+  its tables live in RAM), lazy device time, gameplay-patch counters and which recompiled modules were
+  live (re-checked against the loaded RAM by their code hash).
+- **What it does not hold**: memory card images. A state never rewrites your `.mcd` saves: loading an
+  old state keeps the cards as they are now (as on real hardware with a card swapped in).
+- **Format**: binary, little-endian: `PRMSTATE`, u32 format version, disc serial, build id (version and
+  git commit), u64 frame, then tagged sections. A state from another disc, another build or another
+  format version is refused with a message and the game keeps running untouched; so is a truncated file.
+  A state loads the same with or without `recomp`. Different mods or `text_speed` than when it was saved:
+  it loads, the current options stay active (warning on stderr).
+- **Fast-forward**: while held, up to `video.fast_forward_max` emulated frames run per 1/60 s (less if the
+  PC is slower), one picture in `fast_forward_max` is shown and the sound is dropped (no pitched or
+  crackling audio). `--unthrottled` is already uncapped.
+- **Scripted (headless)**: `personarm --boot <disc> ... --save-state-at <N> <file>` writes a state at the
+  end of frame N; `--load-state <file>` starts from it and runs to `--max-frames`. With the same input
+  script, the RAM and VRAM at the end are byte-identical to the uninterrupted run (checked on disc 1).
 
 ## Command line
 

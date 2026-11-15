@@ -896,3 +896,79 @@ void Ps1BiosHle::HandlePadInit(CpuContext& cpu) {
 }
 
 } // namespace personarm
+
+#include "core/state_io.h"
+
+namespace personarm {
+void Ps1BiosHle::Serialize(StateIO& io) {
+    io.Tag("BIOS");
+    // A card pointer is stored as its slot (-1 = none); the cards themselves stay the host's.
+    auto card = [&](MemoryCard*& c) {
+        int32_t slot = c == m_cards[0] && c ? 0 : c == m_cards[1] && c ? 1 : -1;
+        io(slot);
+        if (io.Loading()) c = slot == 0 || slot == 1 ? m_cards[slot] : nullptr;
+    };
+    io(m_intercept_count, m_next_fd, m_in_irq, m_irq_bits);
+    uint64_t base = m_irq_frame_base;
+    io(base);
+    m_irq_frame_base = size_t(base);
+    uint64_t n = m_frames.size();
+    io(n);
+    if (io.Loading()) {
+        if (n > io.Remaining()) { io.Fail(); return; }
+        m_frames.assign(size_t(n), Frame{});
+    }
+    for (Frame& f : m_frames) {
+        uint64_t idx = f.idx;
+        io(f.irq_walk, f.prio, f.next, f.func2, f.stage, f.visited, idx, f.ret_pc, f.ret_v0);
+        f.idx = size_t(idx);
+        io.Seq(f.funcs);
+    }
+    n = m_open_files.size();
+    io(n);
+    if (io.Loading()) {
+        m_open_files.clear();
+        if (n > io.Remaining()) { io.Fail(); return; }
+        for (uint64_t i = 0; i < n && io.Ok(); ++i) {
+            int32_t fd = 0;
+            uint64_t pos = 0;
+            io(fd, pos);
+            OpenFile& f = m_open_files[fd];
+            io.Seq(f.data);
+            f.pos = size_t(pos);
+        }
+    } else {
+        for (auto& [fd, f] : m_open_files) {
+            int32_t k = fd;
+            uint64_t pos = f.pos;
+            io(k, pos);
+            io.Seq(f.data);
+        }
+    }
+    n = m_card_files.size();
+    io(n);
+    if (io.Loading()) {
+        m_card_files.clear();
+        if (n > io.Remaining()) { io.Fail(); return; }
+        for (uint64_t i = 0; i < n && io.Ok(); ++i) {
+            int32_t fd = 0;
+            io(fd);
+            CardFile& f = m_card_files[fd];
+            card(f.card);
+            io.Seq(f.blocks);
+            io(f.pos, f.async);
+        }
+    } else {
+        for (auto& [fd, f] : m_card_files) {
+            int32_t k = fd;
+            io(k);
+            card(f.card);
+            io.Seq(f.blocks);
+            io(f.pos, f.async);
+        }
+    }
+    card(m_find.card);
+    io.Seq(m_find.pattern);
+    io(m_find.next);
+}
+} // namespace personarm

@@ -9,6 +9,8 @@
 
 namespace personarm {
 
+class StateIO;
+
 // ───────────────────────────────────────────────────────────────────────────
 // MIPS R3000A CPU State (PlayStation 1 Architecture)
 // ───────────────────────────────────────────────────────────────────────────
@@ -73,6 +75,9 @@ public:
     void SetPendingLoad(uint32_t reg, uint32_t value) { m_load_delay_reg = reg; m_load_delay_val = value; }
     uint32_t GetBadVaddr() const { return m_cp0_badvaddr; }
     void SetBadVaddr(uint32_t v) { m_cp0_badvaddr = v; }
+
+    /// Save state: registers, pipeline (delay slots), COP0, GTE, cycle counter.
+    void Serialize(StateIO& io);
 
     // Coprocessor 2 (GTE) Access
     Gte& GetGTE() { return m_gte; }

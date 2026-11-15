@@ -13,6 +13,7 @@ namespace personarm {
 
 class DiscReader;
 class MemoryCard;
+class StateIO;
 namespace trace { class ITraceSink; }
 
 enum class BiosVector : uint32_t {
@@ -68,6 +69,9 @@ public:
     void SetTraceSink(trace::ITraceSink* sink) { m_trace = sink; }
 
     /// Get total calls intercepted since boot
+    /// Save state: open files, card file handles, guest-call frames, IRQ nesting (kernel tables live in RAM).
+    void Serialize(StateIO& io);
+
     uint64_t GetInterceptedCallCount() const { return m_intercept_count; }
     /// Unimplemented calls seen so far, as (vector << 8) | function (e.g. 0xB04A).
     const std::set<uint32_t>& GetUnimplementedCalls() const { return m_logged_unimpl; }

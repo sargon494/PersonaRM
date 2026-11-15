@@ -177,3 +177,19 @@ void Mdec::PushBytes(const uint8_t* b, size_t n, uint32_t blocks) {
 }
 
 } // namespace personarm::hw
+
+#include "core/state_io.h"
+
+namespace personarm::hw {
+void Mdec::Serialize(StateIO& io) {
+    io.Tag("MDEC");
+    io(m_cmd, m_left, m_count_field, m_last_word, m_en_in, m_en_out, m_param_index, m_qt_y, m_qt_uv, m_scale,
+       m_dec, m_block, m_blocks);
+    io.Seq(m_out);
+    uint64_t ready = m_ready;
+    io(ready);
+    m_ready = size_t(ready);
+    io.Seq(m_pending);
+    if (io.Loading() && m_ready > m_out.size()) io.Fail();
+}
+} // namespace personarm::hw

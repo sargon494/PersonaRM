@@ -16,6 +16,8 @@
 #include <cstdint>
 #include <functional>
 
+namespace personarm { class StateIO; }
+
 namespace personarm::hw {
 
 /// Word access to main RAM for DMA. Addresses are physical and word-aligned.
@@ -70,6 +72,8 @@ public:
 
     /// DICR bit 31 (the IRQ3 line).
     bool IrqLine() const { return (m_dicr >> 31) != 0; }
+    /// Save state: channel registers and pending completions (ports are wiring, not state).
+    void Serialize(StateIO& io);
     bool Busy(int channel) const { return (m_ch[channel].chcr >> 24) & 1; }
 
 private:

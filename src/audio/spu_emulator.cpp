@@ -374,3 +374,17 @@ void SpuEmulator::MixFrame(int16_t& out_l, int16_t& out_r) {
 }
 
 } // namespace personarm
+
+#include "core/state_io.h"
+
+namespace personarm {
+void SpuEmulator::Serialize(StateIO& io) {
+    io.Tag("SPU ");
+    io.Seq(m_spu_ram);
+    if (io.Loading() && m_spu_ram.size() != SPU_RAM_SIZE) { io.Fail(); m_spu_ram.resize(SPU_RAM_SIZE); }
+    io(m_voices, m_glob, m_main_l, m_main_r, m_endx, m_transfer_addr, m_spucnt, m_rev_cur, m_rev_phase,
+       m_rev_out_l, m_rev_out_r, m_cycle_acc);
+    io.Seq(m_cd_fifo);
+    if (io.Loading()) m_out.clear();  // output of the session we leave
+}
+} // namespace personarm

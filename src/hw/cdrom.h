@@ -20,6 +20,7 @@
 
 namespace personarm {
 class DiscReader;
+class StateIO;
 }
 
 namespace personarm::hw {
@@ -79,6 +80,8 @@ public:
     bool IrqPending() const { return (m_irq_flags & m_irq_enable & 0x1F) != 0; }
     uint8_t Stat() const;
     uint8_t Mode() const { return m_mode; }
+    /// Save state: registers, queues, pending events, read position, sector buffers.
+    void Serialize(StateIO& io);
     uint32_t DataBytesRemaining() const { return static_cast<uint32_t>(m_data.size() - m_data_pos); }
 
 private:

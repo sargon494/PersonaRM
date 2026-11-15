@@ -9,6 +9,7 @@
 namespace personarm {
 
 class VramTextureHook;
+class StateIO;
 class Ps1Gpu;
 
 /// Display-only listener for a host GPU renderer (rendering/gpu_renderer.h). Never changes emulation.
@@ -118,6 +119,8 @@ public:
     uint32_t GetResolutionScale() const { return m_scale; }
     /// The scaled VRAM, row stride 1024*scale; empty at scale 1.
     const std::vector<uint16_t>& GetScaledVram() const { return m_vram_hi; }
+    /// Save state: VRAM, registers, packet/transfer state (the scaled mirror is rebuilt on load).
+    void Serialize(StateIO& io);
 
     /// Host GPU renderer listener; null = off (default).
     void SetDrawListener(GpuDrawListener* l) { m_listener = l; }

@@ -322,3 +322,31 @@ void CdRom::Tick(uint32_t cycles) {
 }
 
 } // namespace personarm::hw
+
+#include "core/state_io.h"
+
+namespace personarm::hw {
+void CdRom::Serialize(StateIO& io) {
+    io.Tag("CDRM");
+    io(m_index, m_irq_enable, m_irq_flags);
+    io.Seq(m_params);
+    io.Seq(m_response);
+    io.Seq(m_data);
+    uint64_t pos = m_data_pos;
+    io(pos);
+    m_data_pos = size_t(pos);
+    uint64_t n = m_events.size();
+    io(n);
+    if (io.Loading()) {
+        if (n > io.Remaining()) { io.Fail(); return; }
+        m_events.resize(size_t(n));
+    }
+    for (Event& e : m_events) {
+        io(e.delay, e.irq);
+        io.Seq(e.response);
+    }
+    io(m_busy, m_mode, m_filter_file, m_filter_channel, m_muted, m_motor_on, m_reading, m_setloc_pending,
+       m_setloc_lba, m_read_lba, m_sector_timer, m_sector_waiting, m_sector, m_delivered);
+    if (io.Loading() && m_data_pos > m_data.size()) io.Fail();
+}
+} // namespace personarm::hw

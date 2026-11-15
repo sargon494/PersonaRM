@@ -109,6 +109,7 @@ Settings ParseSettings(const std::string& text, std::vector<std::string>* w) {
     GetBool(video, "video", "vsync", s.video.vsync, w);
     GetInt(video, "video", "resolution_scale", 1, 4, s.video.resolution_scale, w);
     GetInt(video, "video", "fps_target", 30, 120, s.video.fps_target, w);
+    GetInt(video, "video", "fast_forward_max", 2, 16, s.video.fast_forward_max, w);
     GetString(video, "video", "widescreen", s.video.widescreen, w);
     if (int aw, ah; !ParseWidescreen(s.video.widescreen, aw, ah)) {
         Warn(w, "video.widescreen: expected off or W:H at least 4:3 (16:9, 21:9), using off");
@@ -166,6 +167,7 @@ std::string DumpSettings(const Settings& s) {
     v.Set("vsync", s.video.vsync);
     v.Set("fps_target", s.video.fps_target);
     v.Set("resolution_scale", s.video.resolution_scale);
+    v.Set("fast_forward_max", s.video.fast_forward_max);
     v.Set("widescreen", s.video.widescreen);
     doc.Set("video", v);
     JsonValue a = Sub(doc, "audio");
