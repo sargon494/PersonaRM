@@ -110,6 +110,11 @@ Settings ParseSettings(const std::string& text, std::vector<std::string>* w) {
     GetInt(video, "video", "resolution_scale", 1, 4, s.video.resolution_scale, w);
     GetInt(video, "video", "fps_target", 30, 120, s.video.fps_target, w);
     GetInt(video, "video", "fast_forward_max", 2, 16, s.video.fast_forward_max, w);
+    GetString(video, "video", "widescreen", s.video.widescreen, w);
+    if (int aw, ah; !ParseWidescreen(s.video.widescreen, aw, ah)) {
+        Warn(w, "video.widescreen: expected off or W:H at least 4:3 (16:9, 21:9), using off");
+        s.video.widescreen = "off";
+    }
     if (s.video.fps_target != 30 && s.video.fps_target != 60 && s.video.fps_target != 90 && s.video.fps_target != 120) {
         Warn(w, "video.fps_target: expected 30, 60, 90 or 120, using 60");
         s.video.fps_target = 60;
@@ -163,6 +168,7 @@ std::string DumpSettings(const Settings& s) {
     v.Set("fps_target", s.video.fps_target);
     v.Set("resolution_scale", s.video.resolution_scale);
     v.Set("fast_forward_max", s.video.fast_forward_max);
+    v.Set("widescreen", s.video.widescreen);
     doc.Set("video", v);
     JsonValue a = Sub(doc, "audio");
     a.Set("master_volume", s.audio.master_volume);
@@ -216,6 +222,7 @@ Settings ApplyCli(Settings s, const HostOptions& o, const std::string& serial) {
     if (o.window_scale > 0) s.video.window_scale = o.window_scale;
     if (o.interp_given) s.video.fps_target = o.interp_hz ? o.interp_hz : 60;
     if (o.resolution_scale_given) s.video.resolution_scale = int(o.resolution_scale);
+    if (!o.widescreen.empty()) s.video.widescreen = o.widescreen;
     if (o.volume >= 0) s.audio.master_volume = o.volume;
     if (o.mute) s.audio.mute = true;
     GameSettings g = GameFor(s, serial);

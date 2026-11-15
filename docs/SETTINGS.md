@@ -30,7 +30,8 @@ can read and write the same file. Implementation: `src/host/settings.{h,cpp}`.
     "vsync": false,
     "fps_target": 60,
     "resolution_scale": 1,
-    "fast_forward_max": 4
+    "fast_forward_max": 4,
+    "widescreen": "off"
   },
   "audio": { "master_volume": 100, "mute": false },
   "general": { "pause_on_focus_loss": true, "language": "ja", "save_dir": "" },
@@ -62,6 +63,7 @@ as-is, unknown ones preserved) with a warning.
 | `fps_target` | `30`, `60`, `90`, `120` | 60 | `60` = native, `120` = frame interpolation (same as `--interp 120`; `--interp N` sets it to N, `--interp 0` to 60). `30` and `90` are valid and stored but not supported yet: they run at 60 with a warning |
 | `resolution_scale` | integer 1..4 | 1 | internal resolution (display only); same as `--resolution-scale`. Ignored (with a warning) when `fps_target` > 60 |
 | `fast_forward_max` | integer 2..16 | 4 | fast-forward speed cap (x real time), see [Save states and fast-forward](#save-states-and-fast-forward) |
+| `widescreen` | `off`, or `W:H` at least 4:3 (`16:9`, `21:9`, ...) | `off` | honoured; same as `--widescreen`. Wider 3D view (GTE hack) shown at W:H; 2D-only and FMV frames stay 4:3. HUD/dialogue drawn over 3D is stretched. See [WIDESCREEN.md](WIDESCREEN.md) |
 
 ### audio
 
@@ -136,3 +138,14 @@ Keys in `personarm_sdl` (fixed for now, not in `input`):
 
 Existing flags keep working and win over the file. New: `--settings F`, `--save-settings`,
 `--window-mode M`, `--window-scale N`, `--volume N`, `--mute`.
+
+### Recording your play: `--record-input <file>`
+
+`personarm_sdl <disc.cue> --record-input session.txt` writes the pad presses of the session as an
+`--input-script` file (`<frame> <button> <hold>` per line; several buttons may start on the same frame).
+The header comment has the disc serial, the date and the memory cards used. The file is rewritten every
+600 emulated frames and on quit, so a crash loses at most 10 s. Frames spent paused (`pause_on_focus_loss`)
+do not count. It also records the presses of a `--input-script` given at the same time (the effective pad).
+Replay with `personarm --boot <disc.cue> --input-script session.txt --max-frames N` (N is in the header).
+Replay is exact only from the same starting state: same disc, same memory card contents, no mods.
+Recordings can contain your saves' effects: do not commit them.

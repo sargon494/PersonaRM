@@ -24,6 +24,7 @@ struct VideoSettings {
     int fps_target = 60;                   // 30 | 60 | 90 | 120; >60 = --interp, 30/90 not supported yet (= 60)
     int resolution_scale = 1;              // 1..4 internal resolution (display only; not combined with interpolation)
     int fast_forward_max = 4;              // 2..16: fast-forward speed cap (x real time)
+    std::string widescreen = "off";        // off | W:H wider than 4:3 (16:9, 21:9...): GTE widescreen, docs/WIDESCREEN.md
 };
 /// --interp value behind fps_target: a multiple of 60 above 60, else 0 (off).
 inline int InterpHz(const VideoSettings& v) { return v.fps_target > 60 && v.fps_target % 60 == 0 ? v.fps_target : 0; }
