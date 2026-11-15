@@ -1,6 +1,7 @@
 #include "engine/engine.h"
 #include "core/save_manager.h"
 #include "core/logger.h"
+#include "core/state_io.h"
 #include <cstdlib>
 #include <cstring>
 #include <algorithm>
@@ -1137,6 +1138,150 @@ uint16_t Engine::ScriptedButtons() const {
     for (const PadPress& p : m_pad_script)
         if (m_frame_counter >= p.frame && m_frame_counter < p.frame + p.frames) held |= p.mask;
     return held;
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Save states
+// ───────────────────────────────────────────────────────────────────────────
+
+#ifndef PRM_BUILD_ID
+#define PRM_BUILD_ID "dev"
+#endif
+const char* Engine::BuildId() { return PRM_BUILD_ID; }
+
+static constexpr char kStateMagic[8] = {'P', 'R', 'M', 'S', 'T', 'A', 'T', 'E'};
+
+void Engine::SaveState(std::vector<uint8_t>& out) {
+    out.clear();
+    StateIO io(out);
+    char magic[8];
+    std::memcpy(magic, kStateMagic, 8);
+    uint32_t version = kStateVersion;
+    std::string serial = m_trace_disc, build = BuildId();
+    uint64_t frame = m_frame_counter;
+    io.Raw(magic, 8);
+    io(version);
+    io.Seq(serial);
+    io.Seq(build);
+    io(frame);
+    SerializeMachine(io);
+}
+
+bool Engine::LoadState(const std::vector<uint8_t>& in, std::string* err) {
+    auto fail = [&](const std::string& m) { if (err) *err = m; return false; };
+    StateIO io(in.data(), in.size());
+    char magic[8] = {};
+    uint32_t version = 0;
+    std::string serial, build;
+    uint64_t frame = 0;
+    io.Raw(magic, 8);
+    io(version);
+    if (!io.Ok() || std::memcmp(magic, kStateMagic, 8) != 0) return fail("not a PersonaRM save state");
+    if (version != kStateVersion)
+        return fail("state format version " + std::to_string(version) + ", this build reads " + std::to_string(kStateVersion));
+    io.Seq(serial);
+    io.Seq(build);
+    io(frame);
+    if (!io.Ok()) return fail("truncated save state header");
+    if (serial != m_trace_disc)
+        return fail("state is for disc " + (serial.empty() ? std::string("(unrecognized)") : serial) + ", the running disc is " +
+                    (m_trace_disc.empty() ? std::string("(unrecognized)") : m_trace_disc));
+    if (build != BuildId()) return fail("state was made by build " + build + ", this is build " + BuildId());
+    // Load in place; on a bad body put the machine back as it was.
+    std::vector<uint8_t> backup;
+    { StateIO b(backup); SerializeMachine(b); }
+    SerializeMachine(io);
+    if (!io.Ok() || io.Remaining()) {
+        StateIO r(backup.data(), backup.size());
+        SerializeMachine(r);
+        return fail("corrupt or truncated save state");
+    }
+    return true;
+}
+
+void Engine::SerializeMachine(StateIO& io) {
+    io.Tag("ENGN");
+    io.Seq(m_ram);
+    io.Seq(m_scratchpad);
+    if (io.Loading() && (m_ram.size() != PS1_MAIN_RAM_SIZE || m_scratchpad.size() != PS1_SCRATCHPAD_SIZE)) {
+        io.Fail();
+        m_ram.resize(PS1_MAIN_RAM_SIZE);
+        m_scratchpad.resize(PS1_SCRATCHPAD_SIZE);
+    }
+    io(m_frame_counter, m_i_stat, m_i_mask, m_timers);
+    io(m_timer_cycles, m_due, m_next_event, m_lag_at, m_stall_cycles);  // lazy device time
+    io.Tag("SIO0");
+    io(m_joy_step, m_joy_ctrl, m_joy_mode, m_joy_baud, m_joy_ack_low, m_joy_irq, m_joy_ack_timer);
+    io.Seq(m_joy_rx_fifo);
+    for (MemoryCard* c : m_cards) {  // protocol position only, always both slots (fixed size)
+        MemoryCard none;
+        (c ? *c : none).SerializeProtocol(io);
+    }
+    m_cpu.Serialize(io);
+    m_gpu.Serialize(io);
+    m_dma->Serialize(io);
+    m_cdrom->Serialize(io);
+    io.Tag("XA  ");
+    io(m_xa, m_xa_resampler);
+    m_mdec->Serialize(io);
+    m_spu.Serialize(io);
+    m_bios.Serialize(io);
+
+    // Gameplay patches / file mods: counters only, and only onto the same patch set.
+    io.Tag("PTCH");
+    uint64_t fp = 0xCBF29CE484222325ull;
+    for (const GamePatch& g : m_patches) {
+        fp = recomp::Fnv1a64(reinterpret_cast<const uint8_t*>(g.name.data()), g.name.size(), fp);
+        fp = recomp::Fnv1a64(reinterpret_cast<const uint8_t*>(&g.trigger), 4, fp);
+        fp = recomp::Fnv1a64(reinterpret_cast<const uint8_t*>(&g.write.address), 4, fp);
+        fp = recomp::Fnv1a64(g.write.bytes.data(), g.write.bytes.size(), fp);
+    }
+    uint64_t saved_fp = fp;
+    std::vector<uint64_t> applied = m_patch_applied, skipped = m_patch_skipped;
+    io(saved_fp);
+    io.Seq(applied);
+    io.Seq(skipped);
+    if (io.Loading() && io.Ok()) {
+        if (saved_fp == fp) m_patch_applied = applied, m_patch_skipped = skipped;
+        else PRM_LOG_WARN("STATE", "gameplay patches / file mods differ from the state's; the current ones stay active");
+    }
+
+    // Recompiled code: which modules were live. On load each is rehashed against the loaded RAM.
+    io.Tag("RCMP");
+    std::vector<std::pair<std::string, uint64_t>> live;
+    if (!io.Loading())
+        for (const LiveModule& lm : m_mods)
+            if (lm.live) live.push_back({lm.m->name, lm.m->code_hash});
+    uint64_t n = live.size();
+    io(n);
+    if (io.Loading()) {
+        if (n > io.Remaining()) { io.Fail(); return; }
+        live.resize(size_t(n));
+    }
+    for (auto& l : live) {
+        io.Seq(l.first);
+        io(l.second);
+    }
+    io(m_epoch);
+    io.Tag("END ");
+    if (io.Loading() && io.Ok()) RestoreLiveModules(live);
+}
+
+void Engine::RestoreLiveModules(const std::vector<std::pair<std::string, uint64_t>>& live) {
+    if (!m_recomp_on) return;  // interpreter only: the state works the same without modules
+    for (uint32_t i = 0; i < m_mods.size(); ++i) {
+        if (m_mods[i].live) Retire(i);
+        m_mods[i].failed_epoch = ~0ull;
+    }
+    for (const auto& l : live)
+        for (uint32_t i = 0; i < m_mods.size(); ++i) {
+            LiveModule& lm = m_mods[i];
+            if (lm.live || l.first != lm.m->name || l.second != lm.m->code_hash) continue;
+            // The overlay hash guard, as when its code is loaded: only code that is in RAM goes live.
+            if (recomp::CodeHash(*lm.m, m_ram.data() + lm.lo) == lm.m->code_hash) SetLive(i);
+            else PRM_LOG_WARN("STATE", std::string("module ") + lm.m->name + " is not in the loaded RAM; interpreted");
+        }
+    m_code_changed = false;
 }
 
 void Engine::GetCurrentFrame(std::vector<uint32_t>& out_rgba, uint32_t& out_w, uint32_t& out_h) {

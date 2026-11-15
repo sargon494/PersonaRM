@@ -9,6 +9,7 @@
 namespace personarm {
 
 class Engine;
+class StateIO;
 
 // Standard PS1 Memory Card Geometry
 constexpr size_t PS1_MEMCARD_BLOCK_SIZE = 8192;   // 8 KB per block
@@ -68,6 +69,8 @@ public:
     void Select() { m_step = 0; }
     /// One SIO0 byte exchange while selected: `rx` = card reply, returns whether /ACK follows.
     bool Exchange(uint8_t tx, uint8_t& rx);
+    /// Save state: SIO0 protocol position only. The card image stays the file's: a state never rewrites saves.
+    void SerializeProtocol(StateIO& io);
 
 private:
     std::vector<uint8_t> m_data;

@@ -27,8 +27,12 @@ void Usage() {
         "  extract    (--disc <img> [--index N] | --file <F.bin>) --out <dir> [--map glifos.txt] [--us|--jp]\n"
         "             escribe <dir>/<Fnnnn>.tsv por fichero con bancos; imprime recuentos\n"
         "  insert     --file <F.bin> --tsv <Fnnnn.tsv> --out <parcheado.bin> [--map glifos.txt] [--recompress] [--us|--jp]\n"
+        "             [--disc <img> | --exe <SLUS_011.58>] [--strict]\n"
         "             US (SLUS): texto empaquetado 0x1136 (2 bytes ASCII por u16), detectado por fichero; --us/--jp lo fuerzan\n"
-        "  verify     (--disc <img> [--index N] | --file <F.bin>)   ida y vuelta LZ/banco/fichero (solo lectura)\n"
+        "             avisa de lineas mas anchas que la ventana y de paginas con demasiadas lineas (en US el ancho sale del EXE\n"
+        "             de --disc/--exe); --strict convierte los avisos en error y no escribe nada\n"
+        "  verify     (--disc <img> [--index N] | --file <F.bin> [--exe <SLUS_011.58>])   ida y vuelta LZ/banco/fichero y\n"
+        "             maquetacion del texto original (solo lectura)\n"
         "  font-sheet (--disc <img> | --font <F0041.bin>) --out <hoja.bmp> [--first N] [--count N]\n"
         "El mapa de glifos: lineas 'id<TAB>caracter' (id decimal o 0xHEX); semilla ASCII 0x20-0x7E.");
 }
@@ -77,6 +81,20 @@ bool LoadMap(const Args& a, GlyphMap& m) {
 }
 
 uint32_t NewChunkSize(const std::vector<uint8_t>& f, size_t pos) { uint32_t v; std::memcpy(&v, f.data() + pos + 4, 4); return v; }
+
+// US widths come from the user's own boot EXE (--exe, or the boot executable of --disc); without them only lines/page are checked.
+Metrics LoadMetrics(const Args& a, bool us, bool warn = true) {
+    Metrics m = DefaultMetrics(us);
+    if (!us) return m;
+    std::vector<uint8_t> exe;
+    if (a.count("exe")) ReadAll(a.at("exe"), exe);
+    else if (a.count("disc")) { DiscFiles d; if (d.Open(a.at("disc"))) d.Reader().ReadFile(d.Reader().DetectBootExecutable(), exe); }
+    std::string err = "falta --disc/--exe";
+    if (!exe.empty() && UsMetricsFromExe(exe, m, err)) return m;
+    if (warn) std::cerr << "aviso: ancho de linea sin comprobar (" << err << "); solo se comprueban las lineas por pagina\n";
+    m.max_px = 0;
+    return m;
+}
 
 struct Loaded { Bank bank; Messages msgs; };
 bool Load(const std::vector<uint8_t>& file, const BankRef& r, Loaded& l) {
@@ -150,7 +168,9 @@ int CmdInsert(const Args& a) {
     }
     if (a.count("us")) map.packed = true;
     if (a.count("jp")) map.packed = false;
-    std::vector<std::string> errors;
+    const Metrics metrics = LoadMetrics(a, map.packed);
+    const std::string fname = fs::path(a.at("file")).stem().string();
+    std::vector<std::string> errors, layout;
     std::string line;
     for (int ln = 1; std::getline(t, line); ++ln) {
         if (!line.empty() && line.back() == '\r') line.pop_back();
@@ -174,14 +194,18 @@ int CmdInsert(const Args& a) {
         if (text == Render(it->second[id], map)) continue;                       // untouched: keep original codes
         std::vector<std::string> e;
         std::vector<uint16_t> codes;
-        if (Encode(text, map, codes, e)) it->second[id] = std::move(codes);
-        else for (const auto& s : e) errors.push_back(where + "msg " + std::to_string(id) + ": " + s);
+        if (Encode(text, map, codes, e)) {
+            for (auto& w : CheckLayout(codes, metrics, fname + " msg " + std::to_string(id))) layout.push_back(std::move(w));
+            it->second[id] = std::move(codes);
+        } else for (const auto& s : e) errors.push_back(where + "msg " + std::to_string(id) + ": " + s);
     }
     if (!errors.empty()) {
         std::cerr << errors.size() << " errores, no se escribe nada:\n";
         for (const auto& s : errors) std::cerr << "  " << s << "\n";
         return 1;
     }
+    for (const auto& w : layout) std::printf("aviso: %s\n", w.c_str());
+    if (a.count("strict") && !layout.empty()) { std::cerr << layout.size() << " avisos de maquetacion con --strict, no se escribe nada\n"; return 1; }
     std::vector<uint8_t> cur = file;
     const bool force = a.count("recompress") > 0;
     for (auto it = loaded.rbegin(); it != loaded.rend(); ++it) {                 // last chunk first: earlier offsets stay valid
@@ -206,6 +230,11 @@ int CmdInsert(const Args& a) {
 
 int CmdVerify(const Args& a) {
     size_t files = 0, banks = 0, msgs = 0, orphans = 0, bad = 0, fail = 0, comp_orig = 0, comp_new = 0, tried = 0, same_bytes = 0;
+    // layout of the original text (a sanity check of the window limits); US widths need --disc/--exe
+    const Metrics usm = (a.count("exe") || a.count("disc")) ? LoadMetrics(a, true, false) : Metrics{};
+    const Metrics jpm = DefaultMetrics(false);
+    unsigned max_px = 0, max_lines = 0;
+    size_t over = 0;
     auto bad_case = [&](const std::string& n, const BankRef& r, const char* why) {
         ++fail;
         std::printf("FALLO %s %s: %s\n", n.c_str(), Hex(r.pos).c_str(), why);
@@ -233,6 +262,10 @@ int CmdVerify(const Args& a) {
             std::vector<std::vector<uint16_t>> codes, via_text;
             for (const auto& m : l.msgs.list) {
                 codes.push_back(m.codes);
+                const Metrics& mm = map.packed ? usm : jpm;
+                std::map<unsigned, unsigned> per_page;
+                for (const auto& ln : MeasureLines(m.codes, mm)) { max_px = std::max(max_px, ln.px); max_lines = std::max(max_lines, ++per_page[ln.page]); }
+                over += CheckLayout(m.codes, mm, "").size();
                 std::vector<uint16_t> e; std::vector<std::string> er;
                 if (!Encode(Render(m.codes, map), map, e, er) || e != m.codes) bad_case(name, r, "texto ida y vuelta");
             }
@@ -266,6 +299,8 @@ int CmdVerify(const Args& a) {
     std::printf("ficheros=%zu bancos=%zu (chunks LZ probados=%zu) mensajes=%zu huerfanos=%zu refs_malas=%zu\n", files, banks, tried, msgs, orphans, bad);
     std::printf("LZ de los bancos: original %zu B, recomprimido %zu B; ficheros identicos tras recomprimir: %zu/%zu; fallos=%zu\n",
                 comp_orig, comp_new, same_bytes, files, fail);
+    std::printf("maquetacion del texto original: linea mas ancha %u px (limite JP %u / US %u), pagina con mas lineas %u (limite %u), fuera de limite=%zu\n",
+                max_px, jpm.max_px, DefaultMetrics(true).max_px, max_lines, jpm.max_lines, over);
     return rc ? rc : (fail ? 1 : 0);
 }
 

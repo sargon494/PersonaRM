@@ -90,6 +90,25 @@ bool RebuildBank(const Bank& b, const Messages& orig, const std::vector<std::vec
 bool PatchFile(const std::vector<uint8_t>& file, const BankRef& r, const std::vector<uint8_t>& new_dec,
                bool keep_original_if_same, std::vector<uint8_t>& out, std::string& error);
 
+// ── Layout (overflow warnings) ──────────────────────────────────────────
+/// Text-window metrics. JP: every glyph code advances a fixed 12 px. US: `adv[c - 0x20]` px per ASCII char, read at run
+/// time from the user's own boot executable (the game's width table lives there; it is never embedded here).
+struct Metrics {
+    bool us = false;
+    uint8_t adv[96] = {};                // US advance (ink width + 1 px) for 0x20..0x7F
+    unsigned max_px = 0;                 // widest line, from the line origin (leading space included)
+    unsigned max_lines = 0;              // lines per page, speaker-name line included
+};
+/// US widths from a PS-X EXE image (`SLUS_011.58`): 96-byte class index + 16 (left, width) pairs, see TRANSLATION_TOOLS.md.
+bool UsMetricsFromExe(const std::vector<uint8_t>& exe, Metrics& m, std::string& error);
+/// JP/US default window limits (measured on the game's own text window).
+Metrics DefaultMetrics(bool us);
+struct LineWidth { unsigned page = 0, line = 0, px = 0; };    // 1-based page/line within the message
+/// Width of every line (split at <br>/<page>); the message's last line is closed by <end>.
+std::vector<LineWidth> MeasureLines(const std::vector<uint16_t>& codes, const Metrics& m);
+/// One warning per line wider than the window and one per page with too many lines.
+std::vector<std::string> CheckLayout(const std::vector<uint16_t>& codes, const Metrics& m, const std::string& where);
+
 // ── Font preview ────────────────────────────────────────────────────────
 /// 8-bit grayscale BMP sheet of full-width glyphs [first, first+count) from the 1 bpp font
 /// (full-width base +0x480, 18 B/glyph, 12x12, bit 0 = left pixel), 32 per row, scaled x2.

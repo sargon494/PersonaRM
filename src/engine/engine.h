@@ -28,6 +28,7 @@
 namespace personarm {
 
 class MemoryCard;
+class StateIO;
 
 /// A declarative RAM patch applied right after the guest (CPU store, DMA word or HLE copy) writes
 /// the word at `trigger`. Triggering on a store, not on a PC, is what keeps interpreter and
@@ -175,6 +176,20 @@ public:
     void SetScratchpad(const std::vector<uint8_t>& sp) { m_scratchpad = sp; }
     void SetFrameCount(uint64_t count) { m_frame_counter = count; }
 
+    /// Save states (docs/SETTINGS.md "Save states"). Call between frames (never from a hook inside
+    /// RunFrame). The state holds the whole machine: CPU/GTE, RAM, scratchpad, GPU, DMA, IRQ,
+    /// timers, CD-ROM, MDEC, SPU, SIO0 pad/card protocol, HLE kernel state, lazy device time,
+    /// gameplay patch counters and the live recompiled modules. Not in it: memory card images (the
+    /// files stay the player's saves), the pad script and host input, trace/debug hooks.
+    /// Format: "PRMSTATE", u32 version, disc serial, build id, u64 frame, then tagged sections.
+    static constexpr uint32_t kStateVersion = 1;
+    void SaveState(std::vector<uint8_t>& out);
+    /// False with a reason in *err, machine untouched, when the state is not one of ours, another
+    /// format version, another disc, another build, or truncated/corrupt.
+    bool LoadState(const std::vector<uint8_t>& in, std::string* err = nullptr);
+    /// Build id written into states (git commit at configure time; "dev" without git).
+    static const char* BuildId();
+
     /// Input manager accessor
     InputManager& GetInput() { return m_input; }
     const InputManager& GetInput() const { return m_input; }
@@ -242,6 +257,8 @@ private:
     ~Engine();
 
     void SetupMemoryBus();
+    void SerializeMachine(StateIO& io);  // state body, both directions
+    void RestoreLiveModules(const std::vector<std::pair<std::string, uint64_t>>& live);
 
     // Memory read/write dispatchers mapped to MIPS address space
     uint32_t ReadBus(uint32_t address, uint32_t size);

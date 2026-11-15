@@ -145,7 +145,12 @@ bool ParseHostArgs(int argc, const char* const* argv, HostOptions& o) {
             }
             else if (is("--window-scale")) { o.window_scale = std::atoi(v); if (o.window_scale < 1 || o.window_scale > 8) return false; }
             else if (is("--volume")) { o.volume = std::atoi(v); if (o.volume < 0 || o.volume > 100) return false; }
-            else if (is("--resolution-scale")) o.resolution_scale = uint32_t(std::strtoul(v, nullptr, 10)), o.resolution_scale_given = true;
+            else if (is("--resolution-scale"))  // "auto" = 0: from the display height (gpu renderer)
+                o.resolution_scale = std::strcmp(v, "auto") ? uint32_t(std::strtoul(v, nullptr, 10)) : 0, o.resolution_scale_given = true;
+            else if (is("--renderer")) {
+                if (std::strcmp(v, "software") && std::strcmp(v, "gpu")) return false;
+                o.renderer = v;
+            }
             else if (is("--widescreen")) {
                 int aw = 0, ah = 0;
                 if (!ParseWidescreen(v, aw, ah)) return false;
@@ -167,7 +172,8 @@ bool ParseHostArgs(int argc, const char* const* argv, HostOptions& o) {
         }
     }
     return !o.disc.empty() && o.interp_hz >= 0 && o.interp_hz % 60 == 0 && o.recomp_quantum > 0 &&
-           o.resolution_scale >= 1 && o.resolution_scale <= 4 && !(o.interp_hz && o.resolution_scale > 1);
+           o.resolution_scale >= (o.renderer == "gpu" ? 0u : 1u) && o.resolution_scale <= (o.renderer == "gpu" ? 9u : 4u) &&
+           !(o.interp_hz && o.resolution_scale != 1);
 }
 
 namespace {

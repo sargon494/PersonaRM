@@ -537,3 +537,15 @@ void CpuContext::ExecuteInstruction(uint32_t opcode) {
 }
 
 } // namespace personarm
+
+#include "core/state_io.h"
+
+namespace personarm {
+void CpuContext::Serialize(StateIO& io) {
+    io.Tag("CPU ");
+    io(m_regs, m_cycles, m_next_pc, m_current_pc, m_prev_was_branch, m_in_delay_slot, m_cp0_badvaddr,
+       m_load_delay_reg, m_load_delay_val, m_prev_load_reg, m_prev_load_val);
+    io.Tag("GTE ");
+    io(m_gte);  // registers only (no pointers): trivially copyable
+}
+} // namespace personarm

@@ -10,6 +10,20 @@ namespace personarm {
 
 class VramTextureHook;
 class Widescreen2D;
+class StateIO;
+class Ps1Gpu;
+
+/// Display-only listener for a host GPU renderer (rendering/gpu_renderer.h). Never changes emulation.
+class GpuDrawListener {
+public:
+    virtual ~GpuDrawListener() = default;
+    /// Every complete GP0 packet, before it executes (the 1x VRAM still holds what it samples).
+    /// Not called for polyline continuation words or upload/read data words.
+    virtual void OnGp0(const Ps1Gpu& gpu, const uint32_t* words, size_t n) = 0;
+    /// The 1x VRAM rect was just written outside the rasterizer: CPU upload, fill, TIM load, WriteVram,
+    /// SetVram (the writes the scaled mirror nearest-upscales). Not called for 80h copies (see OnGp0).
+    virtual void OnVramWrite(const Ps1Gpu& gpu, uint32_t x, uint32_t y, uint32_t w, uint32_t h) = 0;
+};
 
 // ───────────────────────────────────────────────────────────────────────────
 // PlayStation 1 GPU Hardware Dimensions & Standards
@@ -110,6 +124,15 @@ public:
 
     /// The scaled VRAM, row stride 1024*scale; empty at scale 1.
     const std::vector<uint16_t>& GetScaledVram() const { return m_vram_hi; }
+    /// Save state: VRAM, registers, packet/transfer state (the scaled mirror is rebuilt on load).
+    void Serialize(StateIO& io);
+
+    /// Host GPU renderer listener; null = off (default).
+    void SetDrawListener(GpuDrawListener* l) { m_listener = l; }
+    uint32_t GetTexpage() const { return m_texpage; }      // E1h bits 0-13
+    uint32_t GetTexWindow() const { return m_texwindow; }  // E2h bits 0-19
+    bool GetMaskSet() const { return m_mask_set; }
+    bool GetMaskCheck() const { return m_mask_check; }
 
 private:
     // One rasterizer vertex: VRAM-space position (drawing offset applied), 24-bit color, texcoord.
@@ -161,6 +184,7 @@ private:
     std::vector<uint32_t>* m_cmd_log = nullptr;
     VramTextureHook* m_hook = nullptr;
     Widescreen2D* m_ws2d = nullptr;
+    GpuDrawListener* m_listener = nullptr;
     void LogWords(const uint32_t* w, size_t n) {
         m_cmd_log->push_back(static_cast<uint32_t>(n));
         m_cmd_log->insert(m_cmd_log->end(), w, w + n);

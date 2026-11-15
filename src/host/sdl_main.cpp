@@ -12,6 +12,7 @@
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -24,6 +25,7 @@
 #include "loader/png_codec.h"
 #include "recomp/runtime/generated_modules.h"
 #include "rendering/frame_interp.h"
+#include "rendering/gpu_renderer.h"
 #include "rendering/vram_texture_hook.h"
 
 using namespace personarm;
@@ -39,6 +41,8 @@ static void Usage() {
                          "                       ones between the game's frames (display only, one game frame late)\n"
                          "  --resolution-scale N internal resolution N x 320x240 (1-4, default 1 = native); display\n"
                          "                       only, the game still sees the native VRAM. Not with --interp\n"
+                         "  --renderer R         software (default) or gpu: draw the scaled picture on the host GPU\n"
+                         "                       (SDL_gpu, D3D12; docs/GPU_RENDERER.md); then --resolution-scale 1-9 or auto\n"
                          "  --widescreen A       off (default), 16:9, 21:9 or W:H: wider 3D view, shown at that aspect\n"
                          "                       (2D-only and FMV frames stay 4:3; docs/WIDESCREEN.md)\n"
                          "  --dump-dir D --dump-from F --dump-to G   every presented picture of frames F..G as PNG\n"
@@ -57,7 +61,10 @@ static void Usage() {
                          "  --save-settings      write the effective settings (file + command line) back to the file\n"
                          "  --window-mode M      windowed, fullscreen or borderless (Alt+Enter toggles)\n"
                          "  --window-scale N     windowed size = 320x240 * N (1..8)\n"
-                         "  --volume N, --mute   master volume 0..100 / silence\n");
+                         "  --volume N, --mute   master volume 0..100 / silence\n"
+                         "Keys: F5 save state, F8 load state, F6/F7 previous/next slot (0-9; files\n"
+                         "  <save_dir>/<serial>.state<N>), Tab or gamepad right-stick click held = fast-forward\n"
+                         "  (up to video.fast_forward_max x, audio muted), Alt+Enter fullscreen, Esc quit\n");
 }
 
 int main(int argc, char** argv) {
@@ -81,6 +88,12 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "[settings] video.resolution_scale %d is ignored while fps_target > 60\n", scale);
         scale = 1;
     }
+    bool use_gpu = opt.renderer == "gpu";
+    if (use_gpu && interp_hz) {  // shortcut: the interpolator replays at 1x only (docs/GPU_RENDERER.md)
+        std::fprintf(stderr, "[gpu] --renderer gpu is not combined with --interp yet: software renderer\n");
+        use_gpu = false;
+    }
+    if (!use_gpu) scale = std::clamp(scale, 1, 4);
     if (cfg.video.fps_target == 30 || cfg.video.fps_target == 90)
         std::fprintf(stderr, "[settings] video.fps_target %d is not supported yet, running at 60\n", cfg.video.fps_target);
     std::array<MemoryCard, 2> cards;
@@ -100,9 +113,14 @@ int main(int argc, char** argv) {
     }
     SDL_Window* window = nullptr;
     SDL_Renderer* renderer = nullptr;
+    if (use_gpu && scale == 0) {  // auto: enough lines for the display (240 x 9 = 2160, 4K)
+        const SDL_DisplayMode* dm = SDL_GetDesktopDisplayMode(SDL_GetPrimaryDisplay());
+        scale = std::clamp(dm ? (dm->h + 239) / 240 : 4, 1, 9);
+    }
+    const int win_scale = std::max(cfg.video.window_scale, std::min(scale, 4));
     int win_aw = 4, win_ah = 3;  // the window opens at the widescreen aspect when one is set
     host::ParseWidescreen(cfg.video.widescreen, win_aw, win_ah);
-    const int win_h0 = 240 * std::max(cfg.video.window_scale, scale);
+    const int win_h0 = 240 * win_scale;
     if (!SDL_CreateWindowAndRenderer("PersonaRM", win_h0 * win_aw / win_ah, win_h0,
                                      SDL_WINDOW_RESIZABLE | (hidden ? SDL_WINDOW_HIDDEN : 0), &window, &renderer)) {
         std::fprintf(stderr, "SDL_CreateWindowAndRenderer: %s\n", SDL_GetError());
@@ -203,7 +221,16 @@ int main(int argc, char** argv) {
         }
         engine.SetGamePatches(std::move(patches));
     }
-    engine.GetGpu().SetResolutionScale(uint32_t(scale));
+    GpuRenderer gpu_renderer;  // --renderer gpu: the CPU keeps rasterizing at 1x only
+    if (use_gpu) {
+        std::string err;
+        if (!gpu_renderer.Init(engine.GetGpu(), uint32_t(scale), &err)) {
+            std::fprintf(stderr, "[gpu] renderer unavailable (%s): software renderer\n", err.c_str());
+            use_gpu = false;
+            scale = std::clamp(scale, 1, 4);
+        }
+    }
+    engine.GetGpu().SetResolutionScale(uint32_t(use_gpu ? 1 : scale));
     const bool widescreen = win_aw * 3 != win_ah * 4;
     if (widescreen) {
         engine.SetWidescreen(4 * win_ah, 3 * win_aw);
@@ -257,8 +284,59 @@ int main(int argc, char** argv) {
     std::vector<uint32_t> cmd_log;
     if (interp_hz) engine.GetGpu().SetCommandLog(&cmd_log);
     const int sub = interp_hz ? interp_hz / 60 : 1;  // presents per emulated frame
-    uint64_t run_ns = 0, interp_ns = 0, interp_frames = 0, last_hash = 0;
+    uint64_t run_ns = 0, interp_ns = 0, interp_frames = 0, last_hash = 0, gpu_ns = 0;
+    uint32_t gpu_draws = 0;  // most draw calls in one picture this second
     uint32_t flips = 0, changes = 0, pairs = 0, pairs_ok = 0, last_start = ~0u;
+
+    // Save states: F5 save, F8 load, F6/F7 slot. <save_dir>/<serial>.state<N>, else the settings directory.
+    namespace fs = std::filesystem;
+    std::string state_dir = eff.save_dir;
+    if (state_dir.empty()) {
+        if (const char* pref = SDL_GetPrefPath("PersonaRM", "PersonaRM")) state_dir = pref;
+    }
+    int state_slot = 0;
+    uint64_t title_until = 0;
+    auto state_path = [&] {
+        return (fs::path(state_dir) / ((engine.DiscSerial().empty() ? std::string("unknown") : engine.DiscSerial()) +
+                                       ".state" + std::to_string(state_slot))).string();
+    };
+    auto notify = [&](const std::string& m) {  // stderr + window title for a few seconds
+        std::fprintf(stderr, "[state] %s\n", m.c_str());
+        SDL_SetWindowTitle(window, ("PersonaRM - " + m).c_str());
+        title_until = SDL_GetTicksNS() + 3 * SDL_NS_PER_SECOND;
+    };
+    auto save_state = [&] {
+        std::vector<uint8_t> buf;
+        engine.SaveState(buf);
+        const std::string path = state_path(), tmp = path + ".tmp";
+        std::error_code ec;
+        fs::create_directories(fs::path(path).parent_path(), ec);
+        bool ok;
+        {
+            std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
+            f.write(reinterpret_cast<const char*>(buf.data()), std::streamsize(buf.size()));
+            ok = bool(f);
+        }
+        if (ok) fs::rename(tmp, path, ec);  // atomic: a crash never leaves half a state
+        if (!ok || ec) { fs::remove(tmp, ec); notify("cannot write " + path); return; }
+        notify("saved slot " + std::to_string(state_slot) + " (" + path + ")");
+    };
+    auto load_state = [&] {
+        const std::string path = state_path();
+        std::ifstream f(path, std::ios::binary);
+        if (!f) { notify("slot " + std::to_string(state_slot) + " is empty"); return; }
+        const std::vector<uint8_t> buf((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+        std::string err;
+        if (!engine.LoadState(buf, &err)) { notify("slot " + std::to_string(state_slot) + ": " + err); return; }
+        if (audio) SDL_ClearAudioStream(audio);
+        cmd_log.clear();
+        interp = interp::FrameInterpolator();
+        next = SDL_GetTicksNS();
+        notify("loaded slot " + std::to_string(state_slot) + " (frame " + std::to_string(engine.GetFrameCount()) + ")");
+    };
+    // Fast-forward (held): up to fast_forward_max emulated frames per 1/60 s, one picture each, audio dropped.
+    const int ff_max = std::clamp(cfg.video.fast_forward_max, 2, 16);
+    uint64_t ff_frames = 0;
 
     while (!quit && engine.GetState() == EngineState::Running && (!max_frames || engine.GetFrameCount() < max_frames)) {
         SDL_Event ev;
@@ -270,6 +348,13 @@ int main(int argc, char** argv) {
                 if (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) window_mode = "windowed";
                 else window_mode = cfg.video.window_mode == "windowed" ? "borderless" : cfg.video.window_mode;
                 apply_mode(window_mode);
+            } else if (ev.type == SDL_EVENT_KEY_DOWN && !ev.key.repeat && ev.key.scancode == SDL_SCANCODE_F5) {
+                save_state();
+            } else if (ev.type == SDL_EVENT_KEY_DOWN && !ev.key.repeat && ev.key.scancode == SDL_SCANCODE_F8) {
+                load_state();
+            } else if (ev.type == SDL_EVENT_KEY_DOWN && (ev.key.scancode == SDL_SCANCODE_F6 || ev.key.scancode == SDL_SCANCODE_F7)) {
+                state_slot = (state_slot + (ev.key.scancode == SDL_SCANCODE_F7 ? 1 : 9)) % 10;
+                notify("slot " + std::to_string(state_slot));
             } else if (ev.type == SDL_EVENT_WINDOW_FOCUS_LOST && cfg.pause_on_focus_loss) {
                 paused = true;  // never minimize or grab focus back: just stop emulating and go quiet
                 set_gain(true);
@@ -309,6 +394,17 @@ int main(int argc, char** argv) {
         for (SDL_Gamepad* g : gamepads)  // the game reads a digital pad: the left stick drives the d-pad too
             mask |= host::StickToDpad(SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_LEFTX), SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_LEFTY));
         engine.SetPadButtons(mask);
+        bool ff = ks[SDL_SCANCODE_TAB];
+        for (SDL_Gamepad* g : gamepads) ff |= SDL_GetGamepadButton(g, SDL_GAMEPAD_BUTTON_RIGHT_STICK);
+        if (title_until && SDL_GetTicksNS() > title_until) { SDL_SetWindowTitle(window, "PersonaRM"); title_until = 0; }
+        const uint64_t slot_ns = frame_ns / uint64_t(ff ? ff_max : 1);  // wall time per emulated frame
+        auto pace = [&](uint64_t ns) {
+            if (unthrottled) return;
+            next += ns;
+            const uint64_t now = SDL_GetTicksNS();
+            if (now < next) SDL_DelayPrecise(next - now);
+            else if (now - next > 6 * frame_ns) next = now;  // too far behind: drop the debt instead of racing
+        };
         if (!opt.record_input.empty()) {
             recorder.Frame(engine.GetFrameCount(), mask | engine.ScriptedButtons());
             if (engine.GetFrameCount() % 600 == 599) write_recording(engine.GetFrameCount() + 1);
@@ -320,7 +416,7 @@ int main(int argc, char** argv) {
 
         engine.TakeAudio(pcm);
         audio_samples += pcm.size();
-        if (audio && !pcm.empty()) {
+        if (audio && !pcm.empty() && !ff) {  // fast-forward: dropped (no pitched or broken audio)
             // Keep latency bounded if the emulator ran ahead of the device clock (> 0.25 s queued).
             if (SDL_GetAudioStreamQueued(audio) > 44100 * 4 / 4) SDL_ClearAudioStream(audio);
             SDL_PutAudioStreamData(audio, pcm.data(), int(pcm.size() * sizeof(int16_t)));
@@ -348,14 +444,22 @@ int main(int argc, char** argv) {
             flips += start != last_start;
             last_start = start;
             if (frame % 60 == 0) {
-                std::printf("[stats] f=%llu flips/s=%u pictures/s=%u interp_pairs=%u/%u %ux%u%s frame_ms=%.2f\n",
+                std::printf("[stats] f=%llu flips/s=%u pictures/s=%u interp_pairs=%u/%u %ux%u%s frame_ms=%.2f",
                             (unsigned long long)frame, flips, changes, pairs_ok, pairs, d.width, d.height,
                             d.is_24bit ? " 24bpp" : "", double(run_ns) / 60e6);
+                if (use_gpu)  // host GPU work per presented picture: submit + wait + readback
+                    std::printf(" gpu_ms=%.2f max_draws=%u", double(gpu_ns) / 60e6, gpu_draws);
+                std::printf("\n");
                 std::fflush(stdout);
-                flips = changes = pairs_ok = pairs = 0, run_ns = 0;
+                flips = changes = pairs_ok = pairs = 0, run_ns = 0, gpu_ns = 0, gpu_draws = 0;
             }
         }
 
+        // Fast-forward presents one emulated frame out of ff_max (the display rate stays ~60 Hz, vsync or not).
+        if (ff && ++ff_frames % uint64_t(ff_max) != 0 && !(max_frames && frame >= max_frames)) {
+            pace(slot_ns);
+            continue;
+        }
         for (int s = 0; s < sub; ++s) {
             const std::vector<uint16_t>* vram = &gpu.GetVram();
             GpuDisplayArea d = gpu.GetDisplayArea();
@@ -369,9 +473,22 @@ int main(int argc, char** argv) {
                 off = false;
             }
             // 24bpp (FMV) is shown at 1x and stretched by the presenter.
+            bool gpu_frame = use_gpu && !d.is_24bit;  // 24bpp (FMV): software at 1x, GPU work only flushed
+            if (use_gpu) {  // runs even with the display off: the recorded work must be flushed
+                const uint64_t gpu_t0 = SDL_GetTicksNS();
+                if (!gpu_renderer.Present(d, gpu_frame ? &rgba : nullptr)) {
+                    std::fprintf(stderr, "[gpu] present failed (%s): software renderer at 1x\n", SDL_GetError());
+                    gpu_renderer.Shutdown();
+                    use_gpu = gpu_frame = false;
+                    scale = 1;
+                }
+                gpu_ns += SDL_GetTicksNS() - gpu_t0;
+                gpu_draws = std::max(gpu_draws, gpu_renderer.LastDrawCalls());
+            }
             const uint32_t hs = scale > 1 && !d.is_24bit ? uint32_t(scale) : 1;
             const uint32_t w = (d.width ? d.width : 320) * hs, h = (d.height ? d.height : 240) * hs;
             if (off) rgba.assign(size_t(w) * h, 0xFF000000u);  // display disabled
+            else if (gpu_frame) {}  // rgba already holds the GPU picture
             else if (hs > 1) host::DisplayToRgba(gpu.GetScaledVram(), d.x, d.y, w / hs, h / hs, false, rgba, hs);
             else host::DisplayToRgba(*vram, d.x, d.y, w, h, d.is_24bit, rgba);
             for (uint32_t p : rgba)
@@ -406,12 +523,7 @@ int main(int argc, char** argv) {
                 }
             }
             SDL_RenderPresent(renderer);
-
-            if (unthrottled) continue;
-            next += frame_ns / sub;
-            const uint64_t now = SDL_GetTicksNS();
-            if (now < next) SDL_DelayPrecise(next - now);
-            else if (now - next > 6 * frame_ns) next = now;  // too far behind: drop the debt instead of racing
+            pace(slot_ns / uint64_t(sub));
         }
     }
 
@@ -422,6 +534,7 @@ int main(int argc, char** argv) {
     std::printf("[SDL] frames=%llu non-black=%llu audio_samples=%llu\n", (unsigned long long)engine.GetFrameCount(),
                 (unsigned long long)lit_frames, (unsigned long long)audio_samples);
     engine.GetGpu().SetCommandLog(nullptr);
+    gpu_renderer.Shutdown();
     if (!opt.texture_dump.empty() || !game.mods.empty()) {
         std::printf("[textures] uploads=%zu dumped=%zu replaced=%zu\n", texture_hook.UploadCount(),
                     texture_hook.DumpedCount(), texture_hook.ReplacedUploadCount());

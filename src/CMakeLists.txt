@@ -21,6 +21,7 @@ set(CORE_SOURCES
     core/json_lite.cpp
     core/json_lite.h
     core/hash.h
+    core/state_io.h
     recomp/mips_decode.h
     recomp/mips_decode.cpp
     recomp/cfg.h
@@ -134,6 +135,17 @@ target_include_directories(personarm_core PUBLIC
 
 target_compile_features(personarm_core PUBLIC cxx_std_17)
 
+# Save states record the build that wrote them and refuse others (Engine::BuildId).
+# shortcut: the commit is read at configure time, so a rebuild after a new commit keeps the old id
+# until CMake reruns; upgrade to a configure_file regenerated every build if that bites.
+execute_process(COMMAND git rev-parse --short=12 HEAD WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+                OUTPUT_VARIABLE PRM_GIT_COMMIT OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+if(NOT PRM_GIT_COMMIT)
+    set(PRM_GIT_COMMIT "dev")
+endif()
+set_source_files_properties(engine/engine.cpp PROPERTIES
+    COMPILE_DEFINITIONS "PRM_BUILD_ID=\"${PROJECT_VERSION}-${PRM_GIT_COMMIT}\"")
+
 if(MSVC)
     target_compile_options(personarm_core PRIVATE /W4)
     target_compile_definitions(personarm_core PUBLIC _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_WARNINGS NOMINMAX)
@@ -226,6 +238,8 @@ if(PRM_WITH_SDL3)
         host/host_logic.h
         host/settings.cpp
         host/settings.h
+        rendering/gpu_renderer.cpp
+        rendering/gpu_renderer.h
     )
     target_link_libraries(personarm_sdl PRIVATE personarm_core personarm_recomp_modules SDL3::SDL3)
     if(MSVC)
