@@ -48,7 +48,12 @@ void Ps1Gpu::Reset() {
     std::fill(m_vram.begin(), m_vram.end(), static_cast<uint16_t>(0));
     std::fill(m_vram_hi.begin(), m_vram_hi.end(), static_cast<uint16_t>(0));
     if (m_hook) m_hook->ClearTags();
+    ResetRegisters();
+}
 
+// psx-spx "GPU Display Control Commands" GP1(00h): resets registers and the command FIFO; VRAM is kept
+// (ResetGraph(0) after the textures are uploaded must not wipe them).
+void Ps1Gpu::ResetRegisters() {
     m_display.x = 0;
     m_display.y = 0;
     m_display.width = 320;
@@ -158,7 +163,7 @@ void Ps1Gpu::ExecuteGP1Command(uint32_t word) {
     uint8_t cmd = (word >> 24) & 0xFF;
     switch (cmd) {
         case 0x00: // Reset GPU
-            Reset();
+            ResetRegisters();
             break;
 
         case 0x01: // Reset Command Buffer
