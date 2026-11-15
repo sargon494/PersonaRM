@@ -77,6 +77,8 @@ static void PrintUsage(const char* prog) {
               << "                     --dump-vram <png>      1024x512 VRAM at stop\n"
               << "                     --dump-frames <dir> --every N   display area PNG every N frames\n"
               << "                     --dump-audio <wav>     SPU output (voices + CD/XA), 16-bit stereo 44.1 kHz\n"
+              << "                     --widescreen <W:H>     GTE widescreen (16:9, 21:9); frames stay 320 px wide\n"
+              << "                                            (anamorphic), see docs/WIDESCREEN.md\n"
               << "                     --press <btn>@<frame>[+<n>]     hold a pad button n frames (default 5)\n"
               << "                     --input-script <file>  presses from lines <frame> <btn> [<n>] (# comments)\n"
               << "                     --watch-pc <hex>       log the first 20 hits of a PC (repeatable)\n"
@@ -817,6 +819,7 @@ struct BootOptions {
     bool eager_devices = false;      // --eager-devices: per-instruction device ticks (reference)
     std::string memcard[2];          // --memcard1/2: raw .mcd image per slot (empty = no card)
     std::string mods;                // --mods: mod folders (only file mods here, docs/MOD_FILES.md)
+    int widescreen_w = 4, widescreen_h = 3; // --widescreen W:H (4:3 = off)
 };
 
 // Overlay slots (OVERLAY_MAP OV-010, discs 1 and 2): code loaded above the resident EXE text.
@@ -890,6 +893,8 @@ static int RunBootHarness(const std::string& disc_path, const BootOptions& opt) 
     personarm::FileRedirect file_redirect;   // outlives the run: the engine reads the CD through it
     if (!opt.mods.empty()) engine.SetGamePatches(personarm::InstallFileMods(engine, file_redirect, opt.mods));
     engine.SetPadScript(opt.presses);
+    if (opt.widescreen_w * 3 != opt.widescreen_h * 4)
+        engine.GetCpu().GetGTE().SetWidescreen(4 * opt.widescreen_h, 3 * opt.widescreen_w);
     std::array<personarm::MemoryCard, 2> cards;
     for (int slot = 0; slot < 2; ++slot) {
         if (opt.memcard[slot].empty()) continue;
@@ -976,6 +981,7 @@ static int RunBootHarness(const std::string& disc_path, const BootOptions& opt) 
     personarm::GpuDisplayArea disp{};
     uint32_t disp_off = 2;
     std::set<uint32_t> disp_starts;
+    uint32_t gte_h = ~0u, gte_ofx = ~0u, gte_ofy = ~0u;
     std::vector<uint32_t> frame;
     uint32_t fw = 0, fh = 0;
     std::vector<int16_t> audio, chunk;
@@ -1018,6 +1024,14 @@ static int RunBootHarness(const std::string& disc_path, const BootOptions& opt) 
         }
         disp = d;
         disp_off = off;
+        {  // projection setup changes (H, OFX, OFY): evidence for docs/WIDESCREEN.md
+            const auto& g = engine.GetCpu().GetGTE();
+            const uint32_t h = g.ReadControlRegister(26) & 0xFFFF, ofx = g.ReadControlRegister(24), ofy = g.ReadControlRegister(25);
+            if (h != gte_h || ofx != gte_ofx || ofy != gte_ofy) {
+                std::cout << stamp() << "gte H=" << h << " OFX=" << int32_t(ofx) / 65536.0 << " OFY=" << int32_t(ofy) / 65536.0 << "\n";
+                gte_h = h, gte_ofx = ofx, gte_ofy = ofy;
+            }
+        }
         const bool want_dump = !opt.dump_frames.empty() && opt.every && engine.GetFrameCount() % opt.every == 0;
         if (!seen_image || want_dump) {
             DisplayToRgba(gpu, frame, fw, fh);
@@ -1169,6 +1183,14 @@ int main(int argc, char* argv[]) {
                     if (std::strcmp(argv[k], "--watch-pc") == 0) opt.watch_pcs.push_back(std::strtoul(argv[k + 1], nullptr, 16));
                     if (std::strcmp(argv[k], "--memcard1") == 0) opt.memcard[0] = argv[k + 1];
                     if (std::strcmp(argv[k], "--mods") == 0) opt.mods = argv[k + 1];
+                    if (std::strcmp(argv[k], "--widescreen") == 0) {
+                        int w = 0, h = 0;
+                        if (std::sscanf(argv[k + 1], "%d:%d", &w, &h) != 2 || w < 1 || h < 1 || w > 64 || h > 64 || w * 3 < h * 4) {
+                            std::cerr << "--widescreen needs W:H at least 4:3 (16:9, 21:9)\n";
+                            return EXIT_FAILURE;
+                        }
+                        opt.widescreen_w = w, opt.widescreen_h = h;
+                    }
                     if (std::strcmp(argv[k], "--memcard2") == 0) opt.memcard[1] = argv[k + 1];
                     if (std::strcmp(argv[k], "--recomp-quantum") == 0)
                         opt.recomp_quantum = static_cast<uint32_t>(std::strtoul(argv[k + 1], nullptr, 10));
@@ -1203,7 +1225,7 @@ int main(int argc, char* argv[]) {
                 std::strcmp(argv[i], "--input-script") == 0 ||
                 std::strcmp(argv[i], "--watch-pc") == 0 || std::strcmp(argv[i], "--recomp-quantum") == 0 ||
                 std::strcmp(argv[i], "--memcard1") == 0 || std::strcmp(argv[i], "--memcard2") == 0 ||
-                std::strcmp(argv[i], "--mods") == 0) { ++i; continue; } // read by --boot
+                std::strcmp(argv[i], "--mods") == 0 || std::strcmp(argv[i], "--widescreen") == 0) { ++i; continue; } // read by --boot
             if (std::strcmp(argv[i], "--launch") == 0) {
                 return launcher.LaunchGame();
             }

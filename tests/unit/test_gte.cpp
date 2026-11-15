@@ -365,6 +365,28 @@ void TestColor() {
     CHECK_EQ(t.GetFlag(), 0);
 }
 
+// Emulator-side widescreen: X offset from OFX scaled by num/den (16:9 = 3/4), Y and SZ untouched.
+void TestWidescreen() {
+    Gte g;
+    SetDiag(g, 0, 0x1000);
+    g.WriteControlRegister(26, 1000);
+    g.WriteControlRegister(24, 160 << 16);
+    g.WriteControlRegister(25, 120 << 16);
+    g.SetWidescreen(3, 4);
+    g.WriteDataRegister(0, XY(100, 50));
+    g.WriteDataRegister(1, 1000);
+    g.ExecuteCommand(kCop2 | SF | 0x01);
+    CHECK_EQ(g.ReadDataRegister(14), XY(235, 170));  // 160 + 100*3/4, 120 + 50
+    CHECK_EQ(g.ReadDataRegister(19), 1000);
+    g.WriteDataRegister(0, XY(-100, 0));
+    g.ExecuteCommand(kCop2 | SF | 0x01);
+    CHECK_EQ(g.ReadDataRegister(14), XY(85, 120));   // symmetric around OFX
+    CHECK_EQ(g.ProjectionCount(), 2u);
+    g.SetWidescreen(1, 1);                            // off = hardware result
+    g.ExecuteCommand(kCop2 | SF | 0x01);
+    CHECK_EQ(g.ReadDataRegister(14), XY(60, 120));
+}
+
 } // namespace
 
 int main() {
@@ -376,6 +398,7 @@ int main() {
     TestMvmva();
     TestOpSqrGp();
     TestColor();
+    TestWidescreen();
     if (g_failures) {
         std::printf("%d GTE check(s) failed\n", g_failures);
         return 1;

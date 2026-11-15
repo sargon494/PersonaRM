@@ -314,7 +314,10 @@ void Gte::Rtp(int n, bool last) {
     PushSz(MAC(3) >> (12 - m_shift));
 
     const int64_t q = Divide(m_ctrl[26] & 0xFFFF, m_data[19]); // H is unsigned
-    const int64_t sx = SetMac0(q * IR(1) + static_cast<int32_t>(m_ctrl[24]));
+    ++m_projections;
+    int64_t px = q * IR(1);
+    if (m_ws_num != m_ws_den) px = px * m_ws_num / m_ws_den;
+    const int64_t sx = SetMac0(px + static_cast<int32_t>(m_ctrl[24]));
     const int64_t sy = SetMac0(q * IR(2) + static_cast<int32_t>(m_ctrl[25]));
     PushSxy(sx >> 16, sy >> 16);
     if (last) {

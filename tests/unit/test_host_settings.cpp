@@ -154,6 +154,20 @@ int main() {
     CHECK(p.h == 200 && p.w == 266);
     p = PresentRect(1920, 1080, false, false, 240);
     CHECK(p.w == 1440 && p.h == 1080);
+
+    // Widescreen: aspect parsing, settings fallback, presentation at W:H.
+    int aw = 0, ah = 0;
+    CHECK(ParseWidescreen("16:9", aw, ah) && aw == 16 && ah == 9);
+    CHECK(ParseWidescreen("off", aw, ah) && aw == 4 && ah == 3);
+    CHECK(!ParseWidescreen("3:4", aw, ah) && !ParseWidescreen("16:9x", aw, ah) && !ParseWidescreen("wide", aw, ah));
+    CHECK(DefaultSettings().video.widescreen == "off");
+    w.clear();
+    CHECK(ParseSettings(R"({"video":{"widescreen":"21:9"}})", &w).video.widescreen == "21:9" && w.empty());
+    CHECK(ParseSettings(R"({"video":{"widescreen":"9:16"}})", &w).video.widescreen == "off" && w.size() == 1);
+    p = PresentRect(1920, 1080, false, false, 240, 16, 9);
+    CHECK(p.x == 0 && p.w == 1920 && p.h == 1080);
+    p = PresentRect(1920, 1080, false, true, 240, 16, 9);  // 426x240 x4 = 1704x960
+    CHECK(p.w == 1704 && p.h == 960);
     std::printf("host settings tests passed\n");
     return 0;
 }
