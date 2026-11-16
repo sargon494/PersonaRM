@@ -22,7 +22,8 @@ struct VideoSettings {
     std::string aspect = "4:3";            // 4:3 | stretch
     bool vsync = false;
     int fps_target = 60;                   // 30 | 60 | 90 | 120; >60 = --interp, 30 = every other frame presented
-    int resolution_scale = 1;              // 1..4 internal resolution (display only; not combined with interpolation)
+    std::string renderer = "software";     // software | gpu (host GPU, docs/GPU_RENDERER.md)
+    int resolution_scale = 1;              // internal resolution (display only): software 1..4, gpu 1..9; 0 = "auto" (gpu)
     int fast_forward_max = 4;              // 2..16: fast-forward speed cap (x real time)
     std::string widescreen = "off";        // off | W:H wider than 4:3 (16:9, 21:9...): GTE widescreen, docs/WIDESCREEN.md
 };

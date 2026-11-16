@@ -107,7 +107,10 @@ Settings ParseSettings(const std::string& text, std::vector<std::string>* w) {
     GetBool(video, "video", "integer_scaling", s.video.integer_scaling, w);
     GetEnum(video, "video", "aspect", {"4:3", "stretch"}, s.video.aspect, w);
     GetBool(video, "video", "vsync", s.video.vsync, w);
-    GetInt(video, "video", "resolution_scale", 1, 4, s.video.resolution_scale, w);
+    GetEnum(video, "video", "renderer", {"software", "gpu"}, s.video.renderer, w);
+    if (const JsonValue* rs = video ? video->Find("resolution_scale") : nullptr; rs && rs->IsString() && rs->AsString() == "auto")
+        s.video.resolution_scale = 0;
+    else GetInt(video, "video", "resolution_scale", 1, 9, s.video.resolution_scale, w);
     GetInt(video, "video", "fps_target", 30, 120, s.video.fps_target, w);
     GetInt(video, "video", "fast_forward_max", 2, 16, s.video.fast_forward_max, w);
     GetString(video, "video", "widescreen", s.video.widescreen, w);
@@ -166,7 +169,9 @@ std::string DumpSettings(const Settings& s) {
     v.Set("aspect", s.video.aspect);
     v.Set("vsync", s.video.vsync);
     v.Set("fps_target", s.video.fps_target);
-    v.Set("resolution_scale", s.video.resolution_scale);
+    v.Set("renderer", s.video.renderer);
+    if (s.video.resolution_scale) v.Set("resolution_scale", s.video.resolution_scale);
+    else v.Set("resolution_scale", "auto");
     v.Set("fast_forward_max", s.video.fast_forward_max);
     v.Set("widescreen", s.video.widescreen);
     doc.Set("video", v);
@@ -222,6 +227,7 @@ Settings ApplyCli(Settings s, const HostOptions& o, const std::string& serial) {
     if (o.window_scale > 0) s.video.window_scale = o.window_scale;
     if (o.interp_given) s.video.fps_target = o.interp_hz ? o.interp_hz : 60;
     if (o.resolution_scale_given) s.video.resolution_scale = int(o.resolution_scale);
+    if (!o.renderer.empty()) s.video.renderer = o.renderer;
     if (!o.widescreen.empty()) s.video.widescreen = o.widescreen;
     if (o.volume >= 0) s.audio.master_volume = o.volume;
     if (o.mute) s.audio.mute = true;

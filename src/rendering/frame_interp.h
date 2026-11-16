@@ -56,6 +56,8 @@ public:
     /// Pair usable for interpolation (computed once per new game frame).
     bool PairOk() const { return m_pair_ok; }
     const Match& LastMatch() const { return m_match; }
+    /// The GPU the replays run on (a host GPU renderer listens to it while drawing the replay at s x).
+    Ps1Gpu& Scratch() { return m_scratch; }
 
     static constexpr uint64_t kStaleFrames = 8;
     static constexpr int32_t kMaxJump = 48;      // px per game frame

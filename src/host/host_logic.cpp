@@ -172,8 +172,8 @@ bool ParseHostArgs(int argc, const char* const* argv, HostOptions& o) {
         }
     }
     return !o.disc.empty() && (o.interp_hz == 0 || o.interp_hz == 30 || (o.interp_hz > 0 && o.interp_hz % 60 == 0) || o.interp_hz == 90) && o.recomp_quantum > 0 &&
-           o.resolution_scale >= (o.renderer == "gpu" ? 0u : 1u) && o.resolution_scale <= (o.renderer == "gpu" ? 9u : 4u) &&
-           !(o.interp_hz > 60 && o.resolution_scale != 1);
+           o.resolution_scale >= (o.renderer == "software" ? 1u : 0u) && o.resolution_scale <= (o.renderer == "software" ? 4u : 9u) &&
+           !(o.renderer == "software" && o.interp_hz > 60 && o.resolution_scale != 1);
 }
 
 std::vector<double> PresentPhases(int hz, uint64_t frame) {

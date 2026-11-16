@@ -29,6 +29,7 @@ can read and write the same file. Implementation: `src/host/settings.{h,cpp}`.
     "aspect": "4:3",
     "vsync": false,
     "fps_target": 60,
+    "renderer": "software",
     "resolution_scale": 1,
     "fast_forward_max": 4,
     "widescreen": "off"
@@ -61,7 +62,8 @@ as-is, unknown ones preserved) with a warning.
 | `aspect` | `4:3`, `stretch` (fill the window) | `4:3` | honoured |
 | `vsync` | bool | false | honoured; ignored while interpolation or `--unthrottled` is on (it would slow the game down) |
 | `fps_target` | `30`, `60`, `90`, `120` | 60 | the pictures presented per second; the game always runs at 60 Hz (game speed and audio never change). `60` = native; `30` = every other frame is presented (low-end PCs, battery; the skipped frame's host conversion is skipped too); `90` = frame interpolation, 3 pictures per 2 game frames (interpolation phases 0, 2/3, 1/3); `120` = interpolation, 2 per frame. Same as `--interp N` (`--interp 0` = 60). Interpolation is display only and one game frame late |
-| `resolution_scale` | integer 1..4 | 1 | internal resolution (display only); same as `--resolution-scale`. Ignored (with a warning) when `fps_target` > 60 |
+| `renderer` | `software`, `gpu` | `software` | same as `--renderer`. `gpu` draws the scaled picture on the host GPU (SDL_gpu; D3D12 on Windows), see [GPU_RENDERER.md](GPU_RENDERER.md); where it cannot start, the software renderer runs with a log line |
+| `resolution_scale` | integer 1..9, or `"auto"` | 1 | internal resolution (display only); same as `--resolution-scale`. Software renderer: 1..4 (larger values and `auto` fall back to 1..4 with a warning) and 1 while `fps_target` > 60 (warning). `gpu`: 1..9, also with interpolation; `auto` = enough lines for the desktop height (ceil(height / 240): 1080p 5, 1440p 6, 2160p 9) |
 | `fast_forward_max` | integer 2..16 | 4 | fast-forward speed cap (x real time), see [Save states and fast-forward](#save-states-and-fast-forward) |
 | `widescreen` | `off`, or `W:H` at least 4:3 (`16:9`, `21:9`, ...) | `off` | honoured; same as `--widescreen`. Wider 3D view (GTE hack) shown at W:H; 2D-only and FMV frames stay 4:3; dialogue boxes, text and portraits over 3D keep 4:3 proportions. See [WIDESCREEN.md](WIDESCREEN.md) |
 

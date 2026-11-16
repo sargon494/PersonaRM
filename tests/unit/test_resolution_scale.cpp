@@ -126,10 +126,10 @@ static void TestHostDisplay() {
     assert(personarm::host::ParseHostArgs(4, ok, o) && o.resolution_scale == 4);
     const char* dflt[] = {"x", "d.cue"};
     assert(personarm::host::ParseHostArgs(2, dflt, o) && o.resolution_scale == 1);
-    const char* bad[] = {"x", "d.cue", "--resolution-scale", "5"};
-    assert(!personarm::host::ParseHostArgs(4, bad, o));
-    const char* interp[] = {"x", "d.cue", "--resolution-scale", "2", "--interp", "120"};
-    assert(!personarm::host::ParseHostArgs(6, interp, o));
+    const char* bad[] = {"x", "d.cue", "--renderer", "software", "--resolution-scale", "5"};
+    assert(!personarm::host::ParseHostArgs(6, bad, o));
+    const char* interp[] = {"x", "d.cue", "--renderer", "software", "--resolution-scale", "2", "--interp", "120"};
+    assert(!personarm::host::ParseHostArgs(8, interp, o));
 }
 
 int main() {

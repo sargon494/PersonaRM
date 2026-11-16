@@ -111,8 +111,21 @@ int main() {
 
     // New launcher fields: fps_target, resolution_scale 1..4, save_dir, language.
     w.clear();
-    Settings n = ParseSettings(R"({"video": {"fps_target": 45, "resolution_scale": 5}, "general": {"language": "en", "save_dir": "D:/cards"}})", &w);
+    Settings n = ParseSettings(R"({"video": {"fps_target": 45, "resolution_scale": 10}, "general": {"language": "en", "save_dir": "D:/cards"}})", &w);
     CHECK(w.size() == 2 && n.video.fps_target == 60 && n.video.resolution_scale == 1);
+    // Renderer and resolution scale 1..9 / "auto" (gpu): round trip, CLI over file.
+    w.clear();
+    Settings gs = ParseSettings(R"({"video": {"renderer": "gpu", "resolution_scale": "auto"}})", &w);
+    CHECK(w.empty() && gs.video.renderer == "gpu" && gs.video.resolution_scale == 0);
+    const Settings g2 = ParseSettings(DumpSettings(gs), nullptr);
+    CHECK(g2.video.resolution_scale == 0 && g2.video.renderer == "gpu");
+    CHECK(ParseSettings(R"({"video": {"resolution_scale": 9}})", nullptr).video.resolution_scale == 9);
+    w.clear();
+    CHECK(ParseSettings(R"({"video": {"renderer": "vulkan", "resolution_scale": "max"}})", &w).video.renderer == "software" &&
+          w.size() == 2);
+    CHECK(ParseSettings("{}", nullptr).video.renderer == "software");
+    CHECK(ApplyCli(gs, Args({"d.cue", "--renderer", "software", "--resolution-scale", "2"}), "").video.renderer == "software");
+    CHECK(ApplyCli(gs, Args({"d.cue"}), "").video.renderer == "gpu");
     CHECK(n.language == "en" && ParseSettings("{}", nullptr).language == "ja");
     CHECK(ParseSettings("{\"video\": {\"fps_target\": 30}}", nullptr).video.fps_target == 30);
     CHECK(InterpHz(n.video) == 0 && PresentHz(n.video) == 60 && ParseSettings("{\"video\": {\"fps_target\": 90}}", nullptr).video.fps_target == 90);
