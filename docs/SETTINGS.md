@@ -60,7 +60,7 @@ as-is, unknown ones preserved) with a warning.
 | `integer_scaling` | bool; largest whole multiple of the picture that fits, else plain fit | false | honoured |
 | `aspect` | `4:3`, `stretch` (fill the window) | `4:3` | honoured |
 | `vsync` | bool | false | honoured; ignored while interpolation or `--unthrottled` is on (it would slow the game down) |
-| `fps_target` | `30`, `60`, `90`, `120` | 60 | `60` = native, `120` = frame interpolation (same as `--interp 120`; `--interp N` sets it to N, `--interp 0` to 60). `30` and `90` are valid and stored but not supported yet: they run at 60 with a warning |
+| `fps_target` | `30`, `60`, `90`, `120` | 60 | the pictures presented per second; the game always runs at 60 Hz (game speed and audio never change). `60` = native; `30` = every other frame is presented (low-end PCs, battery; the skipped frame's host conversion is skipped too); `90` = frame interpolation, 3 pictures per 2 game frames (interpolation phases 0, 2/3, 1/3); `120` = interpolation, 2 per frame. Same as `--interp N` (`--interp 0` = 60). Interpolation is display only and one game frame late |
 | `resolution_scale` | integer 1..4 | 1 | internal resolution (display only); same as `--resolution-scale`. Ignored (with a warning) when `fps_target` > 60 |
 | `fast_forward_max` | integer 2..16 | 4 | fast-forward speed cap (x real time), see [Save states and fast-forward](#save-states-and-fast-forward) |
 | `widescreen` | `off`, or `W:H` at least 4:3 (`16:9`, `21:9`, ...) | `off` | honoured; same as `--widescreen`. Wider 3D view (GTE hack) shown at W:H; 2D-only and FMV frames stay 4:3; dialogue boxes, text and portraits over 3D keep 4:3 proportions. See [WIDESCREEN.md](WIDESCREEN.md) |
