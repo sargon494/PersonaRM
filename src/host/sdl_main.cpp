@@ -2,6 +2,7 @@
 // Video goes through SDL's own 2D renderer: one streaming texture blitted to a 4:3 rect is all a first
 // version needs, and it avoids a GL loader dependency (glad2) until shaders/upscaling arrive.
 
+#include <cmath>
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 
@@ -37,8 +38,10 @@ static void Usage() {
                          "  --input-script file  scripted pad presses (<frame> <button> [<hold>] per line)\n"
                          "  --record-input file  write the pad presses you play as an --input-script (flushed every 600\n"
                          "                       frames and on quit; also records the scripted presses of --input-script)\n"
-                         "  --interp HZ          present HZ pictures/s (multiple of 60, e.g. 120), synthesizing the\n"
-                         "                       ones between the game's frames (display only, one game frame late)\n"
+                         "  --interp HZ          present HZ pictures/s (= video.fps_target): 90 or a multiple of 60\n"
+                         "                       (120) synthesize the pictures between the game's frames (display only,\n"
+                         "                       one game frame late; 90 = 3 presents per 2 game frames); 30 presents\n"
+                         "                       every other frame (game and audio stay at 60 Hz); 0 = 60\n"
                          "  --resolution-scale N internal resolution N x 320x240 (1-4, default 1 = native; gpu 1-9\n"
                          "                       or auto); display only, the game still sees the native VRAM\n"
                          "  --renderer R         software (default) or gpu (video.renderer): draw the scaled picture on the host GPU\n"
@@ -93,8 +96,7 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "[settings] video.resolution_scale %d needs the gpu renderer (software: 1-4)\n", scale);
         scale = std::clamp(scale, 1, 4);
     }
-    if (cfg.video.fps_target == 30 || cfg.video.fps_target == 90)
-        std::fprintf(stderr, "[settings] video.fps_target %d is not supported yet, running at 60\n", cfg.video.fps_target);
+    const int present_hz = host::PresentHz(cfg.video);  // 30, 60, 90, 120...
     std::array<MemoryCard, 2> cards;
     std::vector<Engine::PadPress> presses;
     if (!input_script.empty()) {
@@ -295,9 +297,11 @@ int main(int argc, char** argv) {
     interp::FrameInterpolator interp;
     std::vector<uint32_t> cmd_log;
     if (interp_hz) engine.GetGpu().SetCommandLog(&cmd_log);
-    const int sub = interp_hz ? interp_hz / 60 : 1;  // presents per emulated frame
     uint64_t run_ns = 0, interp_ns = 0, interp_frames = 0, last_hash = 0, gpu_ns = 0, wall_t0 = SDL_GetTicksNS();
     uint32_t gpu_draws = 0;  // most draw calls in one picture this second
+    uint64_t last_present_ns = 0;
+    uint32_t presents = 0;
+    double gap_min = 1e9, gap_max = 0, gap_sum = 0, gap_sq = 0;  // --stats: wall time between presents (ms)
     uint32_t flips = 0, changes = 0, pairs = 0, pairs_ok = 0, last_start = ~0u;
 
     // Save states: F5 save, F8 load, F6/F7 slot. <save_dir>/<serial>.state<N>, else the settings directory.
@@ -412,10 +416,10 @@ int main(int argc, char** argv) {
         const uint64_t slot_ns = frame_ns / uint64_t(ff ? ff_max : 1);  // wall time per emulated frame
         auto pace = [&](uint64_t ns) {
             if (unthrottled) return;
-            next += ns;
-            const uint64_t now = SDL_GetTicksNS();
+            const uint64_t now = SDL_GetTicksNS();  // wait for this slot's deadline, then book the next one
             if (now < next) SDL_DelayPrecise(next - now);
             else if (now - next > 6 * frame_ns) next = now;  // too far behind: drop the debt instead of racing
+            next += ns;
         };
         if (!opt.record_input.empty()) {
             recorder.Frame(engine.GetFrameCount(), mask | engine.ScriptedButtons());
@@ -467,8 +471,14 @@ int main(int argc, char** argv) {
                 wall_t0 = now;
                 if (use_gpu)  // host GPU submission per presented picture (+ readback when dumping)
                     std::printf(" gpu_ms=%.2f max_draws=%u", double(gpu_ns) / 60e6, gpu_draws);
+                if (presents) {  // presented pictures per second and the wall gap between them (even pacing: min ~ mean ~ max)
+                    const double mean = gap_sum / presents;
+                    std::printf(" presents/s=%u gap_ms=%.2f/%.2f/%.2f sd=%.2f", presents + 1, gap_min, mean, gap_max,
+                                std::sqrt(std::max(0.0, gap_sq / presents - mean * mean)));
+                }
                 std::printf("\n");
                 std::fflush(stdout);
+                presents = 0, gap_min = 1e9, gap_max = gap_sum = gap_sq = 0;
                 flips = changes = pairs_ok = pairs = 0, run_ns = 0, gpu_ns = 0, gpu_draws = 0;
             }
         }
@@ -478,6 +488,12 @@ int main(int argc, char** argv) {
             pace(slot_ns);
             continue;
         }
+        std::vector<double> phases = host::PresentPhases(present_hz, frame);  // fps_target 30: {} on skipped frames
+        // 30 skips the picture (and its conversion); the GPU renderer must flush its recorded work every frame, and
+        // the last frame is always shown for --screenshot.
+        if (phases.empty() && (use_gpu || (max_frames && frame >= max_frames && !screenshot.empty()))) phases = {0.0};
+        if (phases.empty()) { pace(slot_ns); continue; }
+        const int sub = int(phases.size());
         for (int s = 0; s < sub; ++s) {
             const std::vector<uint16_t>* vram = &gpu.GetVram();
             GpuDisplayArea d = gpu.GetDisplayArea();
@@ -485,7 +501,7 @@ int main(int argc, char** argv) {
             double t = -1;
             GpuRenderer::Source src = GpuRenderer::kLive;
             if (interp_hz && interp.Active(frame)) {
-                t = interp.Fraction(double(frame) + double(s) / sub);
+                t = interp.Fraction(double(frame) + phases[s]);
                 const uint64_t t0 = SDL_GetTicksNS();
                 const bool lerp = t > 0 && t < 1 && interp.PairOk();  // else Render shows one of the two frames
                 src = lerp ? GpuRenderer::kReplay : t >= 1 ? GpuRenderer::kCur : GpuRenderer::kPrev;
@@ -564,8 +580,17 @@ int main(int argc, char** argv) {
                     SDL_DestroySurface(shot);
                 }
             }
+            pace(slot_ns * 60 / uint64_t(present_hz > 60 ? present_hz : 60));  // before the present: even spacing at 90
+            if (stats) {
+                const uint64_t tp = SDL_GetTicksNS();
+                if (last_present_ns) {
+                    const double g = double(tp - last_present_ns) / 1e6;
+                    gap_min = std::min(gap_min, g), gap_max = std::max(gap_max, g), gap_sum += g, gap_sq += g * g;
+                    ++presents;
+                }
+                last_present_ns = tp;
+            }
             SDL_RenderPresent(renderer);
-            pace(slot_ns / uint64_t(sub));
         }
     }
 

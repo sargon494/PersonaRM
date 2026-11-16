@@ -171,9 +171,17 @@ bool ParseHostArgs(int argc, const char* const* argv, HostOptions& o) {
             else return false;
         }
     }
-    return !o.disc.empty() && o.interp_hz >= 0 && o.interp_hz % 60 == 0 && o.recomp_quantum > 0 &&
+    return !o.disc.empty() && (o.interp_hz == 0 || o.interp_hz == 30 || (o.interp_hz > 0 && o.interp_hz % 60 == 0) || o.interp_hz == 90) && o.recomp_quantum > 0 &&
            o.resolution_scale >= (o.renderer == "software" ? 1u : 0u) && o.resolution_scale <= (o.renderer == "software" ? 4u : 9u) &&
-           !(o.renderer == "software" && o.interp_hz && o.resolution_scale != 1);
+           !(o.renderer == "software" && o.interp_hz > 60 && o.resolution_scale != 1);
+}
+
+std::vector<double> PresentPhases(int hz, uint64_t frame) {
+    std::vector<double> out;
+    const uint64_t h = uint64_t(hz > 0 ? hz : 60);
+    for (uint64_t i = (frame * h + 59) / 60; i < ((frame + 1) * h + 59) / 60; ++i)
+        out.push_back(double(i * 60 - frame * h) / double(h));
+    return out;
 }
 
 namespace {

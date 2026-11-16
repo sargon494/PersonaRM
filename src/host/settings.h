@@ -21,14 +21,16 @@ struct VideoSettings {
     bool integer_scaling = false;
     std::string aspect = "4:3";            // 4:3 | stretch
     bool vsync = false;
-    int fps_target = 60;                   // 30 | 60 | 90 | 120; >60 = --interp, 30/90 not supported yet (= 60)
+    int fps_target = 60;                   // 30 | 60 | 90 | 120; >60 = --interp, 30 = every other frame presented
     std::string renderer = "software";     // software | gpu (host GPU, docs/GPU_RENDERER.md)
     int resolution_scale = 1;              // internal resolution (display only): software 1..4, gpu 1..9; 0 = "auto" (gpu)
     int fast_forward_max = 4;              // 2..16: fast-forward speed cap (x real time)
     std::string widescreen = "off";        // off | W:H wider than 4:3 (16:9, 21:9...): GTE widescreen, docs/WIDESCREEN.md
 };
-/// --interp value behind fps_target: a multiple of 60 above 60, else 0 (off).
-inline int InterpHz(const VideoSettings& v) { return v.fps_target > 60 && v.fps_target % 60 == 0 ? v.fps_target : 0; }
+/// --interp value behind fps_target: 90, 120... (above 60), else 0 (off).
+inline int InterpHz(const VideoSettings& v) { return v.fps_target > 60 ? v.fps_target : 0; }
+/// Pictures presented per second: fps_target 30 (every other frame), 60 (native) or the interpolated rate.
+inline int PresentHz(const VideoSettings& v) { return v.fps_target == 30 ? 30 : InterpHz(v) ? InterpHz(v) : 60; }
 struct AudioSettings { int master_volume = 100; bool mute = false; };
 /// One game, keyed by disc serial. Empty string / nullopt = not set.
 struct GameSettings {
