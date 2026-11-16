@@ -146,7 +146,7 @@ on stills every 50 frames, not frame by frame while walking.
 4. **Dumps are anamorphic.** `--dump-dir` / `--dump-frames` PNGs stay 320 px wide; resize to W:H to
    view them. `--screenshot` (SDL) is the presented window and is correct.
 5. **Not tested:** battle menus beyond the first two fights, the world map, other discs, the US disc,
-   `--recomp`, `--interp` (its replay of the command log probably draws 2D unsqueezed) and `--resolution-scale`
+   `--recomp`, `--interp` (now replays the logged squeezes: 2D stays 4:3 in interpolated pictures) and `--resolution-scale`
    combined with widescreen. 21:9 was not re-checked after the 2D/3D split.
 6. **Game timing differs from 4:3.** In the battle script the 16:9 run's sprites are at other animation
    positions than the 4:3 run at the same frame (f4700): the wider projection changes what the game

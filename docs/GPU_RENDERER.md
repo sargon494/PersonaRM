@@ -149,8 +149,24 @@ VRAM. On the GPU path, at any resolution scale:
   detaches and switches back;
 - t ≤ 0 or an unusable pair presents the older snapshot, t ≥ 1 the newer one, each with its display area.
 
-The scratch still rasterizes at 1x on the CPU (the interpolator's existing cost, 1-2 ms per synthesized
-picture). The `--interp` restriction to scale 1 remains for the software renderer only.
+The scratch still rasterizes at 1x on the CPU (the interpolator's existing cost, about 3 ms per
+synthesized picture). The `--interp` restriction to scale 1 remains for the software renderer only.
+`fps_target` 90 uses the same path (phases 0, 2/3, 1/3).
+
+Two things the replay needs from the command log (`Ps1Gpu::SetCommandLog`), for both renderers:
+
+- **VRAM uploads.** The log used to leave A0h uploads out, assuming the end-of-frame VRAM holds every
+  texture. The game reuses font glyph slots within a frame (upload a glyph, draw it, upload the next),
+  so every glyph of a replay showed the last one uploaded: garbage text (`おおおお`, `00000000`) at 90 and
+  120 fps. Uploads are now logged with their data words and replayed in order.
+- **Widescreen squeezes.** The scratch GPU has no 2D/3D classifier (its projections are gone), so
+  interpolated pictures drew 2D over 3D unsqueezed: the dialogue box alternated between 4:3 and stretched
+  (flicker). The live decision (centre relative to the first vertex, factor) is logged as a GP0 NOP entry
+  `[3, 00AB0000h, centre - x0, num | den << 12]` before the primitive and applied to its lerped vertices on
+  replay (`Ps1Gpu::Squeeze`). Live rendering is unchanged.
+
+Measured at 9x, 16:9, `--interp 120`, shrine dialogue: 13.5 ms per emulated frame for 2 presents
+(unthrottled), presents every 6.8 ms on average.
 
 ## HD textures (`--mods`)
 
@@ -213,6 +229,11 @@ looked at.
 | second battle | f13000 | 0.44% / 0.07% | message box, party and demon sprites match |
 | shrine, `--widescreen 16:9` | f6700 | 2.37% / 0.27% | dialogue box, name and text squeezed to 4:3 and centred as in software |
 | office, `--interp 120` | f18890-18891, t = 0, .25, .5, .75 | 0.75-0.83% / 0.15% | GPU 1x against software 1x interpolation (the software one has no 4x); 4x pictures looked at |
+| US shrine, `--widescreen 16:9` (US disc, `us_new_game_to_field.txt`) | f6800 | 2.56% / 0.27% | name, text, box and arrow inside the box, box centred at 4:3, as software (the v0.1.0 prototype had no squeeze on the GPU path) |
+| Mizuno, `--widescreen 16:9` | f17000 | 3.37% / 0.55% | portrait and box at 4:3, as software |
+| shrine, `--interp 120` / `90`, 4x | f6700-6701 | 0.71-0.77% from the live picture | text correct (was every glyph = the last uploaded one) |
+| JP shrine / US shrine / Mizuno, `--interp 120` + 16:9, 4x | f6700, f6800, f17000 | 0.35-0.38% from the live 16:9 picture | box stays 4:3 in synthesized pictures; 9x checked at f6700 |
+| office walking, `--interp 120` + 16:9 and `--interp 90`, 4x | f18900-18915, 32 / 24 presents | no picture far from both neighbours (flicker score 0.01 / 0) | |
 | shrine, `--mods` | f6700 | 6.7% / 3.9% | test pack (every dumped texture 4x with a red hatch): floor, walls, the shrine and Tatsuya's legs replaced as in software; his torso and the old woman stay original (one upload per primitive, see HD textures) |
 
 Software 4x of this build against the build before: byte-identical (f6700, f18900, SHA-256), so the
