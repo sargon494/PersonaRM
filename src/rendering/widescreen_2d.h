@@ -48,6 +48,8 @@ public:
 
     /// X around centre cx, squeezed by num/den (symmetric truncation).
     int32_t Squeeze(int32_t x, int32_t cx) const { return cx + (x - cx) * m_num / m_den; }
+    int32_t Num() const { return m_num; }
+    int32_t Den() const { return m_den; }
 
     /// Any GP0 command that is not a polygon, line or rectangle: what follows is HUD 2D. A drawing area or
     /// offset (E3h-E5h, PutDrawEnv) starts a new frame: 2D before its first 3D is background.

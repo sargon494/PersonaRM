@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "rendering/frame_interp.h"
+#include "rendering/widescreen_2d.h"
 
 using namespace personarm;
 using namespace personarm::interp;
@@ -135,7 +136,10 @@ static void TestCaptureIsInvisibleAndComplete() {
     std::vector<uint32_t> seg(log.begin() + i + 2, log.end());
     Ps1Gpu replay;
     replay.SetVram(before.GetVram());
-    // The upload is not captured (VRAM snapshots carry textures): the snapshot already holds it.
+    // The upload is captured with its data words (the game reuses texture slots within a frame).
+    bool upload = false;
+    for (size_t k = 0; k < seg.size(); k += 1 + seg[k]) upload |= seg[k] == 7 && seg[k + 1] >> 24 == 0xA0;
+    assert(upload);
     Replay(replay, seg);
     assert(replay.GetVram() == plain.GetVram());
 
@@ -168,11 +172,41 @@ static void TestCaptureIsInvisibleAndComplete() {
     std::printf("  capture/replay/interpolator ok\n");
 }
 
+// Widescreen: a squeezed 2D primitive is recorded in the log, so a replay without the classifier squeezes
+// it the same way (interpolated pictures keep 2D at 4:3).
+static void TestWidescreenSqueezeReplays() {
+    Widescreen2D ws(3, 4);
+    ws.NoteProjected(XY(10, 10));
+    ws.NoteProjected(XY(60, 10));
+    Ps1Gpu live;
+    live.SetWidescreen2D(&ws);
+    std::vector<uint32_t> log;
+    live.SetCommandLog(&log);
+    std::vector<uint32_t> seg;
+    for (uint32_t w : {0xE3000000u, 0xE4000000u | 319 | 239 << 10, 0xE5000000u}) live.WriteGP0(w);
+    const std::vector<uint16_t> start = live.GetVram();
+    const size_t from = log.size();
+    for (uint32_t w : {0x20FF0000u, XY(10, 10), XY(60, 10), XY(10, 60)}) live.WriteGP0(w);  // 3D (projected)
+    live.WriteGP0(0xE1000000u);                                                              // HUD follows
+    for (uint32_t w : {0x2000FF00u, XY(200, 100), XY(300, 100), XY(200, 200)}) live.WriteGP0(w);  // 2D: squeezed
+    seg.assign(log.begin() + std::ptrdiff_t(from), log.end());
+    size_t recs = 0;
+    for (size_t k = 0; k < seg.size(); k += 1 + seg[k]) recs += seg[k] == 3 && seg[k + 1] == 0x00AB0000u;
+    assert(recs == 1);
+    assert(live.GetVram()[150 * 1024 + 298] == 0);  // squeezed toward the centre (160): not drawn there
+    Ps1Gpu replay;
+    replay.SetVram(start);
+    Replay(replay, seg);
+    assert(replay.GetVram() == live.GetVram());
+    std::printf("  widescreen squeeze replay ok\n");
+}
+
 int main() {
     std::printf("frame_interp tests\n");
     TestMatchAndLerp();
     TestUntexturedAndRects();
     TestCaptureIsInvisibleAndComplete();
+    TestWidescreenSqueezeReplays();
     std::printf("PASS\n");
     return 0;
 }

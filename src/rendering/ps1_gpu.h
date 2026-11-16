@@ -108,8 +108,10 @@ public:
     uint64_t GetPolygonCount() const { return m_polygon_count; }
 
     /// Display-only capture for frame interpolation (rendering/frame_interp.h); null = off (default) and
-    /// emulation is unaffected either way. Appends every executed GP0 packet except VRAM uploads/reads
-    /// (A0h-DFh) as [n, w0..wn-1], polyline continuation words as [1, w], and each display-start change
+    /// emulation is unaffected either way. Appends every executed GP0 packet except VRAM reads (C0h-DFh)
+    /// as [n, w0..wn-1]; a CPU->VRAM upload (A0h) as one entry with its data words (the game overwrites
+    /// font glyphs and other textures mid-frame, so a replay must upload them again in order);
+    /// polyline continuation words as [1, w], and each display-start change
     /// (GP1 05h, a double-buffer flip) as [0, x | y << 16] followed by E1h-E6h packets for the current
     /// draw state, so every segment between two flips replays on its own.
     void SetCommandLog(std::vector<uint32_t>* log) { m_cmd_log = log; }
@@ -196,6 +198,7 @@ private:
         m_cmd_log->push_back(static_cast<uint32_t>(n));
         m_cmd_log->insert(m_cmd_log->end(), w, w + n);
     }
+    size_t m_log_upload = SIZE_MAX;  // command log: header index of the A0h entry its data words extend
 
     // Polyline (GP0 48h-4Fh / 58h-5Fh) streaming state
     bool m_in_polyline = false;
@@ -205,6 +208,16 @@ private:
     uint32_t m_polyline_pending_color = 0;
     bool m_polyline_have_color = false;
     int32_t m_polyline_cx = INT32_MIN;  // widescreen: centre the polyline's 2D vertices are squeezed around (or kNone)
+    // Widescreen squeeze of the current 2D primitive (factor num/den), and a replay's recorded squeeze (below).
+    int32_t m_sq_num = 1, m_sq_den = 1;
+    int32_t m_rsq_off = 0, m_rsq_num = 1, m_rsq_den = 1;
+    int m_rsq_words = 0;
+    bool m_rsq_ready = false;
+    /// Squeezes x[0..n) of a 2D primitive (returns the centre, or Widescreen2D::kNone). Live: Widescreen2D
+    /// decides and the command log gets the decision as a GP0 NOP entry [3, 00AB0000h, centre - x[0],
+    /// num | den << 12] before the primitive's packet; a replay (no Widescreen2D) applies that entry to its
+    /// (lerped) vertices, so interpolated pictures keep 2D at 4:3 too.
+    int32_t Squeeze(const uint32_t* xy, int32_t* x, int n, bool textured);
 
     // VRAM to CPU (C0h) transfer state
     uint32_t m_read_x = 0, m_read_y = 0, m_read_w = 0, m_read_h = 0;

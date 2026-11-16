@@ -262,6 +262,13 @@ void Ps1Gpu::ExecuteGP1Command(uint32_t word) {
 
 void Ps1Gpu::WriteGP0(uint32_t word) {
     if (m_in_vram_transfer) {
+        if (m_cmd_log) {  // the data word extends the A0h entry, unless the log moved on (drained, flip marker)
+            std::vector<uint32_t>& log = *m_cmd_log;
+            const size_t at = m_log_upload;
+            if (at < log.size() && at + 1 < log.size() && at + 1 + log[at] == log.size() && (log[at + 1] >> 24) >= 0xA0 && (log[at + 1] >> 24) < 0xC0)
+                log.push_back(word), ++log[at];
+            else LogWords(&word, 1), m_log_upload = SIZE_MAX;
+        }
         // CPU to VRAM pixel transfer: word contains two 16-bit pixels
         uint16_t p0 = word & 0xFFFF;
         uint16_t p1 = (word >> 16) & 0xFFFF;
@@ -311,7 +318,7 @@ void Ps1Gpu::WriteGP0(uint32_t word) {
             return;
         }
         Vertex next = ParseVertex(word, m_polyline_pending_color);
-        if (m_polyline_cx != Widescreen2D::kNone) next.x = m_ws2d->Squeeze(next.x, m_polyline_cx);
+        if (m_polyline_cx != Widescreen2D::kNone) next.x = m_polyline_cx + (next.x - m_polyline_cx) * m_sq_num / m_sq_den;
         DrawLine(m_polyline_last, next, m_polyline_gouraud, m_polyline_semi);
         m_polyline_last = next;
         m_polyline_have_color = false;
@@ -341,10 +348,18 @@ void Ps1Gpu::ExecuteGP0Command() {
     if (m_gp0_packet.empty()) return;
     uint32_t w0 = m_gp0_packet[0];
     uint8_t cmd = (w0 >> 24) & 0xFF;
-    if (m_cmd_log && !(cmd >= 0xA0 && cmd <= 0xDF)) LogWords(m_gp0_packet.data(), m_gp0_packet.size());
+    if (m_cmd_log && !(cmd >= 0xC0 && cmd <= 0xDF)) {
+        LogWords(m_gp0_packet.data(), m_gp0_packet.size());
+        if (cmd >= 0xA0 && cmd <= 0xBF) m_log_upload = m_cmd_log->size() - m_gp0_packet.size() - 1;
+    }
     if (m_listener) m_listener->OnGp0(*this, m_gp0_packet.data(), m_gp0_packet.size());
 
     if (m_ws2d && (cmd < 0x20 || cmd > 0x7F)) m_ws2d->OtherCommand(cmd >= 0xE3 && cmd <= 0xE5);
+    if (cmd == 0x00 && !m_ws2d) {  // replay: a recorded widescreen squeeze (see Squeeze), NOPs otherwise
+        if (((w0 >> 16) & 0xFF) == 0xAB && !m_rsq_words) m_rsq_words = 2;
+        else if (m_rsq_words == 2) m_rsq_off = int16_t(w0 & 0xFFFF), m_rsq_words = 1;
+        else if (m_rsq_words == 1) m_rsq_num = w0 & 0xFFF, m_rsq_den = std::max<int32_t>(1, (w0 >> 12) & 0xFFF), m_rsq_words = 0, m_rsq_ready = true;
+    }
     if (cmd >= 0x20 && cmd <= 0x3F) { DrawPolygon(cmd); return; }
     if (cmd >= 0x40 && cmd <= 0x5F) { DrawLineCommand(cmd); return; }
     if (cmd >= 0x60 && cmd <= 0x7F) { DrawRectangle(cmd); return; }
@@ -568,10 +583,10 @@ void Ps1Gpu::DrawPolygon(uint8_t cmd) {
     // psx-spx "GPU Rendering Attributes" (E1h bit 9): dithering applies to gouraud-shaded
     // and texture-blended (modulated) primitives only.
     f.dither = ((m_texpage >> 9) & 1) && (gouraud || (f.textured && !f.raw));
-    if (m_ws2d && m_ws2d->Wide()) {
+    {
         int32_t x[4];
         for (int i = 0; i < n; ++i) x[i] = v[i].x;
-        if (m_ws2d->Squeeze2D(xyw, x, n, m_drawing.x1, m_drawing.x2, f.textured) != Widescreen2D::kNone) {
+        if (Squeeze(xyw, x, n, f.textured) != Widescreen2D::kNone) {
             for (int i = 0; i < n; ++i) v[i].x = x[i];
             if (m_listener) m_listener->OnSqueeze(x, n);
         }
@@ -596,6 +611,26 @@ void Ps1Gpu::DrawPolygon(uint8_t cmd) {
     }
     DrawTriangle(Vram1x(), v[0], v[1], v[2], gouraud, f);
     if (quad) DrawTriangle(Vram1x(), v[1], v[2], v[3], gouraud, f);
+}
+
+int32_t Ps1Gpu::Squeeze(const uint32_t* xy, int32_t* x, int n, bool textured) {
+    const int32_t x0 = x[0];
+    if (m_ws2d && m_ws2d->Wide()) {
+        const int32_t cx = m_ws2d->Squeeze2D(xy, x, n, m_drawing.x1, m_drawing.x2, textured);
+        if (cx == Widescreen2D::kNone) return cx;
+        m_sq_num = m_ws2d->Num(), m_sq_den = m_ws2d->Den();
+        if (m_cmd_log && !m_cmd_log->empty()) {  // before the primitive's packet, the log's last entry
+            const uint32_t rec[4] = {3, 0x00AB0000u, uint32_t(cx - x0) & 0xFFFF, uint32_t(m_sq_num & 0xFFF) | uint32_t(m_sq_den & 0xFFF) << 12};
+            m_cmd_log->insert(m_cmd_log->end() - std::ptrdiff_t(m_gp0_packet.size() + 1), rec, rec + 4);
+        }
+        return cx;
+    }
+    if (m_ws2d || !m_rsq_ready) return Widescreen2D::kNone;
+    m_rsq_ready = false;
+    m_sq_num = m_rsq_num, m_sq_den = m_rsq_den;
+    const int32_t cx = x0 + m_rsq_off;
+    for (int i = 0; i < n; ++i) x[i] = cx + (x[i] - cx) * m_sq_num / m_sq_den;
+    return cx;
 }
 
 void Ps1Gpu::DrawTriangle(const Target& t, const Vertex& a, const Vertex& b_in, const Vertex& c_in,
@@ -659,10 +694,9 @@ void Ps1Gpu::DrawLineCommand(uint8_t cmd) {
     Vertex a = ParseVertex(m_gp0_packet[1], c0);
     const uint32_t xy[2] = {m_gp0_packet[1], m_gp0_packet[gouraud ? 3 : 2]};
     Vertex b = ParseVertex(xy[1], gouraud ? m_gp0_packet[2] : c0);
-    m_polyline_cx = Widescreen2D::kNone;
-    if (m_ws2d && m_ws2d->Wide()) {
+    {
         int32_t x[2] = {a.x, b.x};
-        m_polyline_cx = m_ws2d->Squeeze2D(xy, x, 2, m_drawing.x1, m_drawing.x2, false);
+        m_polyline_cx = Squeeze(xy, x, 2, false);
         if (m_polyline_cx != Widescreen2D::kNone) a.x = x[0], b.x = x[1];
     }
     DrawLine(a, b, gouraud, semi);
@@ -745,9 +779,9 @@ void Ps1Gpu::DrawRectangle(uint8_t cmd) {
     }
     // Widescreen 2D squeeze: draw dw pixels wide, sampling the w-wide texture by nearest neighbour.
     int32_t dw = w;
-    if (m_ws2d && m_ws2d->Wide()) {
+    {
         int32_t x[2] = {o.x, o.x + w};
-        if (m_ws2d->Squeeze2D(nullptr, x, 2, m_drawing.x1, m_drawing.x2, f.textured) != Widescreen2D::kNone) {
+        if (Squeeze(nullptr, x, 2, f.textured) != Widescreen2D::kNone) {
             o.x = x[0], dw = std::max(1, x[1] - x[0]);
             const int32_t xs[2] = {o.x, o.x + dw};
             if (m_listener) m_listener->OnSqueeze(xs, 2);
