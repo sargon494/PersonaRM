@@ -48,6 +48,10 @@ public:
                    uint32_t clut_x, uint32_t clut_y, uint16_t orig, uint32_t fx = 0, uint32_t fy = 0,
                    uint32_t scale = 1);
 
+    /// GPU renderer: the HD replacement of the upload whose data VRAM word (wx, wy) still holds, or null;
+    /// rect = that upload's x, y, w, h (VRAM words).
+    const HdTexture* Replacement(uint32_t wx, uint32_t wy, uint32_t rect[4]);
+
     static uint32_t HashUpload(const std::vector<uint16_t>& vram, uint32_t x, uint32_t y, uint32_t w, uint32_t h);
 
     size_t UploadCount() const { return m_uploads.size(); }

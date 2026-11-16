@@ -571,8 +571,10 @@ void Ps1Gpu::DrawPolygon(uint8_t cmd) {
     if (m_ws2d && m_ws2d->Wide()) {
         int32_t x[4];
         for (int i = 0; i < n; ++i) x[i] = v[i].x;
-        if (m_ws2d->Squeeze2D(xyw, x, n, m_drawing.x1, m_drawing.x2, f.textured) != Widescreen2D::kNone)
+        if (m_ws2d->Squeeze2D(xyw, x, n, m_drawing.x1, m_drawing.x2, f.textured) != Widescreen2D::kNone) {
             for (int i = 0; i < n; ++i) v[i].x = x[i];
+            if (m_listener) m_listener->OnSqueeze(x, n);
+        }
     }
 
     // psx-spx "GPU Render Polygon Commands": a quad is drawn as triangles (v0,v1,v2) and (v1,v2,v3).
@@ -678,6 +680,9 @@ void Ps1Gpu::DrawLineCommand(uint8_t cmd) {
 void Ps1Gpu::DrawLine(const Vertex& a, const Vertex& b, bool gouraud, bool semi) {
     // psx-spx "GPU Render Line Commands": lines longer than 1023/511 are not drawn.
     if (std::abs(b.x - a.x) > 1023 || std::abs(b.y - a.y) > 511) return;
+    if (m_listener)
+        m_listener->OnLine(*this, a.x, a.y, uint32_t(a.r | a.g << 8 | a.b << 16), b.x, b.y, uint32_t(b.r | b.g << 8 | b.b << 16),
+                           gouraud, semi);
 
     DrawFlags f;
     f.semi = semi;
@@ -742,7 +747,11 @@ void Ps1Gpu::DrawRectangle(uint8_t cmd) {
     int32_t dw = w;
     if (m_ws2d && m_ws2d->Wide()) {
         int32_t x[2] = {o.x, o.x + w};
-        if (m_ws2d->Squeeze2D(nullptr, x, 2, m_drawing.x1, m_drawing.x2, f.textured) != Widescreen2D::kNone) o.x = x[0], dw = std::max(1, x[1] - x[0]);
+        if (m_ws2d->Squeeze2D(nullptr, x, 2, m_drawing.x1, m_drawing.x2, f.textured) != Widescreen2D::kNone) {
+            o.x = x[0], dw = std::max(1, x[1] - x[0]);
+            const int32_t xs[2] = {o.x, o.x + dw};
+            if (m_listener) m_listener->OnSqueeze(xs, 2);
+        }
     }
     // E1h bits 12/13: textured rectangle X/Y flip. unverified: flipped texcoords simply decrement from u0/v0.
     const bool flip_x = (m_texpage >> 12) & 1, flip_y = (m_texpage >> 13) & 1;

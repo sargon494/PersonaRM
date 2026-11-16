@@ -23,6 +23,13 @@ public:
     /// The 1x VRAM rect was just written outside the rasterizer: CPU upload, fill, TIM load, WriteVram,
     /// SetVram (the writes the scaled mirror nearest-upscales). Not called for 80h copies (see OnGp0).
     virtual void OnVramWrite(const Ps1Gpu& gpu, uint32_t x, uint32_t y, uint32_t w, uint32_t h) = 0;
+    /// One line segment (a line packet or a polyline segment) as the rasterizer draws it: VRAM-space
+    /// endpoints (drawing offset and widescreen squeeze applied), 24-bit colours.
+    virtual void OnLine(const Ps1Gpu&, int32_t /*ax*/, int32_t /*ay*/, uint32_t /*ac*/, int32_t /*bx*/, int32_t /*by*/,
+                        uint32_t /*bc*/, bool /*gouraud*/, bool /*semi*/) {}
+    /// Widescreen: the polygon / rectangle of the last OnGp0 is drawn squeezed, with these VRAM-space X
+    /// coordinates (polygon: one per vertex; rectangle: left edge and right edge + 1).
+    virtual void OnSqueeze(const int32_t* /*x*/, int /*n*/) {}
 };
 
 // ───────────────────────────────────────────────────────────────────────────

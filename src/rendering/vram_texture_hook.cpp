@@ -140,6 +140,16 @@ void VramTextureHook::Dump(const std::vector<uint16_t>& vram, const Upload& u, u
     if (PngCodec::EncodeToFile((fs::path(m_dump_dir) / name).string(), W, H, rgba.data())) ++m_dumped;
 }
 
+const HdTexture* VramTextureHook::Replacement(uint32_t wx, uint32_t wy, uint32_t rect[4]) {
+    const uint32_t id = m_tags[(wy & (kH - 1)) * kW + (wx & (kW - 1))];
+    if (!id) return nullptr;
+    Upload& u = m_uploads[id - 1];
+    if (!u.resolved) Resolve(u);
+    if (!u.hd) return nullptr;
+    rect[0] = u.x, rect[1] = u.y, rect[2] = u.w, rect[3] = u.h;
+    return u.hd.get();
+}
+
 uint16_t VramTextureHook::Texel(const std::vector<uint16_t>& vram, uint32_t wx, uint32_t wy, uint32_t mode,
                                 uint32_t sub, uint32_t clut_x, uint32_t clut_y, uint16_t orig, uint32_t fx,
                                 uint32_t fy, uint32_t scale) {
