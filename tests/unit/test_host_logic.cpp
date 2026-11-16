@@ -1,5 +1,7 @@
 // SDL3 host pure logic: 4:3 letterbox, 15/24bpp display conversion, key/gamepad -> pad bits.
 #undef NDEBUG
+#include <cmath>
+#include <cstdlib>
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
@@ -87,8 +89,26 @@ int main() {
     CHECK(!ParseHostArgs(4, unknown, o));
     const char* nodisc[] = {"personarm_sdl", "--recomp"};
     CHECK(!ParseHostArgs(2, nodisc, o));
-    const char* interp[] = {"personarm_sdl", "d.cue", "--interp", "90"};
+    const char* interp[] = {"personarm_sdl", "d.cue", "--interp", "100"};
     CHECK(!ParseHostArgs(4, interp, o));
+    for (const char* hz : {"30", "90", "120", "0"}) {
+        const char* ok[] = {"personarm_sdl", "d.cue", "--interp", hz};
+        CHECK(ParseHostArgs(4, ok, o) && o.interp_hz == std::atoi(hz));
+    }
+    // Present schedule: which game frame (time = frame + phase) each picture shows, per 60 game frames.
+    auto near = [](double a, double b) { return std::fabs(a - b) < 1e-9; };
+    for (int hz : {30, 60, 90, 120}) {
+        size_t total = 0;
+        for (uint64_t f = 0; f < 60; ++f) total += PresentPhases(hz, f).size();
+        CHECK(total == size_t(hz));  // exactly hz pictures per second, any start frame
+    }
+    CHECK(PresentPhases(60, 7).size() == 1 && near(PresentPhases(60, 7)[0], 0));
+    CHECK(PresentPhases(30, 6).size() == 1 && near(PresentPhases(30, 6)[0], 0) && PresentPhases(30, 7).empty());
+    for (uint64_t f : {0, 2, 100}) {  // 90: {0, 2/3} on the even frame, {1/3} on the odd one
+        const auto e = PresentPhases(90, f), od = PresentPhases(90, f + 1);
+        CHECK(e.size() == 2 && near(e[0], 0) && near(e[1], 2.0 / 3) && od.size() == 1 && near(od[0], 1.0 / 3));
+    }
+    CHECK(PresentPhases(120, 5).size() == 2 && near(PresentPhases(120, 5)[1], 0.5));
     const char* gpu9[] = {"personarm_sdl", "d.cue", "--renderer", "gpu", "--resolution-scale", "9"};
     CHECK(ParseHostArgs(6, gpu9, o) && o.renderer == "gpu" && o.resolution_scale == 9);
     const char* gpuauto[] = {"personarm_sdl", "d.cue", "--resolution-scale", "auto", "--renderer", "gpu"};

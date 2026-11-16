@@ -115,7 +115,10 @@ int main() {
     CHECK(w.size() == 2 && n.video.fps_target == 60 && n.video.resolution_scale == 1);
     CHECK(n.language == "en" && ParseSettings("{}", nullptr).language == "ja");
     CHECK(ParseSettings("{\"video\": {\"fps_target\": 30}}", nullptr).video.fps_target == 30);
-    CHECK(InterpHz(n.video) == 0 && ParseSettings("{\"video\": {\"fps_target\": 90}}", nullptr).video.fps_target == 90);
+    CHECK(InterpHz(n.video) == 0 && PresentHz(n.video) == 60 && ParseSettings("{\"video\": {\"fps_target\": 90}}", nullptr).video.fps_target == 90);
+    VideoSettings v30, v90;
+    v30.fps_target = 30, v90.fps_target = 90;
+    CHECK(PresentHz(v30) == 30 && InterpHz(v30) == 0 && PresentHz(v90) == 90 && InterpHz(v90) == 90);
     CHECK(MemcardFor(n, GameSettings{}, "SLPS-02192", 0).find("SLPS-02192-1.mcd") != std::string::npos);
     CHECK(MemcardFor(n, GameSettings{}, "SLPS-02192", 1).empty() && MemcardFor(n, GameSettings{}, "", 0).empty());
     GameSettings gx; gx.memcard[0] = "mine.mcd";

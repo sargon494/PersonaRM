@@ -15,6 +15,11 @@ Rect Letterbox4x3(int win_w, int win_h);
 /// Largest aw:ah rectangle centred in the window.
 Rect LetterboxAspect(int win_w, int win_h, int aw, int ah);
 
+/// Present schedule: at `hz` pictures/s (30, 60, 90, 120...) present i shows game time i*60/hz frames. Returns the
+/// phases in [0,1) of the pictures shown during emulated frame `frame` (time = frame + phase): 30 -> {0} on even
+/// frames, {} on odd ones (skipped); 60 -> {0}; 90 -> {0, 2/3} then {1/3}; 120 -> {0, 1/2}.
+std::vector<double> PresentPhases(int hz, uint64_t frame);
+
 /// Where the picture goes: whole window if `stretch`, else the aw:ah box (default 4:3); with `integer` the
 /// box is the largest whole multiple of (tex_h*aw/ah) x tex_h that fits (else the plain fit).
 Rect PresentRect(int win_w, int win_h, bool stretch, bool integer, int tex_h, int aw = 4, int ah = 3);
@@ -67,7 +72,7 @@ struct HostOptions {
     std::string record_input;       // --record-input F: write the played pad presses as an --input-script
     bool stats = false, unthrottled = false, hidden = false;
 };
-/// False on an unknown option, a missing value, no disc, --interp not a multiple of 60, a resolution scale
+/// False on an unknown option, a missing value, no disc, --interp not 30, 90 or a multiple of 60, a resolution scale
 /// outside 1-4 (--renderer gpu: 1-9 or auto), or --interp with a resolution scale above 1 (the interpolator replays at 1x only).
 bool ParseHostArgs(int argc, const char* const* argv, HostOptions& out);
 
