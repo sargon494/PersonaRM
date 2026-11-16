@@ -396,6 +396,11 @@ fn run_watcher(exe: &str, args: &[String]) {
     if let Ok(f) = log {
         cmd.stderr(f);
     }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW: personarm_sdl is a console app; no cmd window
+    }
     let status = cmd.status();
     if !status.as_ref().is_ok_and(|s| s.success()) {
         let code = status.map_or("?".into(), |s| s.code().map_or("signal".into(), |c| c.to_string()));
