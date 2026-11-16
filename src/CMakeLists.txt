@@ -254,6 +254,18 @@ if(PRM_WITH_SDL3)
             COMMAND_EXPAND_LISTS)
     endif()
     install(TARGETS personarm_sdl RUNTIME DESTINATION bin)
+
+    # Optional launcher (Rust, docs/LAUNCHER.md): `cmake --build . --target launcher` builds it with cargo
+    # and copies it next to personarm_sdl. Not part of ALL, so the C++ build never needs Rust.
+    find_program(CARGO_EXECUTABLE cargo HINTS "$ENV{USERPROFILE}/.cargo/bin" "$ENV{HOME}/.cargo/bin")
+    if(CARGO_EXECUTABLE)
+        add_custom_target(launcher
+            COMMAND ${CARGO_EXECUTABLE} build --release --manifest-path ${CMAKE_SOURCE_DIR}/launcher/Cargo.toml
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${CMAKE_SOURCE_DIR}/launcher/target/release/launcher${CMAKE_EXECUTABLE_SUFFIX} $<TARGET_FILE_DIR:personarm_sdl>
+            COMMENT "Building the launcher with cargo")
+        add_dependencies(launcher personarm_sdl)
+    endif()
 endif()
 
 # ───────────────────────────────────────────────────────────────────────
