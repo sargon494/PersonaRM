@@ -49,6 +49,10 @@ when:
 
 With the option off nothing changes: same GTE results, same GPU output, same window, same 4:3 rectangle.
 
+The host GPU renderer (`--renderer gpu`, [GPU_RENDERER.md](GPU_RENDERER.md)) gets the same picture: the
+software rasterizer reports each squeezed 2D primitive and line to it, so 2D over 3D keeps 4:3 there too
+(checked at f6700, 16:9, 4x).
+
 ### 2D over 3D
 
 The GPU only sees final screen coordinates, so 2D drawn on a W:H frame would be 33% too wide at 16:9.
