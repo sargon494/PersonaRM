@@ -39,9 +39,9 @@ static void Usage() {
                          "                       frames and on quit; also records the scripted presses of --input-script)\n"
                          "  --interp HZ          present HZ pictures/s (multiple of 60, e.g. 120), synthesizing the\n"
                          "                       ones between the game's frames (display only, one game frame late)\n"
-                         "  --resolution-scale N internal resolution N x 320x240 (1-4, default 1 = native); display\n"
-                         "                       only, the game still sees the native VRAM. Not with --interp\n"
-                         "  --renderer R         software (default) or gpu: draw the scaled picture on the host GPU\n"
+                         "  --resolution-scale N internal resolution N x 320x240 (1-4, default 1 = native; gpu 1-9\n"
+                         "                       or auto); display only, the game still sees the native VRAM\n"
+                         "  --renderer R         software (default) or gpu (video.renderer): draw the scaled picture on the host GPU\n"
                          "                       (SDL_gpu, D3D12; docs/GPU_RENDERER.md); then --resolution-scale 1-9 or auto\n"
                          "  --widescreen A       off (default), 16:9, 21:9 or W:H: wider 3D view, shown at that aspect\n"
                          "                       (2D-only and FMV frames stay 4:3; docs/WIDESCREEN.md)\n"
@@ -84,16 +84,15 @@ int main(int argc, char** argv) {
     const host::Settings cfg = host::ApplyCli(file, opt, "");  // everything but the per-game part
     const int interp_hz = host::InterpHz(cfg.video);
     int scale = cfg.video.resolution_scale;
-    if (interp_hz && scale > 1) {  // shortcut: the interpolator only knows 1x VRAM; compose them when it snapshots the scaled mirror
-        std::fprintf(stderr, "[settings] video.resolution_scale %d is ignored while fps_target > 60\n", scale);
+    bool use_gpu = cfg.video.renderer == "gpu";
+    if (interp_hz && scale > 1 && !use_gpu) {  // shortcut: the software interpolator replays at 1x only (the gpu one at s x)
+        std::fprintf(stderr, "[settings] video.resolution_scale %d is ignored while fps_target > 60 (software renderer)\n", scale);
         scale = 1;
     }
-    bool use_gpu = opt.renderer == "gpu";
-    if (use_gpu && interp_hz) {  // shortcut: the interpolator replays at 1x only (docs/GPU_RENDERER.md)
-        std::fprintf(stderr, "[gpu] --renderer gpu is not combined with --interp yet: software renderer\n");
-        use_gpu = false;
+    if (!use_gpu && (scale < 1 || scale > 4)) {
+        std::fprintf(stderr, "[settings] video.resolution_scale %d needs the gpu renderer (software: 1-4)\n", scale);
+        scale = std::clamp(scale, 1, 4);
     }
-    if (!use_gpu) scale = std::clamp(scale, 1, 4);
     if (cfg.video.fps_target == 30 || cfg.video.fps_target == 90)
         std::fprintf(stderr, "[settings] video.fps_target %d is not supported yet, running at 60\n", cfg.video.fps_target);
     std::array<MemoryCard, 2> cards;
@@ -121,8 +120,17 @@ int main(int argc, char** argv) {
     int win_aw = 4, win_ah = 3;  // the window opens at the widescreen aspect when one is set
     host::ParseWidescreen(cfg.video.widescreen, win_aw, win_ah);
     const int win_h0 = 240 * win_scale;
-    if (!SDL_CreateWindowAndRenderer("PersonaRM", win_h0 * win_aw / win_ah, win_h0,
-                                     SDL_WINDOW_RESIZABLE | (hidden ? SDL_WINDOW_HIDDEN : 0), &window, &renderer)) {
+    const SDL_WindowFlags win_flags = SDL_WINDOW_RESIZABLE | (hidden ? SDL_WINDOW_HIDDEN : 0);
+    if (use_gpu && (window = SDL_CreateWindow("PersonaRM", win_h0 * win_aw / win_ah, win_h0, win_flags))) {
+        // The SDL GPU renderer: GpuRenderer draws on its device and the picture is presented without readback.
+        renderer = SDL_CreateGPURenderer(nullptr, window);
+        if (!renderer) renderer = SDL_CreateRenderer(window, nullptr);
+    }
+    if (!window || !renderer) {
+        if (renderer) SDL_DestroyRenderer(renderer), renderer = nullptr;
+        if (window) SDL_DestroyWindow(window), window = nullptr;
+    }
+    if (!window && !SDL_CreateWindowAndRenderer("PersonaRM", win_h0 * win_aw / win_ah, win_h0, win_flags, &window, &renderer)) {
         std::fprintf(stderr, "SDL_CreateWindowAndRenderer: %s\n", SDL_GetError());
         SDL_Quit();
         return EXIT_FAILURE;
@@ -141,9 +149,9 @@ int main(int argc, char** argv) {
         } else SDL_SetWindowFullscreen(window, false);
     };
     apply_mode(window_mode);
-    std::printf("[settings] file=%s window=%s x%d integer=%d aspect=%s vsync=%d interp=%d volume=%d mute=%d pause_on_focus_loss=%d\n",
+    std::printf("[settings] file=%s window=%s x%d integer=%d aspect=%s vsync=%d interp=%d renderer=%s scale=%d volume=%d mute=%d pause_on_focus_loss=%d\n",
                 settings_path.c_str(), window_mode.c_str(), cfg.video.window_scale, cfg.video.integer_scaling,
-                cfg.video.aspect.c_str(), vsync, interp_hz, cfg.audio.master_volume, cfg.audio.mute, cfg.pause_on_focus_loss);
+                cfg.video.aspect.c_str(), vsync, interp_hz, use_gpu ? "gpu" : "software", scale, cfg.audio.master_volume, cfg.audio.mute, cfg.pause_on_focus_loss);
     // SPU output: 44.1 kHz stereo s16. No stream = run silent.
     const SDL_AudioSpec spec{SDL_AUDIO_S16, 2, 44100};
     SDL_AudioStream* audio = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, nullptr, nullptr);
@@ -222,13 +230,17 @@ int main(int argc, char** argv) {
         engine.SetGamePatches(std::move(patches));
     }
     GpuRenderer gpu_renderer;  // --renderer gpu: the CPU keeps rasterizing at 1x only
+    bool gpu_direct = true;    // its pictures are drawn by the window renderer (no readback)
     if (use_gpu) {
         std::string err;
-        if (!gpu_renderer.Init(engine.GetGpu(), uint32_t(scale), &err)) {
+        if (!gpu_renderer.Init(engine.GetGpu(), uint32_t(scale), &err, SDL_GetGPURendererDevice(renderer)) ||
+            (interp_hz && !gpu_renderer.EnableInterp(&err))) {
             std::fprintf(stderr, "[gpu] renderer unavailable (%s): software renderer\n", err.c_str());
+            gpu_renderer.Shutdown();
             use_gpu = false;
-            scale = std::clamp(scale, 1, 4);
+            scale = interp_hz ? 1 : std::clamp(scale, 1, 4);
         }
+        if (use_gpu && !game.mods.empty()) gpu_renderer.SetTextureHook(&texture_hook);  // HD textures at s x
     }
     engine.GetGpu().SetResolutionScale(uint32_t(use_gpu ? 1 : scale));
     const bool widescreen = win_aw * 3 != win_ah * 4;
@@ -284,7 +296,7 @@ int main(int argc, char** argv) {
     std::vector<uint32_t> cmd_log;
     if (interp_hz) engine.GetGpu().SetCommandLog(&cmd_log);
     const int sub = interp_hz ? interp_hz / 60 : 1;  // presents per emulated frame
-    uint64_t run_ns = 0, interp_ns = 0, interp_frames = 0, last_hash = 0, gpu_ns = 0;
+    uint64_t run_ns = 0, interp_ns = 0, interp_frames = 0, last_hash = 0, gpu_ns = 0, wall_t0 = SDL_GetTicksNS();
     uint32_t gpu_draws = 0;  // most draw calls in one picture this second
     uint32_t flips = 0, changes = 0, pairs = 0, pairs_ok = 0, last_start = ~0u;
 
@@ -428,9 +440,12 @@ int main(int argc, char** argv) {
         // GPU uses to squeeze 2D); 2D-only screens (title, FMV, menus without a scene) keep their 4:3 picture.
         const Widescreen2D* ws = engine.GetWidescreen2D();
         const bool wide_now = ws && ws->Wide() && !gpu.GetDisplayArea().is_24bit;
-        if (interp_hz && interp.Consume(cmd_log, gpu, frame) && interp.Active(frame)) {
-            ++pairs;
-            pairs_ok += interp.PairOk();
+        if (interp_hz && interp.Consume(cmd_log, gpu, frame)) {
+            if (use_gpu) gpu_renderer.Flip();  // snapshot the scaled picture of the new game frame
+            if (interp.Active(frame)) {
+                ++pairs;
+                pairs_ok += interp.PairOk();
+            }
         }
         if (stats) {  // flips = display start changes; pictures = emulated frames whose display area changed
             const GpuDisplayArea& d = gpu.GetDisplayArea();
@@ -447,7 +462,10 @@ int main(int argc, char** argv) {
                 std::printf("[stats] f=%llu flips/s=%u pictures/s=%u interp_pairs=%u/%u %ux%u%s frame_ms=%.2f",
                             (unsigned long long)frame, flips, changes, pairs_ok, pairs, d.width, d.height,
                             d.is_24bit ? " 24bpp" : "", double(run_ns) / 60e6);
-                if (use_gpu)  // host GPU work per presented picture: submit + wait + readback
+                const uint64_t now = SDL_GetTicksNS();  // whole loop per emulated frame (emulation + present)
+                std::printf(" wall_ms=%.2f", double(now - wall_t0) / 60e6);
+                wall_t0 = now;
+                if (use_gpu)  // host GPU submission per presented picture (+ readback when dumping)
                     std::printf(" gpu_ms=%.2f max_draws=%u", double(gpu_ns) / 60e6, gpu_draws);
                 std::printf("\n");
                 std::fflush(stdout);
@@ -465,47 +483,71 @@ int main(int argc, char** argv) {
             GpuDisplayArea d = gpu.GetDisplayArea();
             bool off = (gpu.ReadGPUSTAT() >> 23) & 1;
             double t = -1;
+            GpuRenderer::Source src = GpuRenderer::kLive;
             if (interp_hz && interp.Active(frame)) {
                 t = interp.Fraction(double(frame) + double(s) / sub);
                 const uint64_t t0 = SDL_GetTicksNS();
+                const bool lerp = t > 0 && t < 1 && interp.PairOk();  // else Render shows one of the two frames
+                src = lerp ? GpuRenderer::kReplay : t >= 1 ? GpuRenderer::kCur : GpuRenderer::kPrev;
+                if (lerp && use_gpu) gpu_renderer.BeginReplay(interp.Scratch());  // the replay draws at s x too
                 interp.Render(t, vram, d);
-                if (t > 0 && t < 1 && interp.PairOk()) interp_ns += SDL_GetTicksNS() - t0, ++interp_frames;
+                if (lerp && use_gpu) gpu_renderer.EndReplay();
+                if (lerp) interp_ns += SDL_GetTicksNS() - t0, ++interp_frames;
                 off = false;
             }
             // 24bpp (FMV) is shown at 1x and stretched by the presenter.
             bool gpu_frame = use_gpu && !d.is_24bit;  // 24bpp (FMV): software at 1x, GPU work only flushed
+            const bool dump = !dump_dir.empty() && frame >= dump_from && frame <= dump_to;
+            // Direct: the GPU picture stays on the GPU and is drawn by the window's renderer; read back to dump only.
+            bool direct = gpu_direct && gpu_frame && !off && !dump && gpu_renderer.SharedDevice();
             if (use_gpu) {  // runs even with the display off: the recorded work must be flushed
                 const uint64_t gpu_t0 = SDL_GetTicksNS();
-                if (!gpu_renderer.Present(d, gpu_frame ? &rgba : nullptr)) {
+                if (!gpu_renderer.Present(d, gpu_frame && !off, gpu_frame && !off && !direct ? &rgba : nullptr, src)) {
                     std::fprintf(stderr, "[gpu] present failed (%s): software renderer at 1x\n", SDL_GetError());
                     gpu_renderer.Shutdown();
-                    use_gpu = gpu_frame = false;
+                    use_gpu = gpu_frame = direct = false;
                     scale = 1;
                 }
                 gpu_ns += SDL_GetTicksNS() - gpu_t0;
                 gpu_draws = std::max(gpu_draws, gpu_renderer.LastDrawCalls());
             }
+            SDL_Texture* shown = direct ? gpu_renderer.OutputTexture(renderer) : nullptr;
+            if (direct && !shown) {  // cannot wrap the GPU texture: read back from now on
+                std::fprintf(stderr, "[gpu] direct present unavailable (%s): reading pictures back\n", SDL_GetError());
+                gpu_direct = direct = false;
+                gpu_renderer.Present(d, true, &rgba, src);  // nothing queued: display pass + readback only
+            }
             const uint32_t hs = scale > 1 && !d.is_24bit ? uint32_t(scale) : 1;
             const uint32_t w = (d.width ? d.width : 320) * hs, h = (d.height ? d.height : 240) * hs;
-            if (off) rgba.assign(size_t(w) * h, 0xFF000000u);  // display disabled
-            else if (gpu_frame) {}  // rgba already holds the GPU picture
-            else if (hs > 1) host::DisplayToRgba(gpu.GetScaledVram(), d.x, d.y, w / hs, h / hs, false, rgba, hs);
-            else host::DisplayToRgba(*vram, d.x, d.y, w, h, d.is_24bit, rgba);
-            for (uint32_t p : rgba)
-                if (p & 0xFFFFFFu) { ++lit_frames; break; }
-            if (!dump_dir.empty() && frame >= dump_from && frame <= dump_to) {  // t999 = live, not interpolated
+            if (direct) {  // non-black check on the 1x picture
+                bool lit = false;
+                for (uint32_t y = 0; y < h / hs && !lit; ++y)
+                    for (uint32_t x = 0; x < w / hs && !lit; ++x) lit = ((*vram)[((d.y + y) & 511) * 1024 + ((d.x + x) & 1023)] & 0x7FFF) != 0;
+                lit_frames += lit;
+            } else {
+                if (off) rgba.assign(size_t(w) * h, 0xFF000000u);  // display disabled
+                else if (gpu_frame) {}  // rgba already holds the GPU picture
+                else if (hs > 1) host::DisplayToRgba(gpu.GetScaledVram(), d.x, d.y, w / hs, h / hs, false, rgba, hs);
+                else host::DisplayToRgba(*vram, d.x, d.y, w, h, d.is_24bit, rgba);
+                for (uint32_t p : rgba)
+                    if (p & 0xFFFFFFu) { ++lit_frames; break; }
+            }
+            if (dump) {  // t999 = live, not interpolated
                 char name[64];
                 std::snprintf(name, sizeof name, "/f%06llu_%d_t%03d.png", (unsigned long long)frame, s,
                               t < 0 ? 999 : int(t * 100 + 0.5));
                 PngCodec::EncodeToFile(dump_dir + name, w, h, reinterpret_cast<const uint8_t*>(rgba.data()));
             }
-            if (!texture || tex_w != int(w) || tex_h != int(h)) {
-                if (texture) SDL_DestroyTexture(texture);
-                texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING, int(w), int(h));
-                SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_LINEAR);
-                tex_w = int(w), tex_h = int(h);
+            if (!shown) {
+                if (!texture || tex_w != int(w) || tex_h != int(h)) {
+                    if (texture) SDL_DestroyTexture(texture);
+                    texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING, int(w), int(h));
+                    SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_LINEAR);
+                    tex_w = int(w), tex_h = int(h);
+                }
+                SDL_UpdateTexture(texture, nullptr, rgba.data(), int(w * 4));
+                shown = texture;
             }
-            SDL_UpdateTexture(texture, nullptr, rgba.data(), int(w * 4));
 
             int win_w = 0, win_h = 0;
             SDL_GetRenderOutputSize(renderer, &win_w, &win_h);
@@ -514,7 +556,7 @@ int main(int argc, char** argv) {
             const SDL_FRect dst{float(r.x), float(r.y), float(r.w), float(r.h)};
             SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
             SDL_RenderClear(renderer);
-            SDL_RenderTexture(renderer, texture, nullptr, &dst);
+            SDL_RenderTexture(renderer, shown, nullptr, &dst);
             const bool last = s == sub - 1 && !screenshot.empty() && (quit || (max_frames && frame >= max_frames));
             if (last) {
                 if (SDL_Surface* shot = SDL_RenderReadPixels(renderer, nullptr)) {
