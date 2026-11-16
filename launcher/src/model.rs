@@ -1,0 +1,311 @@
+//! Launcher data model: its own config (launcher.json), the game settings it edits in the game's
+//! settings.json (unknown keys preserved), and the command line used to start the game.
+//! No UI code here so everything is unit-testable.
+
+use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value, json};
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+
+/// One entry of the library. Data-driven: a future PSP/Nintendo entry only needs a different
+/// `exe`/args scheme; for now every game is started by `personarm_sdl <cue>`.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Game {
+    pub name: String,
+    /// Disc serials of this game, used to write the per-game `game.<serial>` settings section.
+    pub serials: Vec<String>,
+    /// Language ("ja" / "en") -> disc image (.cue), chosen by the user.
+    #[serde(default)]
+    pub discs: BTreeMap<String, String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(default)]
+pub struct LauncherConfig {
+    /// Path to personarm_sdl; empty = look next to the launcher.
+    pub game_exe: String,
+    /// "software" | "gpu" (CLI only in the game).
+    pub renderer: String,
+    /// Internal resolution multiplier; 0 = auto (gpu only).
+    pub resolution: u32,
+    pub games: Vec<Game>,
+}
+
+impl Default for LauncherConfig {
+    fn default() -> Self {
+        Self {
+            game_exe: String::new(),
+            renderer: "software".into(),
+            resolution: 1,
+            games: vec![Game {
+                name: "Persona 2: Eternal Punishment".into(),
+                serials: ["SLPS-02785", "SLPS-02786", "SLUS-01158", "SLUS-01339"].map(String::from).to_vec(),
+                discs: BTreeMap::new(),
+            }],
+        }
+    }
+}
+
+/// The subset of the game's settings.json the launcher edits.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GameSettings {
+    pub language: String,
+    pub fps: u32,
+    pub window_mode: String,
+    pub widescreen: String,
+    pub volume: u32,
+    pub mute: bool,
+    pub text_speed: String,
+    pub save_dir: String,
+    pub pause_on_focus_loss: bool,
+}
+
+impl Default for GameSettings {
+    fn default() -> Self {
+        Self {
+            language: "ja".into(),
+            fps: 60,
+            window_mode: "windowed".into(),
+            widescreen: "off".into(),
+            volume: 100,
+            mute: false,
+            text_speed: "normal".into(),
+            save_dir: String::new(),
+            pause_on_focus_loss: true,
+        }
+    }
+}
+
+fn get<'a>(doc: &'a Value, path: &[&str]) -> Option<&'a Value> {
+    path.iter().try_fold(doc, |v, k| v.get(k))
+}
+
+/// Set `path` in `doc`, creating (or replacing non-object) parents; sibling keys are untouched.
+fn set(doc: &mut Value, path: &[&str], val: Value) {
+    let mut cur = doc;
+    for k in &path[..path.len() - 1] {
+        if !cur.is_object() {
+            *cur = Value::Object(Map::new());
+        }
+        cur = cur.as_object_mut().unwrap().entry(*k).or_insert_with(|| Value::Object(Map::new()));
+    }
+    if !cur.is_object() {
+        *cur = Value::Object(Map::new());
+    }
+    cur.as_object_mut().unwrap().insert(path[path.len() - 1].into(), val);
+}
+
+impl GameSettings {
+    /// Read the known keys; anything missing or of the wrong type keeps its default.
+    pub fn from_value(doc: &Value, serials: &[String]) -> Self {
+        let d = Self::default();
+        let s = |p: &[&str], def: &str| get(doc, p).and_then(Value::as_str).unwrap_or(def).to_string();
+        let u = |p: &[&str], def: u32| get(doc, p).and_then(Value::as_u64).map_or(def, |n| n as u32);
+        let b = |p: &[&str], def: bool| get(doc, p).and_then(Value::as_bool).unwrap_or(def);
+        let text_speed = serials
+            .iter()
+            .find_map(|id| get(doc, &["game", id, "text_speed"]).and_then(Value::as_str))
+            .unwrap_or(&d.text_speed)
+            .to_string();
+        Self {
+            language: s(&["general", "language"], &d.language),
+            fps: u(&["video", "fps_target"], d.fps),
+            window_mode: s(&["video", "window_mode"], &d.window_mode),
+            widescreen: s(&["video", "widescreen"], &d.widescreen),
+            volume: u(&["audio", "master_volume"], d.volume).min(100),
+            mute: b(&["audio", "mute"], d.mute),
+            text_speed,
+            save_dir: s(&["general", "save_dir"], ""),
+            pause_on_focus_loss: b(&["general", "pause_on_focus_loss"], d.pause_on_focus_loss),
+        }
+    }
+
+    /// Write the known keys into `doc`; every other key at every level is preserved.
+    /// `resolution` goes to `video.resolution_scale` only when the game file accepts it (1..4).
+    pub fn apply(&self, doc: &mut Value, serials: &[String], resolution: u32) {
+        if !doc.is_object() {
+            *doc = Value::Object(Map::new());
+        }
+        if doc.get("version").is_none() {
+            set(doc, &["version"], json!(1));
+        }
+        set(doc, &["general", "language"], json!(self.language));
+        set(doc, &["general", "save_dir"], json!(self.save_dir));
+        set(doc, &["general", "pause_on_focus_loss"], json!(self.pause_on_focus_loss));
+        set(doc, &["video", "fps_target"], json!(self.fps));
+        set(doc, &["video", "window_mode"], json!(self.window_mode));
+        set(doc, &["video", "widescreen"], json!(self.widescreen));
+        if (1..=4).contains(&resolution) {
+            set(doc, &["video", "resolution_scale"], json!(resolution));
+        }
+        set(doc, &["audio", "master_volume"], json!(self.volume));
+        set(doc, &["audio", "mute"], json!(self.mute));
+        for id in serials {
+            set(doc, &["game", id, "text_speed"], json!(self.text_speed));
+        }
+    }
+}
+
+/// Arguments for `personarm_sdl`. Renderer and scale are CLI-only (the file accepts 1..4 and no renderer).
+pub fn build_args(settings: &str, cue: &str, cfg: &LauncherConfig, s: &GameSettings) -> Vec<String> {
+    let mut a: Vec<String> = vec![cue.into(), "--settings".into(), settings.into(), "--renderer".into(), cfg.renderer.clone()];
+    // The host rejects an internal resolution above 1x together with frame interpolation (fps > 60).
+    if s.fps <= 60 {
+        let gpu = cfg.renderer == "gpu";
+        let r = match cfg.resolution {
+            0 if gpu => "auto".to_string(),
+            n => n.clamp(1, if gpu { 9 } else { 4 }).to_string(),
+        };
+        a.extend(["--resolution-scale".into(), r]);
+    }
+    a
+}
+
+/// Disc for the selected language, if the user set one.
+pub fn disc_for<'a>(g: &'a Game, language: &str) -> Option<&'a str> {
+    g.discs.get(language).map(String::as_str).filter(|p| !p.is_empty())
+}
+
+// ── paths ──
+
+/// Per-user data root, same one the game uses (`%APPDATA%` on Windows).
+fn data_root() -> PathBuf {
+    let var = |k: &str| std::env::var_os(k).map(PathBuf::from);
+    if cfg!(windows) {
+        var("APPDATA").unwrap_or_default()
+    } else if let Some(x) = var("XDG_DATA_HOME") {
+        x
+    } else if cfg!(target_os = "macos") {
+        var("HOME").unwrap_or_default().join("Library/Application Support")
+    } else {
+        var("HOME").unwrap_or_default().join(".local/share")
+    }
+}
+
+pub fn launcher_dir() -> PathBuf { data_root().join("PersonaRM") }
+pub fn launcher_json() -> PathBuf { launcher_dir().join("launcher.json") }
+pub fn log_dir() -> PathBuf { launcher_dir().join("logs") }
+/// Same file as `SDL_GetPrefPath("PersonaRM","PersonaRM")/settings.json`.
+pub fn game_settings_json() -> PathBuf { launcher_dir().join("PersonaRM").join("settings.json") }
+
+pub fn exe_name() -> &'static str { if cfg!(windows) { "personarm_sdl.exe" } else { "personarm_sdl" } }
+
+/// `game_exe` if it exists, else `personarm_sdl` next to the launcher.
+pub fn find_game_exe(cfg: &LauncherConfig) -> Option<PathBuf> {
+    let p = PathBuf::from(&cfg.game_exe);
+    if !cfg.game_exe.is_empty() && p.is_file() {
+        return Some(p);
+    }
+    let next = std::env::current_exe().ok()?.parent()?.join(exe_name());
+    next.is_file().then_some(next)
+}
+
+// ── io ──
+
+/// Hand-edited files (Windows PowerShell, Notepad) often start with a UTF-8 BOM.
+fn strip_bom(t: &str) -> &str { t.strip_prefix('\u{feff}').unwrap_or(t) }
+
+pub fn load_launcher()-> LauncherConfig {
+    std::fs::read_to_string(launcher_json()).ok().and_then(|t| serde_json::from_str(strip_bom(&t)).ok()).unwrap_or_default()
+}
+
+fn write_atomic(path: &std::path::Path, text: &str) -> std::io::Result<()> {
+    if let Some(d) = path.parent() {
+        std::fs::create_dir_all(d)?;
+    }
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, text)?;
+    std::fs::rename(&tmp, path)
+}
+
+pub fn save_launcher(c: &LauncherConfig) -> std::io::Result<()> {
+    write_atomic(&launcher_json(), &serde_json::to_string_pretty(c).unwrap())
+}
+
+/// The game's settings document; missing or malformed file = empty object (never an error).
+pub fn load_game_doc() -> Value {
+    std::fs::read_to_string(game_settings_json())
+        .ok()
+        .and_then(|t| serde_json::from_str::<Value>(strip_bom(&t)).ok())
+        .filter(Value::is_object)
+        .unwrap_or_else(|| json!({}))
+}
+
+pub fn save_game_doc(doc: &Value) -> std::io::Result<()> {
+    write_atomic(&game_settings_json(), &serde_json::to_string_pretty(doc).unwrap())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn serials() -> Vec<String> { vec!["SLPS-02785".into(), "SLUS-01158".into()] }
+
+    #[test]
+    fn apply_preserves_unknown_keys() {
+        let mut doc = json!({
+            "version": 1,
+            "launcher": {"x": 1},
+            "video": {"window_scale": 5, "future_key": "keep", "fps_target": 30},
+            "input": {"keyboard": {"cross": ["X"]}},
+            "game": {"SLPS-02785": {"memcard1": "a.mcd", "text_speed": "fast"}, "OTHER": {"a": 1}}
+        });
+        let s = GameSettings { fps: 120, language: "en".into(), text_speed: "instant".into(), mute: true, volume: 40, ..Default::default() };
+        s.apply(&mut doc, &serials(), 3);
+        assert_eq!(doc["launcher"]["x"], 1);
+        assert_eq!(doc["video"]["window_scale"], 5);
+        assert_eq!(doc["video"]["future_key"], "keep");
+        assert_eq!(doc["input"]["keyboard"]["cross"][0], "X");
+        assert_eq!(doc["game"]["SLPS-02785"]["memcard1"], "a.mcd");
+        assert_eq!(doc["game"]["OTHER"]["a"], 1);
+        assert_eq!(doc["video"]["fps_target"], 120);
+        assert_eq!(doc["video"]["resolution_scale"], 3);
+        assert_eq!(doc["general"]["language"], "en");
+        assert_eq!(doc["audio"]["master_volume"], 40);
+        assert_eq!(doc["audio"]["mute"], true);
+        assert_eq!(doc["game"]["SLPS-02785"]["text_speed"], "instant");
+        assert_eq!(doc["game"]["SLUS-01158"]["text_speed"], "instant");
+    }
+
+    #[test]
+    fn apply_to_empty_or_garbage_and_roundtrip() {
+        for mut doc in [json!({}), json!(null), json!([1]), json!({"video": 7})] {
+            let s = GameSettings { widescreen: "21:9".into(), window_mode: "borderless".into(), ..Default::default() };
+            s.apply(&mut doc, &serials(), 0);
+            assert_eq!(doc["version"], 1);
+            assert!(doc["video"].get("resolution_scale").is_none(), "auto/>4 is CLI-only");
+            assert_eq!(GameSettings::from_value(&doc, &serials()), s);
+        }
+    }
+
+    #[test]
+    fn high_resolution_not_written_to_file() {
+        let mut doc = json!({"video": {"resolution_scale": 2}});
+        GameSettings::default().apply(&mut doc, &serials(), 9);
+        assert_eq!(doc["video"]["resolution_scale"], 2);
+    }
+
+    #[test]
+    fn args() {
+        let mut c = LauncherConfig { renderer: "gpu".into(), resolution: 0, ..Default::default() };
+        let s = GameSettings::default();
+        assert_eq!(build_args("S.json", "d.cue", &c, &s), ["d.cue", "--settings", "S.json", "--renderer", "gpu", "--resolution-scale", "auto"]);
+        c.resolution = 9;
+        assert_eq!(build_args("S", "d", &c, &s)[6], "9");
+        c.renderer = "software".into();
+        assert_eq!(build_args("S", "d", &c, &s)[6], "4"); // software caps at 4x
+        c.resolution = 0;
+        assert_eq!(build_args("S", "d", &c, &s)[6], "1");
+        let fast = GameSettings { fps: 120, ..Default::default() };
+        assert_eq!(build_args("S", "d", &c, &fast), ["d", "--settings", "S", "--renderer", "software"]);
+    }
+
+    #[test]
+    fn disc_lookup() {
+        let mut g = LauncherConfig::default().games.remove(0);
+        g.discs.insert("ja".into(), "a.cue".into());
+        g.discs.insert("en".into(), String::new());
+        assert_eq!(disc_for(&g, "ja"), Some("a.cue"));
+        assert_eq!(disc_for(&g, "en"), None);
+    }
+}
