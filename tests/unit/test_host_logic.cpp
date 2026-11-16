@@ -93,13 +93,17 @@ int main() {
     CHECK(ParseHostArgs(6, gpu9, o) && o.renderer == "gpu" && o.resolution_scale == 9);
     const char* gpuauto[] = {"personarm_sdl", "d.cue", "--resolution-scale", "auto", "--renderer", "gpu"};
     CHECK(ParseHostArgs(6, gpuauto, o) && o.resolution_scale == 0);
-    const char* sw9[] = {"personarm_sdl", "d.cue", "--resolution-scale", "9"};
-    CHECK(!ParseHostArgs(4, sw9, o));
-    const char* swauto[] = {"personarm_sdl", "d.cue", "--resolution-scale", "auto"};
-    CHECK(!ParseHostArgs(4, swauto, o));
+    const char* sw9[] = {"personarm_sdl", "d.cue", "--renderer", "software", "--resolution-scale", "9"};
+    CHECK(!ParseHostArgs(6, sw9, o));
+    const char* swauto[] = {"personarm_sdl", "d.cue", "--renderer", "software", "--resolution-scale", "auto"};
+    CHECK(!ParseHostArgs(6, swauto, o));
+    const char* file9[] = {"personarm_sdl", "d.cue", "--resolution-scale", "9"};  // renderer from the settings file
+    CHECK(ParseHostArgs(4, file9, o) && o.resolution_scale == 9 && o.renderer.empty());
+    const char* sw10[] = {"personarm_sdl", "d.cue", "--resolution-scale", "10"};
+    CHECK(!ParseHostArgs(4, sw10, o));
     const char* badr[] = {"personarm_sdl", "d.cue", "--renderer", "vulkan"};
     CHECK(!ParseHostArgs(4, badr, o));
-    CHECK(ParseHostArgs(2, plain, o) && o.renderer == "software");
+    CHECK(ParseHostArgs(2, plain, o) && o.renderer.empty());
     const char* two[] = {"personarm_sdl", "d.cue", "e.cue"};
     CHECK(!ParseHostArgs(3, two, o));
 
