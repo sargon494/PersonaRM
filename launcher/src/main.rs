@@ -7,15 +7,8 @@ use eframe::egui::{self, Color32, RichText, ViewportCommand};
 use model::*;
 use serde_json::Value;
 use std::path::PathBuf;
-use std::sync::mpsc::{Receiver, channel};
 
 const ACCENT: Color32 = Color32::from_rgb(110, 140, 255);
-
-/// Result of a game run, sent by the waiter thread.
-struct Exit {
-    ok: bool,
-    msg: String,
-}
 
 struct App {
     cfg: LauncherConfig,
@@ -23,7 +16,6 @@ struct App {
     doc: Value,
     dirty: bool,
     error: Option<String>,
-    running: Option<Receiver<Exit>>,
 }
 
 impl App {
@@ -44,7 +36,10 @@ impl App {
         }
         let doc = load_game_doc();
         let settings = GameSettings::from_value(&doc, &cfg.games[0].serials);
-        Self { cfg, settings, doc, dirty: false, error: None, running: None }
+        let last = log_dir().join("last_error.txt");
+        let error = std::fs::read_to_string(&last).ok();
+        let _ = std::fs::remove_file(last);
+        Self { cfg, settings, doc, dirty: false, error }
     }
 
     fn save(&mut self) {
@@ -70,35 +65,14 @@ impl App {
             return;
         };
         let args = build_args(&game_settings_json().to_string_lossy(), cue, &self.cfg, &self.settings);
-        let log_path = log_dir().join("personarm_sdl.log");
-        let log = std::fs::create_dir_all(log_dir()).and_then(|_| std::fs::File::create(&log_path));
-        let mut cmd = std::process::Command::new(&exe);
-        cmd.args(&args).stdout(std::process::Stdio::null());
-        if let Ok(f) = log {
-            cmd.stderr(f);
+        // The UI process exits while the game runs (an OpenGL window costs ~100 MB even hidden); a
+        // windowless watcher (`--run`, a few MB) waits for the game and reopens the launcher.
+        let me = std::env::current_exe().unwrap_or_default();
+        if let Err(e) = std::process::Command::new(me).arg("--run").arg(&exe).args(&args).spawn() {
+            self.error = Some(format!("Could not start the game: {e}"));
+            return;
         }
-        let mut child = match cmd.spawn() {
-            Ok(c) => c,
-            Err(e) => {
-                self.error = Some(format!("Could not start the game: {e}"));
-                return;
-            }
-        };
-        let (tx, rx) = channel();
-        let ctx2 = ctx.clone();
-        std::thread::spawn(move || {
-            let status = child.wait();
-            let ok = status.as_ref().is_ok_and(|s| s.success());
-            let code = status.map_or("?".into(), |s| s.code().map_or("signal".into(), |c| c.to_string()));
-            let tail = std::fs::read_to_string(&log_path).unwrap_or_default();
-            let tail: Vec<&str> = tail.lines().rev().take(8).collect();
-            let msg = format!("The game exited with code {code}.\n{}", tail.into_iter().rev().collect::<Vec<_>>().join("\n"));
-            let _ = tx.send(Exit { ok, msg });
-            ctx2.request_repaint(); // wakes `logic` even while the window is hidden
-        });
-        self.running = Some(rx);
-        // Hidden window: no taskbar button, not in Alt-Tab, no focus.
-        ctx.send_viewport_cmd(ViewportCommand::Visible(false));
+        ctx.send_viewport_cmd(ViewportCommand::Close);
     }
 }
 
@@ -133,16 +107,6 @@ fn heading(ui: &mut egui::Ui, t: &str) {
 }
 
 impl eframe::App for App {
-    fn logic(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
-        if let Some(Ok(exit)) = self.running.as_ref().map(|r| r.try_recv()) {
-            self.running = None;
-            if !exit.ok {
-                self.error = Some(exit.msg);
-            }
-            ctx.send_viewport_cmd(ViewportCommand::Visible(true));
-        }
-    }
-
     fn ui(&mut self, ui: &mut egui::Ui, _: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         let mut dirty = false;
@@ -248,7 +212,7 @@ impl eframe::App for App {
                 let btn = egui::Button::new(RichText::new("Play").size(20.0).strong().color(Color32::WHITE))
                     .fill(ACCENT)
                     .min_size(egui::vec2(ui.available_width(), 44.0));
-                play = ui.add_enabled(self.running.is_none(), btn).clicked();
+                play = ui.add(btn).clicked();
             });
         });
         self.dirty |= dirty;
@@ -261,7 +225,36 @@ impl eframe::App for App {
     }
 }
 
+/// `--run <exe> <args...>`: start the game, wait for it, record a failure for the UI, reopen the UI.
+fn run_watcher(exe: &str, args: &[String]) {
+    let log_path = log_dir().join("personarm_sdl.log");
+    let log = std::fs::create_dir_all(log_dir()).and_then(|_| std::fs::File::create(&log_path));
+    let mut cmd = std::process::Command::new(exe);
+    cmd.args(args).stdout(std::process::Stdio::null());
+    if let Ok(f) = log {
+        cmd.stderr(f);
+    }
+    let status = cmd.status();
+    if !status.as_ref().is_ok_and(|s| s.success()) {
+        let code = status.map_or("?".into(), |s| s.code().map_or("signal".into(), |c| c.to_string()));
+        let tail = std::fs::read_to_string(&log_path).unwrap_or_default();
+        let tail: Vec<&str> = tail.lines().rev().take(8).collect();
+        let msg = format!("The game exited with code {code}.
+{}", tail.into_iter().rev().collect::<Vec<_>>().join("
+"));
+        let _ = std::fs::write(log_dir().join("last_error.txt"), msg);
+    }
+    if let Ok(me) = std::env::current_exe() {
+        let _ = std::process::Command::new(me).spawn();
+    }
+}
+
 fn main() -> eframe::Result {
+    let argv: Vec<String> = std::env::args().collect();
+    if argv.len() >= 3 && argv[1] == "--run" {
+        run_watcher(&argv[2], &argv[3..]);
+        return Ok(());
+    }
     let opts = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("PersonaRM")
