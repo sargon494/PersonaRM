@@ -1,0 +1,72 @@
+name: Release
+
+# Push a tag `vX.Y.Z` (or run manually with a tag name) to publish a Windows zip + .sha256 on GitHub
+# Releases. The launcher's self-updater reads that release. No game data, BIOS or recompiled game
+# code is ever built or shipped (PRM_RECOMP_GENERATED_DIR is deliberately not set).
+
+on:
+  push:
+    tags: [ 'v*' ]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag, e.g. v0.2.0 (creates a DRAFT release; publish it by hand)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    name: Release - Windows
+    runs-on: windows-latest
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check tag
+        shell: pwsh
+        run: |
+          if ($env:TAG -notmatch '^v\d+\.\d+\.\d+$') { throw "Tag '$env:TAG' must look like v1.2.3" }
+
+      - name: Build game (SDL3 host, no recompiled code)
+        shell: pwsh
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DPRM_WITH_SDL3=ON
+          cmake --build build --config Release --target personarm personarm_sdl
+
+      - name: Test launcher
+        shell: pwsh
+        working-directory: launcher
+        run: cargo test --release
+
+      - name: Build launcher (version baked in from the tag)
+        shell: pwsh
+        working-directory: launcher
+        run: |
+          $env:PRM_VERSION = $env:TAG.TrimStart('v')
+          cargo build --release
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $bin = Split-Path (Get-ChildItem build -Recurse -Filter personarm_sdl.exe | Select-Object -First 1).FullName
+          ./scripts/package-release.ps1 -Tag $env:TAG -BinDir $bin -Launcher launcher/target/release/launcher.exe -Out dist
+
+      - name: Publish release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $files = @(Get-ChildItem dist -Filter "PersonaRM-*" | ForEach-Object FullName)
+          $extra = @()
+          if ('${{ github.event_name }}' -eq 'workflow_dispatch') { $extra += '--draft' }
+          gh release view $env:TAG *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $env:TAG @files --clobber
+          } else {
+            gh release create $env:TAG @files --title "PersonaRM $env:TAG" --generate-notes @extra
+          }
+          if ($LASTEXITCODE -ne 0) { exit 1 }

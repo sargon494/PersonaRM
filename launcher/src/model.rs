@@ -28,6 +28,8 @@ pub struct LauncherConfig {
     pub renderer: String,
     /// Internal resolution multiplier; 0 = auto (gpu only).
     pub resolution: u32,
+    /// Look for a newer release on start (one background request, silent when offline).
+    pub check_updates: bool,
     pub games: Vec<Game>,
 }
 
@@ -37,6 +39,7 @@ impl Default for LauncherConfig {
             game_exe: String::new(),
             renderer: "software".into(),
             resolution: 1,
+            check_updates: true,
             games: vec![Game {
                 name: "Persona 2: Eternal Punishment".into(),
                 serials: ["SLPS-02785", "SLPS-02786", "SLUS-01158", "SLUS-01339"].map(String::from).to_vec(),
