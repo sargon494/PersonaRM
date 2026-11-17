@@ -44,6 +44,10 @@ public:
     uint64_t ProjectionCount() const { return m_projections; }
     /// Widescreen: each RTPS/RTPT screen XY is noted here so the GPU can tell 3D from 2D (null = off).
     void SetProjectionTracker(Widescreen2D* t) { m_tracker = t; }
+    /// Session settings that a save state must not overwrite (the widescreen factor and tracker pointer).
+    void KeepSessionConfig(const Gte& session) {
+        m_ws_num = session.m_ws_num, m_ws_den = session.m_ws_den, m_tracker = session.m_tracker;
+    }
 
     // psx-spx "GTE Division Inaccuracy": UNR Newton-Raphson division.
     // Returns min(1FFFFh, H*10000h/SZ3) as the hardware computes it; sets

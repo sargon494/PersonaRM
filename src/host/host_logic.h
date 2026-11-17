@@ -69,6 +69,7 @@ struct HostOptions {
     bool interp_given = false;      // --interp was on the command line (even --interp 0)
     bool resolution_scale_given = false;  // --resolution-scale was on the command line
     bool save_settings = false;     // --save-settings: write the effective settings back to the file
+    int load_slot = -1;             // --load-state N: load save-state slot N right after boot (as F8)
     std::string record_input;       // --record-input F: write the played pad presses as an --input-script
     bool stats = false, unthrottled = false, hidden = false;
 };

@@ -96,6 +96,17 @@ static void TestCpu() {
         CHECK(a.GetGTE().ReadDataRegister(i) == b.GetGTE().ReadDataRegister(i));
         CHECK(a.GetGTE().ReadControlRegister(i) == b.GetGTE().ReadControlRegister(i));
     }
+    // A state saved with widescreen on (tracker pointer, 3/4 factor) loaded into a session with it off:
+    // the session keeps its own settings. Before the fix b got a's pointer and RTPS crashed on it.
+    CpuContext c;
+    a.GetGTE().SetWidescreen(3, 4);
+    a.GetGTE().SetProjectionTracker(reinterpret_cast<Widescreen2D*>(uintptr_t(16)));  // never dereferenced
+    RoundTrip(a, b);
+    RoundTrip(a, c);
+    c.GetGTE().SetWidescreen(1, 1);  // reference: same registers, widescreen off
+    b.GetGTE().ExecuteCommand(0x00180001);  // RTPS: would dereference a's pointer
+    c.GetGTE().ExecuteCommand(0x00180001);
+    CHECK(b.GetGTE().ReadDataRegister(14) == c.GetGTE().ReadDataRegister(14));  // SXY2 unscaled
 }
 
 static void TestGpu() {

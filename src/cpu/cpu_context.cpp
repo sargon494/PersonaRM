@@ -546,6 +546,12 @@ void CpuContext::Serialize(StateIO& io) {
     io(m_regs, m_cycles, m_next_pc, m_current_pc, m_prev_was_branch, m_in_delay_slot, m_cp0_badvaddr,
        m_load_delay_reg, m_load_delay_val, m_prev_load_reg, m_prev_load_val);
     io.Tag("GTE ");
-    io(m_gte);  // registers only (no pointers): trivially copyable
+    // The Gte is trivially copyable but also holds session settings (widescreen factor, a tracker pointer):
+    // states store them neutral and a load keeps this session's, never another process's pointer.
+    Gte g = m_gte;
+    g.KeepSessionConfig(Gte{});
+    io(g);
+    g.KeepSessionConfig(m_gte);
+    m_gte = g;
 }
 } // namespace personarm
