@@ -63,7 +63,7 @@
                 <p class="lead">
                     PersonaRM は Windows と Linux 向けのオープンソースのランタイム兼ランチャーで、
                     現在開発中です。ゲームに必要な PlayStation 1 のハードウェアを再構築しています。
-                    まだプレイはできませんが、ゲーム本来の実行ファイルはすでにイントロを再生し、
+                    まだ完全にプレイできるわけではありませんが、ゲーム本来の実行ファイルはすでにイントロを再生し、
                     タイトル画面を表示し、ニューゲームでは操作キャラクターの自由移動とメインメニューまで
                     到達します(任意で SDL3 ウィンドウを使用。音楽と効果音も再生されます)。
                 </p>
@@ -99,7 +99,7 @@
                 </article>
                 <article class="card reveal">
                     <h3>拡張機能</h3>
-                    <p>ステートセーブ（F5 / F8、10 スロット）、キーを押している間の最大 16 倍の早送り、ワイドスクリーンのプロトタイプが使えます。コントローラーのボタン表示は今後対応します。</p>
+                    <p>ステートセーブ（F5 / F8、10 スロット）、キーを押している間の最大 16 倍の早送り、実験的なワイドスクリーンが使えます。コントローラーのボタン表示は今後対応します。</p>
                 </article>
             </div>
         </section>
@@ -137,7 +137,7 @@
                 </article>
                 <article class="feature reveal">
                     <h3>表示モード</h3>
-                    <p>4:3 に加え、ワイドスクリーンのプロトタイプ(16:9、21:9)があります。予定:画面いっぱい(Fill)。</p>
+                    <p>4:3 に加え、実験的なワイドスクリーン(16:9、21:9)があります。予定:画面いっぱい(Fill)。</p>
                 </article>
                 <article class="feature reveal">
                     <h3>コントローラー</h3>
@@ -158,15 +158,15 @@
             </header>
             <p class="intro reveal">PersonaRM は開発中で、まだプレイはできません。計画は次のとおりです。
                 CPU の正しさを検証できる状態にし、マシンの中核を完成させ、ゲームを起動し、その後ゲームのコードを事前にコンパイルします。</p>
-            <p class="intro reveal"><strong>現在のフェーズ:全 6 ステップ中のステップ 4、静的再コンパイル(進行中)。</strong> CPU とマシンの中核は完成しています。ステップ 3(初回起動)は、さらに先へ進めるために継続中です。ディスク 1 の日本版では、学校でのセーブから最初の戦闘に到達して勝利でき、その経路でエミュレーターのバグはありません。手動で数回の戦闘を行っても不具合は出ませんでした。現在の最優先事項は、これらの設定でゲームを起動する軽量ランチャー(Rust + egui)で、現在開発中です。
+            <p class="intro reveal"><strong>現在のフェーズ:ユーザーの報告をもとに、ゲームをできるだけプレイしやすくする段階。</strong> 最初の公開版はリリース済みです(クイックスタートを参照)。 CPU とマシンの中核は完成しています。ステップ 3(初回起動)は、さらに先へ進めるために継続中です。ディスク 1 の日本版では、学校でのセーブから最初の戦闘に到達して勝利でき、その経路でエミュレーターのバグはありません。手動で数回の戦闘を行っても不具合は出ませんでした。軽量ランチャー(Rust + egui)はリリース済みで、これらの設定でゲームを起動し、GitHub Releases から自動更新されます。
                 ディスク 1 は音声付きでイントロを再生し、タイトル画面を表示し、ニューゲームでは自由移動とメインメニューまで到達します。
                 起動の挙動は、最初のオーバーレイのロードまで、リファレンスエミュレーターの PCSX-Redux と一致しています。
-                音楽と効果音が再生されるようになり、SPU はエミュレートされた時間(44,100 Hz)で動作します。リコンパイラはオーバーレイも対象になり、それぞれ RAM 上のコードのハッシュで検証され、上書きされた場合はインタプリタにフォールバックします。ディスク 1 では命令のほぼ 100% がネイティブコードとして実行され、トレースは自由移動までインタプリタと完全に一致したままです。デバイスのタイミングは遅延して進むようになり、結果は正確なまま、高速な PC でインタプリタは約 74 から 129 fps、再コンパイル版は約 100 から 370 fps に向上しました。メモリーカードは動作します。標準の 128 KB の <code>.mcd</code> ファイルを <code>--memcard1</code> と <code>--memcard2</code> で指定できます。ディスク 1 ではメインメニューからセーブでき、再起動後に「CONTINUE」でそのセーブを読み込めます。SDL3 ウィンドウは開発ビルドとして、<code>--recomp</code>(再コンパイル版)をメモリーカードと併用して実行できます。MOD: テクスチャのダンプと置換の最初のバージョンが SDL3 ウィンドウに入りました(<code>--texture-dump</code> と <code>--mods</code>、進捗表のモッドの行を参照)。ゲームのテキストシステムは特定済みです。会話はイベントバンク内のゲーム独自の 16 ビット文字コードで表現され、12x12 のフォントで描画されます。テキスト速度は本体の実行ファイル内の単一の設定です。テキスト速度オプションがあります: <code>personarm_sdl --text-speed normal|fast|instant</code>(または MOD のマニフェストの <code>gameplay.text_speed</code>)。ゲームに依存しない小さなゲームプレイパッチの仕組みの上に作られており、ゲームが特定のメモリワードを書き込むとパッチが適用され、期待されるバイト列で確認されます。会話の最初の行が表示されるまで、normal で 138 フレーム、fast で 48 フレーム、instant で 6 フレームです。現在はディスク 1 のみ対応です。ディスク 2(Sumaru TV Special Preview Disc)は起動して動作するようになりました。ATLUS と各局の映像、新聞形式のテレビ番組表を含むプロモーション用のテレビチャンネルディスクで、各番組はダイアログを含む短いゲーム内シーン(天気予報、バラエティ番組、Velvet Room のイゴールなど)です。インタプリタと再コンパイル版は完全に一致し、命令の約 99.99% がネイティブコードとして実行されます。米国版(SLUS-01158)は、英語のテキストで自由移動とメインメニューまで起動し、再コンパイル版はインタプリタと一致します。主なターゲットは引き続き日本版です。今後のランチャーでは、米国版のディスクを起動して英語を選べるようにする予定です。設定ファイル(<code>settings.json</code>、<a href="https://github.com/sargon494/PersonaRM/blob/main/docs/SETTINGS.md">docs/SETTINGS.md</a> を参照)では、ウィンドウモードと倍率、整数倍スケーリング、アスペクト比、垂直同期、fps の目標値、内部解像度、音量とミュート、キーとパッドの割り当て変更、セーブフォルダ、ゲームごとのオプション、フォーカス喪失時の一時停止を設定できます。コマンドラインのフラグはファイルの設定より優先されます。内部解像度(<code>--resolution-scale 1-4</code>)は、ソフトウェアラスタライザで 2 倍がリアルタイムに動作します。3 倍と 4 倍は GPU レンダラー(<code>--renderer gpu</code>、プロトタイプ)で動作しますが、フレーム補間とはまだ併用できません。<code>p2text</code> ツールはフィールドの会話を抽出・再挿入します(<a href="https://github.com/sargon494/PersonaRM/blob/main/docs/TRANSLATION_TOOLS.md">docs/TRANSLATION_TOOLS.md</a>)。ディスク 1 全体を往復変換して失敗は 0 件です。ファイル MOD(<a href="https://github.com/sargon494/PersonaRM/blob/main/docs/MOD_FILES.md">docs/MOD_FILES.md</a>)と組み合わせると、編集した会話が実行中のゲームに表示されます(ディスク 1 の日本版、祠のシーンで確認)。翻訳はパッチとしてのみ配布し、ゲームのテキストそのものは配布しません。新機能: ディスク 1 の日本版でメニューのカーソルと UI ラベルが再び表示されるようになりました(GPU のリセットでビデオメモリが消えなくなりました)。左スティックで十字キーを操作でき、ボタン操作はログに記録されます。<code>--record-input</code> はプレイセッションを再生可能な入力スクリプトとして記録します(再生は同じ開始状態からバイト単位で一致します)。ワイドスクリーン(<code>--widescreen 16:9</code> または <code>21:9</code>)はプロトタイプです。GPU レンダラーのプロトタイプ(<code>--renderer gpu</code>)は 9 倍(4K)まで、または auto で動作します。ステートセーブ(F5 / F8)と早送りが使えます。<code>p2text</code> は翻訳した行が 288 px の会話ウィンドウからはみ出すと警告します。次は、ランチャー、GPU レンダラーの完成、30 / 90 fps です。</p>
+                音楽と効果音が再生されるようになり、SPU はエミュレートされた時間(44,100 Hz)で動作します。リコンパイラはオーバーレイも対象になり、それぞれ RAM 上のコードのハッシュで検証され、上書きされた場合はインタプリタにフォールバックします。ディスク 1 では命令のほぼ 100% がネイティブコードとして実行され、トレースは自由移動までインタプリタと完全に一致したままです。デバイスのタイミングは遅延して進むようになり、結果は正確なまま、高速な PC でインタプリタは約 74 から 129 fps、再コンパイル版は約 100 から 370 fps に向上しました。メモリーカードは動作します。標準の 128 KB の <code>.mcd</code> ファイルを <code>--memcard1</code> と <code>--memcard2</code> で指定できます。ディスク 1 ではメインメニューからセーブでき、再起動後に「CONTINUE」でそのセーブを読み込めます。SDL3 ウィンドウは開発ビルドとして、<code>--recomp</code>(再コンパイル版)をメモリーカードと併用して実行できます。MOD: テクスチャのダンプと置換の最初のバージョンが SDL3 ウィンドウに入りました(<code>--texture-dump</code> と <code>--mods</code>、進捗表のモッドの行を参照)。ゲームのテキストシステムは特定済みです。会話はイベントバンク内のゲーム独自の 16 ビット文字コードで表現され、12x12 のフォントで描画されます。テキスト速度は本体の実行ファイル内の単一の設定です。テキスト速度オプションがあります: <code>personarm_sdl --text-speed normal|fast|instant</code>(または MOD のマニフェストの <code>gameplay.text_speed</code>)。ゲームに依存しない小さなゲームプレイパッチの仕組みの上に作られており、ゲームが特定のメモリワードを書き込むとパッチが適用され、期待されるバイト列で確認されます。会話の最初の行が表示されるまで、normal で 138 フレーム、fast で 48 フレーム、instant で 6 フレームです。現在はディスク 1 のみ対応です。ディスク 2(Sumaru TV Special Preview Disc)は起動して動作するようになりました。ATLUS と各局の映像、新聞形式のテレビ番組表を含むプロモーション用のテレビチャンネルディスクで、各番組はダイアログを含む短いゲーム内シーン(天気予報、バラエティ番組、Velvet Room のイゴールなど)です。インタプリタと再コンパイル版は完全に一致し、命令の約 99.99% がネイティブコードとして実行されます。米国版(SLUS-01158)は、英語のテキストで自由移動とメインメニューまで起動し、再コンパイル版はインタプリタと一致します。主なターゲットは引き続き日本版です。今後のランチャーでは、米国版のディスクを起動して英語を選べるようにする予定です。設定ファイル(<code>settings.json</code>、<a href="https://github.com/sargon494/PersonaRM/blob/main/docs/SETTINGS.md">docs/SETTINGS.md</a> を参照)では、ウィンドウモードと倍率、整数倍スケーリング、アスペクト比、垂直同期、fps の目標値、内部解像度、音量とミュート、キーとパッドの割り当て変更、セーブフォルダ、ゲームごとのオプション、フォーカス喪失時の一時停止を設定できます。コマンドラインのフラグはファイルの設定より優先されます。内部解像度(<code>--resolution-scale 1-4</code>)は、ソフトウェアラスタライザで 2 倍がリアルタイムに動作します。GPU レンダラー(<code>--renderer gpu</code>)は 1 から 9 倍まで動作し、フレーム補間とも併用できます。<code>p2text</code> ツールはフィールドの会話を抽出・再挿入します(<a href="https://github.com/sargon494/PersonaRM/blob/main/docs/TRANSLATION_TOOLS.md">docs/TRANSLATION_TOOLS.md</a>)。ディスク 1 全体を往復変換して失敗は 0 件です。ファイル MOD(<a href="https://github.com/sargon494/PersonaRM/blob/main/docs/MOD_FILES.md">docs/MOD_FILES.md</a>)と組み合わせると、編集した会話が実行中のゲームに表示されます(ディスク 1 の日本版、祠のシーンで確認)。翻訳はパッチとしてのみ配布し、ゲームのテキストそのものは配布しません。新機能: ディスク 1 の日本版でメニューのカーソルと UI ラベルが再び表示されるようになりました(GPU のリセットでビデオメモリが消えなくなりました)。左スティックで十字キーを操作でき、ボタン操作はログに記録されます。<code>--record-input</code> はプレイセッションを再生可能な入力スクリプトとして記録します(再生は同じ開始状態からバイト単位で一致します)。ワイドスクリーン(<code>--widescreen 16:9</code> または <code>21:9</code>)は実験的な機能です。GPU レンダラー(<code>--renderer gpu</code>)は 9 倍(4K)まで、または auto で動作します。ステートセーブ(F5 / F8)と早送りが使えます。<code>p2text</code> は翻訳した行が 288 px の会話ウィンドウからはみ出すと警告します。次は、ワイドスクリーンの改善、90 / 120 fps のよりなめらかなペース配分、ストーリーのさらなるプレイと確認です。</p>
             <div class="status-table reveal" role="table" aria-label="サブシステムの進捗">
                 <div class="row head" role="row"><span role="columnheader">サブシステム</span><span
                         role="columnheader">状況</span></div>
-                <div class="row" role="row"><span role="cell">ランチャー(ディスクのスキャンと検証)</span><span role="cell"
-                        class="tag prototype">ゲームの起動は仮実装。軽量ランチャー(Rust + egui)を開発中</span></div>
+                <div class="row" role="row"><span role="cell">ランチャー(Rust + egui)</span><span role="cell"
+                        class="tag ok">設定、ゲームの起動、更新に対応: 言語、フレームレート 30/60/90/120、レンダラー、解像度、ワイドスクリーン、音量など。コンソールウィンドウなしで起動し、プレイ中は非表示になります。GitHub Releases から自動更新(SHA-256 で検証、設定・セーブ・メモリーカードには触れません)</span></div>
                 <div class="row" role="row"><span role="cell">ディスクリーダーと PS-X EXE ローダー</span><span role="cell"
                         class="tag ok">実装済み</span></div>
                 <div class="row" role="row"><span role="cell">静的解析ツール</span><span role="cell"
@@ -200,17 +200,17 @@
                 <div class="row" role="row"><span role="cell">米国版(SLUS-01158)</span><span role="cell"
                         class="tag progress">英語のテキストで自由移動とメインメニューまで起動。再コンパイル版はインタプリタと一致。主なターゲットは引き続き日本版</span></div>
                 <div class="row" role="row"><span role="cell">設定ファイル(<code>settings.json</code>)</span><span role="cell"
-                        class="tag progress">ユーザーごとの設定フォルダ、または <code>--settings</code> で指定。コマンドラインのフラグが優先。<code>fps_target</code> の 30 と 90 は未対応(60 で動作)。<code>language</code> は保存のみ</span></div>
+                        class="tag progress">ユーザーごとの設定フォルダ、または <code>--settings</code> で指定。コマンドラインのフラグが優先。<code>fps_target</code> の 30、60、90、120 はすべて動作します。<code>language</code> は保存のみ</span></div>
                 <div class="row" role="row"><span role="cell">内部解像度(<code>--resolution-scale</code>)</span><span role="cell"
-                        class="tag progress">1 から 4、または設定ファイルの <code>video.resolution_scale</code>。2 倍はソフトウェアラスタライザでリアルタイムに動作。3 倍と 4 倍は GPU レンダラー(<code>--renderer gpu</code>)で動作。フレーム補間とはまだ併用不可</span></div>
+                        class="tag progress">ソフトウェアは 1 から 4、GPU は 1 から 9 または <code>auto</code>、または設定ファイルの <code>video.resolution_scale</code>。2 倍はソフトウェアラスタライザでリアルタイムに動作。GPU レンダラー(<code>--renderer gpu</code>)はフレーム補間とも併用可能</span></div>
                 <div class="row" role="row"><span role="cell">翻訳ツール(<code>p2text</code>)</span><span role="cell"
                         class="tag progress">フィールドの会話を抽出・再挿入。ディスク 1 全体を往復変換して失敗 0 件。ファイル MOD と組み合わせると、編集した会話が実行中のゲームに表示される(ディスク 1 の日本版、祠のシーンで確認)。翻訳はパッチとしてのみ配布。<code>p2text</code> は翻訳した行が 288 px の会話ウィンドウからはみ出すと警告します。米国版の文字幅はユーザーのディスクから読み取ります</span></div>
                 <div class="row" role="row"><span role="cell">GPU レンダラー(<code>--renderer gpu</code>)</span><span role="cell"
-                        class="tag progress">プロトタイプ。SDL_gpu(Windows では D3D12)。4 倍で 1 フレームあたり合計約 8 ms(エミュレーション 6.5 ms と読み戻し)、ソフトウェアでは約 37 ms。1〜9 倍(4K まで)または <code>auto</code>。一部の機能はソフトウェアへのフォールバックか未実装です。詳細は <a href="https://github.com/sargon494/PersonaRM/blob/main/docs/GPU_RENDERER.md">docs/GPU_RENDERER.md</a></span></div>
+                        class="tag progress">SDL_gpu(Windows では D3D12。他のプラットフォームはソフトウェアを使用)。読み戻しなしで直接表示します。1 フレームあたり 4 倍で約 8 ms、9 倍(4K)で約 11 ms、ソフトウェアでは 4 倍で約 37 ms。ラインとマスクは GPU で処理され、ワイドスクリーンとフレーム補間にも対応。1〜9 倍(4K まで)または <code>auto</code>。一部の機能はソフトウェアへのフォールバックか未実装です。詳細は <a href="https://github.com/sargon494/PersonaRM/blob/main/docs/GPU_RENDERER.md">docs/GPU_RENDERER.md</a></span></div>
                 <div class="row" role="row"><span role="cell">ワイドスクリーン(<code>--widescreen</code>、<code>video.widescreen</code>)</span><span role="cell"
-                        class="tag progress">プロトタイプ。<code>--widescreen 16:9</code> または <code>21:9</code> で 3D 表示をより広くします。3D 上の会話、テキスト、肖像画は 4:3 のまま。メニューと FMV は 4:3 です。既知の問題: 部屋の端の空白が左右に見えます。詳細は <a href="https://github.com/sargon494/PersonaRM/blob/main/docs/WIDESCREEN.md">docs/WIDESCREEN.md</a></span></div>
+                        class="tag progress">実験的な機能。<code>--widescreen 16:9</code> または <code>21:9</code> で 3D 表示をより広くします。3D 上の会話、テキスト、肖像画は 4:3 のまま。メニューと FMV は 4:3 です。既知の問題: 部屋の端の空白が左右に見えます。スプライトのパーツが分離することがあり、テキストが揺れることがあり、フェードで最初に左右の端が見えることがあります。4:3 が推奨モードです。詳細は <a href="https://github.com/sargon494/PersonaRM/blob/main/docs/WIDESCREEN.md">docs/WIDESCREEN.md</a></span></div>
                 <div class="row" role="row"><span role="cell">ステートセーブと早送り</span><span role="cell"
-                        class="tag ok">F5 で保存、F8 で読み込み、F6 / F7 でスロットを切り替え。決定的に動作。ステートはメモリーカードに一切触れません。Tab またはゲームパッドの R3 を押している間早送り。既定で最大 4 倍、上限 16 倍(<code>video.fast_forward_max</code>)</span></div>
+                        class="tag ok">F5 で保存、F8 で読み込み、F6 / F7 でスロットを切り替え。決定的に動作。ステートはメモリーカードに一切触れません。ワイドスクリーンを有効にして保存した状態を読み込むとクラッシュする問題は修正済みです。<code>personarm_sdl --load-state N</code> で起動時にスロット N を読み込めます。ステートは作成したビルドでのみ読み込めます(リリース間では互換性がありません)。メモリーカードのセーブは常に引き継がれます。Tab またはゲームパッドの R3 を押している間早送り。既定で最大 4 倍、上限 16 倍(<code>video.fast_forward_max</code>)</span></div>
                 <div class="row" role="row"><span role="cell">入力の記録(<code>--record-input</code>)</span><span role="cell"
                         class="tag ok">プレイセッションを再生可能な入力スクリプトとして記録します。再生は同じ開始状態から行えば、バイト単位で一致します</span></div>
             </div>
@@ -223,7 +223,7 @@
                 <h2 id="start-title"><em>クイック</em>スタート</h2>
             </header>
             <div class="notice reveal">
-                <strong>まだプレイはできません。</strong>リリース版はまだないため、ソースからビルドしてください。以下のコマンドのほとんどは、開発用にディスクイメージと
+                <strong>初期のビルドです。</strong>ご自身のディスクイメージが必要です。リリース版にはゲームのデータ、BIOS、ゲームのコードは含まれません。以下のコマンドは開発者向けで、ディスクイメージと
                 設定を管理するものです。
             </div>
             <ol class="steps">
@@ -232,12 +232,16 @@
                     <p>ご自身が所有する「ペルソナ2 罰」(<em>Persona 2: Eternal Punishment</em>)のディスクが必要です。</p>
                 </li>
                 <li class="reveal">
-                    <h3>PersonaRM をダウンロードまたはビルドする</h3>
-                    <p>README の手順に従ってソースからビルドしてください。リリース版はまだありません。</p>
+                    <h3>PersonaRM をダウンロードする</h3>
+                    <p><a href="https://github.com/sargon494/PersonaRM/releases">GitHub Releases</a> から最新の zip(v0.1.2)をダウンロードし、展開して <code>launcher.exe</code> を実行してください。</p>
                 </li>
                 <li class="reveal">
-                    <h3>ディスクを指定する</h3>
-                    <p>フォルダーをスキャンし、イメージを検証します。</p>
+                    <h3>ディスクを指定して PLAY を押す</h3>
+                    <p>ランチャーで <code>.cue</code> ファイルを指定し(日本版と米国版(英語)のどちらでも可)、<strong>PLAY</strong> を押してください。</p>
+                </li>
+                <li class="reveal">
+                    <h3>開発者向け</h3>
+                    <p>README の手順でソースからビルドし、フォルダーをスキャンしてイメージを検証します。</p>
                     <div class="code">
                         <pre><code>personarm --scan "/path/to/discs"
 personarm --verify-disc "/path/to/disc1.cue"
