@@ -1,6 +1,6 @@
 #include "rendering/frame_interp.h"
 
-#include <climits>
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <unordered_map>
@@ -67,40 +67,44 @@ uint64_t Key(const uint32_t* w, uint32_t n) {
 
 int32_t Sx(uint32_t v) { return static_cast<int32_t>((v & 0x7FF) << 21) >> 21; }
 
-constexpr size_t kMaxCandidates = 256;  // bounds the per-key scan (a floor of identical tiles)
-
 } // namespace
 
-Match MatchPrimitives(const std::vector<uint32_t>& prev, const std::vector<uint32_t>& cur) {
+Match MatchPrimitives(const std::vector<uint32_t>& prev, const std::vector<uint32_t>& cur, int32_t max_jump) {
     std::unordered_map<uint64_t, std::vector<int32_t>> by_key;
     int slot[4];
     for (size_t i = 0; i < prev.size(); i += 1 + prev[i])
         if (Slots(&prev[i], slot)) by_key[Key(&prev[i + 1], prev[i])].push_back(int32_t(i));
+    // Every same-key pair within max_jump on all vertices, cheapest (total vertex travel) first: the true
+    // partners of a scrolled floor win before an inserted or removed tile can steal a neighbour's.
+    struct Cand { int32_t cost, pk, p; };
+    std::vector<Cand> cands;
+    std::vector<size_t> at;  // word offset of each packet of cur
     Match m;
     for (size_t i = 0; i < cur.size(); i += 1 + cur[i]) {
-        int32_t p = -1;
-        if (Slots(&cur[i], slot)) {
-            ++m.prims;
-            auto it = by_key.find(Key(&cur[i + 1], cur[i]));
-            if (it != by_key.end() && !it->second.empty()) {
-                // Nearest first vertex among the unused candidates (repeated tiles, glyphs, scrolling).
-                std::vector<int32_t>& c = it->second;
-                const uint32_t v = cur[i + 1 + slot[0]];
-                size_t best = 0;
-                int32_t best_d = INT32_MAX;
-                for (size_t k = 0; k < c.size() && k < kMaxCandidates; ++k) {
-                    const uint32_t q = prev[c[k] + 1 + slot[0]];
-                    const int32_t d = std::abs(Sx(q) - Sx(v)) + std::abs(Sx(q >> 16) - Sx(v >> 16));
-                    if (d < best_d) best_d = d, best = k;
-                }
-                p = c[best];
-                c[best] = c.back();
-                c.pop_back();
-                ++m.matched;
+        const int32_t pk = int32_t(at.size());
+        at.push_back(i);
+        const int nv = Slots(&cur[i], slot);
+        if (!nv) continue;
+        ++m.prims;
+        auto it = by_key.find(Key(&cur[i + 1], cur[i]));
+        if (it == by_key.end()) continue;
+        for (int32_t p : it->second) {
+            int32_t cost = 0;
+            for (int k = 0; k < nv && cost >= 0; ++k) {
+                const uint32_t a = prev[p + 1 + slot[k]], b = cur[i + 1 + slot[k]];
+                const int32_t dx = std::abs(Sx(b) - Sx(a)), dy = std::abs(Sx(b >> 16) - Sx(a >> 16));
+                cost = dx > max_jump || dy > max_jump ? -1 : cost + dx + dy;
             }
+            if (cost >= 0) cands.push_back({cost, pk, p});
         }
-        m.prev_of.push_back(p);
     }
+    std::sort(cands.begin(), cands.end(), [](const Cand& x, const Cand& y) {
+        return x.cost != y.cost ? x.cost < y.cost : x.pk != y.pk ? x.pk < y.pk : x.p < y.p;
+    });
+    m.prev_of.assign(at.size(), -1);
+    std::vector<bool> used(prev.size());  // by word offset of the prev packet
+    for (const Cand& c : cands)
+        if (m.prev_of[c.pk] < 0 && !used[c.p]) m.prev_of[c.pk] = c.p, used[c.p] = true, ++m.matched;
     return m;
 }
 
@@ -174,7 +178,7 @@ bool FrameInterpolator::Consume(std::vector<uint32_t>& log, const Ps1Gpu& gpu, u
     if (!flipped) return false;
     m_cur.vram = gpu.GetVram();
     if (m_prev.vram.empty()) m_prev.vram = m_cur.vram;
-    m_match = MatchPrimitives(m_prev.cmds, m_cur.cmds);
+    m_match = MatchPrimitives(m_prev.cmds, m_cur.cmds, kMaxJump);
     const GpuDisplayArea &a = m_prev.disp, &b = m_cur.disp;
     m_pair_ok = m_count >= 2 && !b.is_24bit && a.width == b.width && a.height == b.height && m_match.prims &&
                 m_match.matched >= kMinMatched * m_match.prims && DrawsTo(m_cur.cmds, b.x, b.y);

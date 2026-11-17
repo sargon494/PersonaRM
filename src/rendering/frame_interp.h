@@ -11,18 +11,20 @@
 
 namespace personarm::interp {
 
-/// Per packet of `cur` (in order), the word offset of its packet in `prev`, or -1. Only primitives
-/// with fixed vertex slots take part (polygons, single lines, rectangles). Key: opcode plus the
-/// texture words (UV / CLUT / texpage, rectangle size) for textured primitives, plus the first colour
-/// for untextured ones; among the unused `prev` packets with the same key, the one whose first vertex
-/// is nearest pairs (repeated tiles and glyphs, depth-sorted OTs that reorder primitives).
-/// shortcut: greedy in cur's draw order over at most 256 candidates per key; a real matcher would
-/// solve the assignment and use the camera motion as a prior.
+/// Per packet of `cur` (in order), the word offset of its packet in `prev`, or -1 (drawn as in cur).
+/// Only primitives with fixed vertex slots take part (polygons, single lines, rectangles). Key: opcode
+/// plus the texture words (UV / CLUT / texpage, rectangle size) for textured primitives, plus the first
+/// colour for untextured ones. Among same-key packets whose every vertex moved at most `max_jump` px
+/// per axis, pairs are taken cheapest total vertex travel first (a global greedy assignment), so
+/// primitives inserted or removed anywhere in the list (tiles entering the view, depth-sorted OTs that
+/// reorder) cannot shift the pairing of the others.
+/// shortcut: greedy, not an optimal assignment; same-key candidates are all scanned (quadratic in the
+/// size of one key group, fine for a few hundred identical tiles or glyphs).
 struct Match {
     std::vector<int32_t> prev_of;  // per packet of cur
     uint32_t prims = 0, matched = 0;
 };
-Match MatchPrimitives(const std::vector<uint32_t>& prev, const std::vector<uint32_t>& cur);
+Match MatchPrimitives(const std::vector<uint32_t>& prev, const std::vector<uint32_t>& cur, int32_t max_jump);
 
 /// `cur` with every matched primitive's vertices at prev + (cur - prev) * t (rounded), unless one of
 /// them moved more than `max_jump` pixels on an axis (teleport / wrong pair: drawn as in cur).
