@@ -540,6 +540,8 @@ void CpuContext::ExecuteInstruction(uint32_t opcode) {
 
 #include "core/state_io.h"
 
+#include <cstring>
+
 namespace personarm {
 void CpuContext::Serialize(StateIO& io) {
     io.Tag("CPU ");
@@ -548,10 +550,13 @@ void CpuContext::Serialize(StateIO& io) {
     io.Tag("GTE ");
     // The Gte is trivially copyable but also holds session settings (widescreen factor, a tracker pointer):
     // states store them neutral and a load keeps this session's, never another process's pointer.
-    Gte g = m_gte;
+    // Copies go through memcpy: the state stores the object's bytes, padding included, and an assignment
+    // leaves padding unspecified (re-saving a loaded state then differed on Linux).
+    Gte g;
+    std::memcpy(static_cast<void*>(&g), &m_gte, sizeof g);
     g.KeepSessionConfig(Gte{});
     io(g);
     g.KeepSessionConfig(m_gte);
-    m_gte = g;
+    std::memcpy(static_cast<void*>(&m_gte), &g, sizeof g);
 }
 } // namespace personarm
