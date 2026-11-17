@@ -182,10 +182,12 @@ public:
     /// gameplay patch counters and the live recompiled modules. Not in it: memory card images (the
     /// files stay the player's saves), the pad script and host input, trace/debug hooks.
     /// Format: "PRMSTATE", u32 version, disc serial, build id, u64 frame, then tagged sections.
+    /// Bump kStateVersion on any change to what SerializeMachine writes: states from other builds load
+    /// when the version matches (the build id only logs a warning).
     static constexpr uint32_t kStateVersion = 1;
     void SaveState(std::vector<uint8_t>& out);
     /// False with a reason in *err, machine untouched, when the state is not one of ours, another
-    /// format version, another disc, another build, or truncated/corrupt.
+    /// format version, another disc, or truncated/corrupt.
     bool LoadState(const std::vector<uint8_t>& in, std::string* err = nullptr);
     /// Build id written into states (git commit at configure time; "dev" without git).
     static const char* BuildId();

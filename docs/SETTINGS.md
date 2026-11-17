@@ -125,8 +125,9 @@ Keys in `personarm_sdl` (fixed for now, not in `input`):
 - **What it does not hold**: memory card images. A state never rewrites your `.mcd` saves: loading an
   old state keeps the cards as they are now (as on real hardware with a card swapped in).
 - **Format**: binary, little-endian: `PRMSTATE`, u32 format version, disc serial, build id (version and
-  git commit), u64 frame, then tagged sections. A state from another disc, another build or another
-  format version is refused with a message and the game keeps running untouched; so is a truncated file.
+  git commit), u64 frame, then tagged sections. A state from another disc or another format version is
+  refused with a message and the game keeps running untouched; so is a truncated file. A state from
+  another build with the same format version loads (warning on stderr), so states survive updates.
   A state loads the same with or without `recomp`. Different mods or `text_speed` than when it was saved:
   it loads, the current options stay active (warning on stderr).
 - **Fast-forward**: while held, up to `video.fast_forward_max` emulated frames run per 1/60 s (less if the

@@ -135,7 +135,7 @@ target_include_directories(personarm_core PUBLIC
 
 target_compile_features(personarm_core PUBLIC cxx_std_17)
 
-# Save states record the build that wrote them and refuse others (Engine::BuildId).
+# Save states record the build that wrote them (Engine::BuildId; another build loads with a warning).
 # shortcut: the commit is read at configure time, so a rebuild after a new commit keeps the old id
 # until CMake reruns; upgrade to a configure_file regenerated every build if that bites.
 execute_process(COMMAND git rev-parse --short=12 HEAD WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}

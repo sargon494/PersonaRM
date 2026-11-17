@@ -313,9 +313,13 @@ static void TestEngine() {
     bad = state;
     bad[8] ^= 1;  // version
     rejected(bad);
-    bad = state;
-    bad[8 + 4 + 8 + e.DiscSerial().size() + 8] ^= 1;  // first byte of the build id
-    rejected(bad);
+    {  // another build of the same format version loads (warning only)
+        std::vector<uint8_t> other = state;
+        other[8 + 4 + 8 + e.DiscSerial().size() + 8] ^= 1;  // first byte of the build id
+        std::string why;
+        CHECK(e.LoadState(other, &why) && e.GetFrameCount() == 3);
+        CHECK(e.LoadState(after, &why) && e.GetFrameCount() == frame1);
+    }
     bad = state;
     bad[8 + 4] ^= 1;  // serial length: another disc (or garbage)
     rejected(bad);

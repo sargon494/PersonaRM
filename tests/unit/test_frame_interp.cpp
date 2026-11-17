@@ -41,7 +41,7 @@ static void TestMatchAndLerp() {
     TexQuad(cur, 60, 20, 64);   // B
     TexQuad(cur, 30, 20, 0);    // A
     TexQuad(cur, 200, 50, 128); // C
-    const Match m = MatchPrimitives(prev, cur);
+    const Match m = MatchPrimitives(prev, cur, 48);
     assert(m.prims == 3 && m.matched == 2);
     assert(m.prev_of.size() == 4 && m.prev_of[0] == -1 && m.prev_of[3] == -1);
     LerpCommands(prev, cur, m, 0.5, 48, out);
@@ -62,7 +62,7 @@ static void TestMatchAndLerp() {
     std::vector<uint32_t> p2, c2;
     TexQuad(p2, -30, -10, 0);
     TexQuad(c2, -10, -10, 0);
-    const Match m2 = MatchPrimitives(p2, c2);
+    const Match m2 = MatchPrimitives(p2, c2, 48);
     LerpCommands(p2, c2, m2, 0.25, 48, out);
     assert(X0(out, 0) == -25);
     // Same key (repeated tile) drawn in another order: the nearest one pairs, not the first.
@@ -71,7 +71,7 @@ static void TestMatchAndLerp() {
     TexQuad(p3, 50, 0, 32);
     TexQuad(c3, 52, 0, 32);
     TexQuad(c3, 12, 0, 32);
-    const Match m3 = MatchPrimitives(p3, c3);
+    const Match m3 = MatchPrimitives(p3, c3, 48);
     assert(m3.matched == 2 && m3.prev_of[0] == 10 && m3.prev_of[1] == 0);
     std::printf("  match/lerp ok\n");
 }
@@ -85,15 +85,33 @@ static void TestUntexturedAndRects() {
     Packet(cur, {0x200000FF, XY(4, 0), XY(14, 0), XY(4, 10)});
     Packet(cur, {0x60FFFFFF, XY(9, 5), XY(8, 4)});
     Packet(cur, {0x60FFFFFF, XY(9, 5), XY(9, 4)});  // different size: no partner
-    const Match m = MatchPrimitives(prev, cur);
+    const Match m = MatchPrimitives(prev, cur, 48);
     assert(m.prims == 4 && m.matched == 3);
     LerpCommands(prev, cur, m, 0.5, 48, out);
     assert(X0(out, 0) == 52 && X0(out, 5) == 2 && X0(out, 10) == 7 && X0(out, 14) == 9);
     // A polyline continuation word that looks like a polygon opcode is not a primitive.
     std::vector<uint32_t> poly_tail;
     Packet(poly_tail, {0x3C00F00F});
-    assert(MatchPrimitives(poly_tail, poly_tail).prims == 0);
+    assert(MatchPrimitives(poly_tail, poly_tail, 48).prims == 0);
     std::printf("  untextured/rect ok\n");
+}
+
+// A floor of identical tiles scrolls 4 px while a tile is inserted mid-list (drawn first, next to an old
+// one) and another is removed: every surviving tile pairs with itself, the new one is drawn as in cur.
+static void TestInsertedAndRemovedTiles() {
+    std::vector<uint32_t> prev, cur, out;
+    for (int x : {0, 20, 40, 60, 200}) TexQuad(prev, x, 0, 32);  // 200: leaves the view
+    TexQuad(cur, 4, 0, 32);
+    TexQuad(cur, 12, 0, 32);  // inserted: drawn before 24, nearest old tile is 20
+    for (int x : {24, 44, 64}) TexQuad(cur, x, 0, 32);
+    const Match m = MatchPrimitives(prev, cur, 48);
+    assert(m.prims == 5 && m.matched == 4);
+    assert(m.prev_of[0] == 0 && m.prev_of[1] == -1 && m.prev_of[2] == 10 && m.prev_of[3] == 20 && m.prev_of[4] == 30);
+    LerpCommands(prev, cur, m, 0.5, 48, out);
+    assert(out.size() == cur.size());
+    assert(X0(out, 0) == 2 && X0(out, 10) == 12 && X0(out, 20) == 22 && X0(out, 30) == 42 && X0(out, 40) == 62);
+    for (size_t i = 10; i < 20; ++i) assert(out[i] == cur[i]);  // the new tile is untouched, not dropped
+    std::printf("  inserted/removed tiles ok\n");
 }
 
 // A frame's worth of GP0 traffic including an upload, a polyline, fills and a flip.
@@ -205,6 +223,7 @@ int main() {
     std::printf("frame_interp tests\n");
     TestMatchAndLerp();
     TestUntexturedAndRects();
+    TestInsertedAndRemovedTiles();
     TestCaptureIsInvisibleAndComplete();
     TestWidescreenSqueezeReplays();
     std::printf("PASS\n");

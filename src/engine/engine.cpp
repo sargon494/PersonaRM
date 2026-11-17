@@ -1186,7 +1186,9 @@ bool Engine::LoadState(const std::vector<uint8_t>& in, std::string* err) {
     if (serial != m_trace_disc)
         return fail("state is for disc " + (serial.empty() ? std::string("(unrecognized)") : serial) + ", the running disc is " +
                     (m_trace_disc.empty() ? std::string("(unrecognized)") : m_trace_disc));
-    if (build != BuildId()) return fail("state was made by build " + build + ", this is build " + BuildId());
+    // The format version guards the layout; another build of the same format loads (states survive updates).
+    if (build != BuildId())
+        PRM_LOG_WARN("ENGINE", "loading a state made by build " + build + " into build " + BuildId());
     // Load in place; on a bad body put the machine back as it was.
     std::vector<uint8_t> backup;
     { StateIO b(backup); SerializeMachine(b); }
