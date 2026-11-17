@@ -36,6 +36,7 @@ static void Usage() {
                          "  --frames N           quit after N emulated frames\n"
                          "  --screenshot file    save the last presented frame as BMP on quit\n"
                          "  --input-script file  scripted pad presses (<frame> <button> [<hold>] per line)\n"
+                         "  --load-state N       load save-state slot N (0-9) right after boot, like pressing F8\n"
                          "  --record-input file  write the pad presses you play as an --input-script (flushed every 600\n"
                          "                       frames and on quit; also records the scripted presses of --input-script)\n"
                          "  --interp HZ          present HZ pictures/s (= video.fps_target): 90 or a multiple of 60\n"
@@ -354,6 +355,7 @@ int main(int argc, char** argv) {
     const int ff_max = std::clamp(cfg.video.fast_forward_max, 2, 16);
     uint64_t ff_frames = 0;
 
+    if (opt.load_slot >= 0) { state_slot = opt.load_slot; load_state(); }  // reproduce a reported moment
     while (!quit && engine.GetState() == EngineState::Running && (!max_frames || engine.GetFrameCount() < max_frames)) {
         SDL_Event ev;
         while (SDL_PollEvent(&ev)) {

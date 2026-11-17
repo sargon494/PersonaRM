@@ -137,6 +137,7 @@ bool ParseHostArgs(int argc, const char* const* argv, HostOptions& o) {
             else if (is("--screenshot")) o.screenshot = v;
             else if (is("--input-script")) o.input_script = v;
             else if (is("--record-input")) o.record_input = v;
+            else if (is("--load-state")) { o.load_slot = std::atoi(v); if (o.load_slot < 0 || o.load_slot > 9) return false; }
             else if (is("--interp")) o.interp_hz = std::atoi(v), o.interp_given = true;
             else if (is("--settings")) o.settings_path = v;
             else if (is("--window-mode")) {
