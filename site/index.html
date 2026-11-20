@@ -96,7 +96,8 @@
                 </article>
                 <article class="card reveal">
                     <h3>Enhancements</h3>
-                    <p>Save states (F5 / F8, ten slots), hold-to-fast-forward up to 16×, and experimental widescreen work now; controller glyphs come next.</p>
+                    <p>Save states (F5 / F8, ten slots), hold-to-fast-forward up to 16×, and experimental widescreen
+                        work now; controller glyphs come next.</p>
                 </article>
             </div>
         </section>
@@ -110,7 +111,8 @@
             <div class="grid features">
                 <article class="feature reveal">
                     <h3>MIPS-I CPU</h3>
-                    <p>R3000A interpreter with branch and load delay slots. It is the reference the rest is checked against.</p>
+                    <p>R3000A interpreter with branch and load delay slots. It is the reference the rest is checked
+                        against.</p>
                 </article>
                 <article class="feature reveal">
                     <h3>Geometry engine</h3>
@@ -118,7 +120,8 @@
                 </article>
                 <article class="feature reveal">
                     <h3>GPU and VRAM</h3>
-                    <p>Software rasterizer over 1 MB of VRAM: polygons, lines, sprites, CLUT textures and semi-transparency.</p>
+                    <p>Software rasterizer over 1 MB of VRAM: polygons, lines, sprites, CLUT textures and
+                        semi-transparency.</p>
                 </article>
                 <article class="feature reveal">
                     <h3>MDEC video</h3>
@@ -126,11 +129,13 @@
                 </article>
                 <article class="feature reveal">
                     <h3>SPU audio</h3>
-                    <p>24 voices with ADPCM, pitch, envelopes and reverb. The interpolation table is still an approximation.</p>
+                    <p>24 voices with ADPCM, pitch, envelopes and reverb. The interpolation table is still an
+                        approximation.</p>
                 </article>
                 <article class="feature reveal">
                     <h3>Disc handling</h3>
-                    <p>ISO 9660 and raw CD-ROM XA images with <code>.cue</code> resolution, plus tools that map the game's data files.</p>
+                    <p>ISO 9660 and raw CD-ROM XA images with <code>.cue</code> resolution, plus tools that map the
+                        game's data files.</p>
                 </article>
                 <article class="feature reveal">
                     <h3>Display modes</h3>
@@ -138,11 +143,13 @@
                 </article>
                 <article class="feature reveal">
                     <h3>Controllers</h3>
-                    <p>Keyboard and gamepad work in the window; the left stick drives the d-pad. Planned: mouse, and PlayStation, Xbox, and Nintendo profiles.</p>
+                    <p>Keyboard and gamepad work in the window; the left stick drives the d-pad. Planned: mouse, and
+                        PlayStation, Xbox, and Nintendo profiles.</p>
                 </article>
                 <article class="feature reveal">
                     <h3>Memory card and saves</h3>
-                    <p>Standard 128 KB card files via <code>--memcard1</code> and <code>--memcard2</code>. Disc 1 saves and CONTINUE work, and save states snapshot the whole machine at any moment.</p>
+                    <p>Standard 128 KB card files via <code>--memcard1</code> and <code>--memcard2</code>. Disc 1 saves
+                        and CONTINUE work, and save states snapshot the whole machine at any moment.</p>
                 </article>
             </div>
         </section>
@@ -156,19 +163,66 @@
             <p class="intro reveal">PersonaRM is in active development and not playable yet. The plan:
                 get the CPU provably correct, finish the machine core, boot the game, then compile its code ahead of
                 time.</p>
-            <p class="intro reveal"><strong>Current phase: making the game as playable as possible from user reports.</strong> The first public releases are out (see Quick start). The CPU and the machine core
-                are done. Step 3, first boot, continues for playing further: on JP disc 1 the first battle is reached and won from a save at the school, with no emulator bugs on that path, and several battles played by hand showed no glitches. The lightweight launcher (Rust + egui) is out: it starts the game with these settings and updates itself from GitHub Releases. Disc 1 plays its intro with sound, shows the title screen and, on a new game, reaches free
+            <p class="intro reveal"><strong>Current phase: making the game as playable as possible from user
+                    reports.</strong> The first public releases are out (see Quick start). The CPU and the machine core
+                are done. Step 3, first boot, continues for playing further: on JP disc 1 the first battle is reached
+                and won from a save at the school, with no emulator bugs on that path, and several battles played by
+                hand showed no glitches. The lightweight launcher (Rust + egui) is out: it starts the game with these
+                settings and updates itself from GitHub Releases. Disc 1 plays its intro with sound, shows the title
+                screen and, on a new game, reaches free
                 movement and the main menu. The boot matches the PCSX-Redux reference emulator up to the first
-                overlay loads. Music and sound effects now play, with the SPU on emulated time. The recompiler now covers
-                overlays too, each validated by a hash of its code in RAM, with the interpreter as fallback. On disc 1 it
-                runs essentially 100% of instructions as native code, and the trace still matches the interpreter exactly
+                overlay loads. Music and sound effects now play, with the SPU on emulated time. The recompiler now
+                covers
+                overlays too, each validated by a hash of its code in RAM, with the interpreter as fallback. On disc 1
+                it
+                runs essentially 100% of instructions as native code, and the trace still matches the interpreter
+                exactly
                 up to free movement. Device timing now advances lazily, with exact results: on a fast PC the interpreter
-                went from about 74 to 129 fps, and the recompiled mode from about 100 to 370 fps. Memory cards work: standard 128 KB <code>.mcd</code> files via <code>--memcard1</code> and <code>--memcard2</code>. On disc 1 the game saves from the main menu, and after a reboot CONTINUE loads the save. The SDL3 window can run the recompiled mode (<code>--recomp</code>) with memory cards, as a developer build. Mods: a first version of texture dump and replacement is in the SDL3 window (<code>--texture-dump</code> and <code>--mods</code>; see the mods row in the status table). The game's text system has been located: dialogue uses the game's own 16-bit character codes in event banks, drawn with a 12x12 font, and text speed is a single setting in the main executable. The faster-text option is in: <code>personarm_sdl --text-speed normal|fast|instant</code> (or <code>gameplay.text_speed</code> in a mod manifest). It is built on a small, game-agnostic gameplay-patch layer: patches are applied when the game writes a given memory word, guarded by the expected bytes. The first dialogue line takes 138 frames to appear at normal, 48 at fast and 6 at instant. Disc 1 only for now. Disc 2, the Sumaru TV Special Preview Disc, now boots and runs: it is a promotional TV-channel disc with ATLUS and channel videos and a newspaper TV listing, and each programme is a short in-engine scene with dialogue (a weather report, a variety show, Igor in the Velvet Room). Its interpreter and recompiled modes match exactly, with about 99.99% of instructions running as native code. The US release (SLUS-01158) boots to free movement and the main menu with English text, and its recompiled mode matches the interpreter. The JP release is still the primary target; the future launcher will let you pick English by booting the US disc. A settings file (<code>settings.json</code>, see <a href="https://github.com/sargon494/PersonaRM/blob/main/docs/SETTINGS.md">docs/SETTINGS.md</a>) covers window mode and scale, integer scaling, aspect, vsync, fps target, internal resolution, volume and mute, key and pad remapping, save folder, per-game options and pause on focus loss; command-line flags override it. Internal resolution (<code>--resolution-scale 1-4</code>) runs 2x in real time on the software rasterizer; the GPU renderer (<code>--renderer gpu</code>) runs 1 to 9x and also works with frame interpolation. The <code>p2text</code> tool extracts and reinserts field dialogue (<a href="https://github.com/sargon494/PersonaRM/blob/main/docs/TRANSLATION_TOOLS.md">docs/TRANSLATION_TOOLS.md</a>); it round-trips all of disc 1 with 0 failures. With file mods (<a href="https://github.com/sargon494/PersonaRM/blob/main/docs/MOD_FILES.md">docs/MOD_FILES.md</a>), edited dialogue now shows in the running game, verified on the shrine scene. Translations ship only as patches, never as game text. Recent additions: the menu cursor and UI labels on JP disc 1 are visible again (a GPU reset no longer wipes video memory); the gamepad's left stick drives the d-pad, and button presses are logged; <code>--record-input</code> records a play session as a replayable input script (the replay is byte-identical from the same starting state); widescreen (<code>--widescreen 16:9</code> or <code>21:9</code>) is experimental; the GPU renderer (<code>--renderer gpu</code>) runs at up to 9x (4K) or auto; save states (F5 / F8) and hold-to-fast-forward are in; <code>p2text</code> warns when a translated line overflows the 288 px dialogue window. Next: widescreen polish, smoother 90 and 120 fps pacing, and more of the story played and checked.</p>
+                went from about 74 to 129 fps, and the recompiled mode from about 100 to 370 fps. Memory cards work:
+                standard 128 KB <code>.mcd</code> files via <code>--memcard1</code> and <code>--memcard2</code>. On disc
+                1 the game saves from the main menu, and after a reboot CONTINUE loads the save. The SDL3 window can run
+                the recompiled mode (<code>--recomp</code>) with memory cards, as a developer build. Mods: a first
+                version of texture dump and replacement is in the SDL3 window (<code>--texture-dump</code> and
+                <code>--mods</code>; see the mods row in the status table). The game's text system has been located:
+                dialogue uses the game's own 16-bit character codes in event banks, drawn with a 12x12 font, and text
+                speed is a single setting in the main executable. The faster-text option is in:
+                <code>personarm_sdl --text-speed normal|fast|instant</code> (or <code>gameplay.text_speed</code> in a
+                mod manifest). It is built on a small, game-agnostic gameplay-patch layer: patches are applied when the
+                game writes a given memory word, guarded by the expected bytes. The first dialogue line takes 138 frames
+                to appear at normal, 48 at fast and 6 at instant. Disc 1 only for now. Disc 2, the Sumaru TV Special
+                Preview Disc, now boots and runs: it is a promotional TV-channel disc with ATLUS and channel videos and
+                a newspaper TV listing, and each programme is a short in-engine scene with dialogue (a weather report, a
+                variety show, Igor in the Velvet Room). Its interpreter and recompiled modes match exactly, with about
+                99.99% of instructions running as native code. The US release (SLUS-01158) boots to free movement and
+                the main menu with English text, and its recompiled mode matches the interpreter. The JP release is
+                still the primary target; the future launcher will let you pick English by booting the US disc. A
+                settings file (<code>settings.json</code>, see <a
+                    href="https://github.com/sargon494/PersonaRM/blob/main/docs/SETTINGS.md">docs/SETTINGS.md</a>)
+                covers window mode and scale, integer scaling, aspect, vsync, fps target, internal resolution, volume
+                and mute, key and pad remapping, save folder, per-game options and pause on focus loss; command-line
+                flags override it. Internal resolution (<code>--resolution-scale 1-4</code>) runs 2x in real time on the
+                software rasterizer; the GPU renderer (<code>--renderer gpu</code>) runs 1 to 9x and also works with
+                frame interpolation. The <code>p2text</code> tool extracts and reinserts field dialogue (<a
+                    href="https://github.com/sargon494/PersonaRM/blob/main/docs/TRANSLATION_TOOLS.md">docs/TRANSLATION_TOOLS.md</a>);
+                it round-trips all of disc 1 with 0 failures. With file mods (<a
+                    href="https://github.com/sargon494/PersonaRM/blob/main/docs/MOD_FILES.md">docs/MOD_FILES.md</a>),
+                edited dialogue now shows in the running game, verified on the shrine scene. Translations ship only as
+                patches, never as game text. Recent additions: the menu cursor and UI labels on JP disc 1 are visible
+                again (a GPU reset no longer wipes video memory); the gamepad's left stick drives the d-pad, and button
+                presses are logged; <code>--record-input</code> records a play session as a replayable input script (the
+                replay is byte-identical from the same starting state); widescreen (<code>--widescreen 16:9</code> or
+                <code>21:9</code>) is experimental; the GPU renderer (<code>--renderer gpu</code>) runs at up to 9x (4K)
+                or auto; save states (F5 / F8) and hold-to-fast-forward are in; <code>p2text</code> warns when a
+                translated line overflows the 288 px dialogue window. Next: widescreen polish, smoother 90 and 120 fps
+                pacing, and more of the story played and checked.</p>
             <div class="status-table reveal" role="table" aria-label="Subsystem status">
                 <div class="row head" role="row"><span role="columnheader">Subsystem</span><span
                         role="columnheader">Status</span></div>
                 <div class="row" role="row"><span role="cell">Launcher (Rust + egui)</span><span role="cell"
-                        class="tag ok">Settings for language, frame rate (30/60/90/120), renderer, resolution, widescreen, window mode, volume, text speed, save folder and pause on focus loss. Plays the game with no console window and hides while you play. Auto-update from GitHub Releases: SHA-256 checked, never touches settings, saves or memory cards</span></div>
+                        class="tag ok">Settings for language, frame rate (30/60/90/120), renderer, resolution,
+                        widescreen, window mode, volume, text speed, save folder and pause on focus loss. Plays the game
+                        with no console window and hides while you play. Auto-update from GitHub Releases: SHA-256
+                        checked, never touches settings, saves or memory cards</span></div>
                 <div class="row" role="row"><span role="cell">Disc reader and PS-X EXE loader</span><span role="cell"
                         class="tag ok">Implemented</span></div>
                 <div class="row" role="row"><span role="cell">Static analysis tools</span><span role="cell"
@@ -188,33 +242,81 @@
                 <div class="row" role="row"><span role="cell">DMA, CD-ROM and SPU</span><span role="cell"
                         class="tag ok">Wired into the bus</span></div>
                 <div class="row" role="row"><span role="cell">Real-game boot</span><span role="cell"
-                        class="tag progress">Disc 1: free movement and main menu; the menu cursor and UI labels on JP disc 1 are visible again (a GPU reset no longer wipes video memory); a first battle reached and won from a school save, with no emulator bugs on that path; disc 2 (Sumaru TV Special Preview Disc) boots and runs</span></div>
+                        class="tag progress">Disc 1: free movement and main menu; the menu cursor and UI labels on JP
+                        disc 1 are visible again (a GPU reset no longer wipes video memory); a first battle reached and
+                        won from a school save, with no emulator bugs on that path; disc 2 (Sumaru TV Special Preview
+                        Disc) boots and runs</span></div>
                 <div class="row" role="row"><span role="cell">Static recompiler</span><span role="cell"
-                        class="tag progress">v0: function-level C++ generation, synthetic G2 passing; overlays covered (code-hash checked); not yet playable end to end</span></div>
+                        class="tag progress">v0: function-level C++ generation, synthetic G2 passing; overlays covered
+                        (code-hash checked); not yet playable end to end</span></div>
                 <div class="row" role="row"><span role="cell">Memory cards and saves</span><span role="cell"
                         class="tag ok">Works: 128 KB .mcd cards; disc 1 saves and CONTINUE</span></div>
                 <div class="row" role="row"><span role="cell">Mods: texture dump and replacement</span><span role="cell"
-                        class="tag progress">First version; texture mods are in the SDL3 window only, off by default. <code>--texture-dump</code> saves each texture uploaded to video memory as PNG (once per content hash); <code>--mods</code> draws replacement PNGs from <code>mods/&lt;name&gt;/textures/</code> (optional <code>manifest.json</code> priority). Output stays at native resolution; palette variants share one PNG; textures uploaded in pieces give one PNG per piece. Mods must contain only the modder's own images, never original game files. File mods (<code>files/Fnnnn.BIN</code>): a mod can replace a whole disc file, and the running game loads it instead of the disc copy; the file may grow. Works with <code>--mods</code> in <code>personarm --boot</code> and <code>personarm_sdl</code>, on JP disc 1 and the US release, in interpreter and recompiled modes. With no mods active, output is byte-identical. See <a href="https://github.com/sargon494/PersonaRM/blob/main/docs/MOD_FILES.md">docs/MOD_FILES.md</a></span></div>
+                        class="tag progress">First version; texture mods are in the SDL3 window only, off by default.
+                        <code>--texture-dump</code> saves each texture uploaded to video memory as PNG (once per content
+                        hash); <code>--mods</code> draws replacement PNGs from <code>mods/&lt;name&gt;/textures/</code>
+                        (optional <code>manifest.json</code> priority). Output stays at native resolution; palette
+                        variants share one PNG; textures uploaded in pieces give one PNG per piece. Mods must contain
+                        only the modder's own images, never original game files. File mods
+                        (<code>files/Fnnnn.BIN</code>): a mod can replace a whole disc file, and the running game loads
+                        it instead of the disc copy; the file may grow. Works with <code>--mods</code> in
+                        <code>personarm --boot</code> and <code>personarm_sdl</code>, on JP disc 1 and the US release,
+                        in interpreter and recompiled modes. With no mods active, output is byte-identical. See <a
+                            href="https://github.com/sargon494/PersonaRM/blob/main/docs/MOD_FILES.md">docs/MOD_FILES.md</a></span>
+                </div>
                 <div class="row" role="row"><span role="cell">Text speed option</span><span role="cell"
-                        class="tag progress">Disc 1 only; <code>--text-speed</code> takes normal, fast or instant (or <code>gameplay.text_speed</code> in a mod manifest). Built on a small, game-agnostic gameplay-patch layer. The first dialogue line takes 138 frames to appear at normal, 48 at fast and 6 at instant</span></div>
+                        class="tag progress">Disc 1 only; <code>--text-speed</code> takes normal, fast or instant (or
+                        <code>gameplay.text_speed</code> in a mod manifest). Built on a small, game-agnostic
+                        gameplay-patch layer. The first dialogue line takes 138 frames to appear at normal, 48 at fast
+                        and 6 at instant</span></div>
                 <div class="row" role="row"><span role="cell">Window, input and audio (SDL3)</span><span role="cell"
-                        class="tag progress">Works; the gamepad's left stick drives the d-pad and button presses are logged; full SPU and CD/XA mix in the window; runs with --recomp and --memcard1/2; optional frame interpolation (off by default)</span></div>
+                        class="tag progress">Works; the gamepad's left stick drives the d-pad and button presses are
+                        logged; full SPU and CD/XA mix in the window; runs with --recomp and --memcard1/2; optional
+                        frame interpolation (off by default)</span></div>
                 <div class="row" role="row"><span role="cell">US release (SLUS-01158)</span><span role="cell"
-                        class="tag progress">Boots to free movement and the main menu with English text; recompiled mode matches the interpreter. The JP release remains the primary target</span></div>
-                <div class="row" role="row"><span role="cell">Settings file (<code>settings.json</code>)</span><span role="cell"
-                        class="tag progress">In the per-user config folder, or given with <code>--settings</code>; command-line flags override it. <code>fps_target</code> 30, 60, 90 and 120 all work; <code>language</code> is stored only</span></div>
-                <div class="row" role="row"><span role="cell">Internal resolution (<code>--resolution-scale</code>)</span><span role="cell"
-                        class="tag progress">1 to 4 on the software renderer, 1 to 9 or <code>auto</code> on the GPU renderer, or <code>video.resolution_scale</code> in the settings file. 2x runs in real time on the software rasterizer; the GPU renderer (<code>--renderer gpu</code>, see below) also works with frame interpolation</span></div>
-                <div class="row" role="row"><span role="cell">Translation tools (<code>p2text</code>)</span><span role="cell"
-                        class="tag progress">Extracts and reinserts field dialogue; round-trips all of disc 1 with 0 failures. With file mods, edited dialogue shows in the running game (JP disc 1, verified on the shrine scene). Translations ship only as patches. <code>p2text</code> warns when a translated line overflows the 288 px dialogue window; US glyph widths are read from the user's disc.</span></div>
-                <div class="row" role="row"><span role="cell">GPU renderer (<code>--renderer gpu</code>)</span><span role="cell"
-                        class="tag progress">On SDL_gpu (D3D12 on Windows; other platforms use the software renderer). Presents directly with no readback: about 8 ms per frame at 4x and about 11 ms at 9x (4K), against about 37 ms in software at 4x. Lines and the mask run on the GPU; works with widescreen and frame interpolation. Scale 1 to 9 or <code>auto</code>. Some features still fall back to the software renderer or are missing. See <a href="https://github.com/sargon494/PersonaRM/blob/main/docs/GPU_RENDERER.md">docs/GPU_RENDERER.md</a></span></div>
-                <div class="row" role="row"><span role="cell">Widescreen (<code>--widescreen</code>, <code>video.widescreen</code>)</span><span role="cell"
-                        class="tag progress">Experimental: <code>--widescreen 16:9</code> or <code>21:9</code> shows a wider 3D view. Dialogue, text and portraits over 3D keep 4:3; menus and FMV stay 4:3. Known issues: empty room edges are visible at the sides; sprite parts can separate, text can jitter, and fades can uncover the sides first. 4:3 is the recommended mode. See <a href="https://github.com/sargon494/PersonaRM/blob/main/docs/WIDESCREEN.md">docs/WIDESCREEN.md</a></span></div>
+                        class="tag progress">Boots to free movement and the main menu with English text; recompiled mode
+                        matches the interpreter. The JP release remains the primary target</span></div>
+                <div class="row" role="row"><span role="cell">Settings file (<code>settings.json</code>)</span><span
+                        role="cell" class="tag progress">In the per-user config folder, or given with
+                        <code>--settings</code>; command-line flags override it. <code>fps_target</code> 30, 60, 90 and
+                        120 all work; <code>language</code> is stored only</span></div>
+                <div class="row" role="row"><span role="cell">Internal resolution
+                        (<code>--resolution-scale</code>)</span><span role="cell" class="tag progress">1 to 4 on the
+                        software renderer, 1 to 9 or <code>auto</code> on the GPU renderer, or
+                        <code>video.resolution_scale</code> in the settings file. 2x runs in real time on the software
+                        rasterizer; the GPU renderer (<code>--renderer gpu</code>, see below) also works with frame
+                        interpolation</span></div>
+                <div class="row" role="row"><span role="cell">Translation tools (<code>p2text</code>)</span><span
+                        role="cell" class="tag progress">Extracts and reinserts field dialogue; round-trips all of disc
+                        1 with 0 failures. With file mods, edited dialogue shows in the running game (JP disc 1,
+                        verified on the shrine scene). Translations ship only as patches. <code>p2text</code> warns when
+                        a translated line overflows the 288 px dialogue window; US glyph widths are read from the user's
+                        disc.</span></div>
+                <div class="row" role="row"><span role="cell">GPU renderer (<code>--renderer gpu</code>)</span><span
+                        role="cell" class="tag progress">On SDL_gpu (D3D12 on Windows; other platforms use the software
+                        renderer). Presents directly with no readback: about 8 ms per frame at 4x and about 11 ms at 9x
+                        (4K), against about 37 ms in software at 4x. Lines and the mask run on the GPU; works with
+                        widescreen and frame interpolation. Scale 1 to 9 or <code>auto</code>. Some features still fall
+                        back to the software renderer or are missing. See <a
+                            href="https://github.com/sargon494/PersonaRM/blob/main/docs/GPU_RENDERER.md">docs/GPU_RENDERER.md</a></span>
+                </div>
+                <div class="row" role="row"><span role="cell">Widescreen (<code>--widescreen</code>,
+                        <code>video.widescreen</code>)</span><span role="cell" class="tag progress">Experimental:
+                        <code>--widescreen 16:9</code> or <code>21:9</code> shows a wider 3D view. Dialogue, text and
+                        portraits over 3D keep 4:3; menus and FMV stay 4:3. Known issues: empty room edges are visible
+                        at the sides; sprite parts can separate, text can jitter, and fades can uncover the sides first.
+                        4:3 is the recommended mode. See <a
+                            href="https://github.com/sargon494/PersonaRM/blob/main/docs/WIDESCREEN.md">docs/WIDESCREEN.md</a></span>
+                </div>
                 <div class="row" role="row"><span role="cell">Save states and fast-forward</span><span role="cell"
-                        class="tag ok">F5 save, F8 load, F6/F7 slot. Deterministic. The memory card is never touched by states. A crash when loading a state saved with widescreen on is fixed; <code>personarm_sdl --load-state N</code> loads slot N at start. States load only in the build they were made with (not across releases); memory-card saves always carry over. Hold Tab or R3 to fast-forward: up to 4x by default (<code>video.fast_forward_max</code>), 16x max</span></div>
-                <div class="row" role="row"><span role="cell">Input recording (<code>--record-input</code>)</span><span role="cell"
-                        class="tag ok">Records a play session as a replayable input script; the replay is byte-identical from the same starting state</span></div>
+                        class="tag ok">F5 save, F8 load, F6/F7 slot. Deterministic. The memory card is never touched by
+                        states. A crash when loading a state saved with widescreen on is fixed;
+                        <code>personarm_sdl --load-state N</code> loads slot N at start. States load only in the build
+                        they were made with (not across releases); memory-card saves always carry over. Hold Tab or R3
+                        to fast-forward: up to 4x by default (<code>video.fast_forward_max</code>), 16x max</span></div>
+                <div class="row" role="row"><span role="cell">Input recording (<code>--record-input</code>)</span><span
+                        role="cell" class="tag ok">Records a play session as a replayable input script; the replay is
+                        byte-identical from the same starting state</span></div>
             </div>
         </section>
 
@@ -225,7 +327,8 @@
                 <h2 id="start-title">Quick <em>start</em></h2>
             </header>
             <div class="notice reveal">
-                <strong>Early builds.</strong> You need your own disc image; the release contains no game data, BIOS or game code. The developer commands below manage disc images and
+                <strong>Early builds.</strong> You need your own disc image; the release contains no game data, BIOS or
+                game code. The developer commands below manage disc images and
                 configuration for development.
             </div>
             <ol class="steps">
@@ -235,11 +338,13 @@
                 </li>
                 <li class="reveal">
                     <h3>Download PersonaRM</h3>
-                    <p>Download the latest zip from <a href="https://github.com/sargon494/PersonaRM/releases">GitHub Releases</a> (v0.1.2), unzip it and run <code>launcher.exe</code>.</p>
+                    <p>Download the latest zip from <a href="https://github.com/sargon494/PersonaRM/releases">GitHub
+                            Releases</a> (v0.1.4), unzip it and run <code>launcher.exe</code>.</p>
                 </li>
                 <li class="reveal">
                     <h3>Set your disc and press PLAY</h3>
-                    <p>In the launcher, set your disc <code>.cue</code> (the Japanese and/or the English US release) and press <strong>PLAY</strong>.</p>
+                    <p>In the launcher, set your disc <code>.cue</code> (the Japanese and/or the English US release) and
+                        press <strong>PLAY</strong>.</p>
                 </li>
                 <li class="reveal">
                     <h3>For developers</h3>
@@ -254,8 +359,11 @@ personarm_sdl "/path/to/disc1.cue" --recomp --memcard1 "/path/to/card1.mcd"</cod
                     </div>
                 </li>
             </ol>
-            <p class="fine reveal">Settings are stored in <code>personarm_config.json</code>. The SDL3 window also reads <code>settings.json</code> (see <a href="https://github.com/sargon494/PersonaRM/blob/main/docs/SETTINGS.md">docs/SETTINGS.md</a>). Run
-                <code>personarm --help</code> for all options.</p>
+            <p class="fine reveal">Settings are stored in <code>personarm_config.json</code>. The SDL3 window also reads
+                <code>settings.json</code> (see <a
+                    href="https://github.com/sargon494/PersonaRM/blob/main/docs/SETTINGS.md">docs/SETTINGS.md</a>). Run
+                <code>personarm --help</code> for all options.
+            </p>
         </section>
 
         <!-- DEVELOPERS -->
