@@ -164,6 +164,10 @@ bool ParseHostArgs(int argc, const char* const* argv, HostOptions& o) {
                 if (std::strcmp(v, "normal") && std::strcmp(v, "fast") && std::strcmp(v, "instant")) return false;
                 o.text_speed = v;
             }
+            else if (is("--encounters")) {
+                if (std::strcmp(v, "normal") && std::strcmp(v, "reduced") && std::strcmp(v, "none")) return false;
+                o.encounters = v;
+            }
             else if (is("--dump-from")) o.dump_from = std::strtoull(v, nullptr, 10);
             else if (is("--dump-to")) o.dump_to = std::strtoull(v, nullptr, 10);
             else if (is("--memcard1")) o.memcard[0] = v;

@@ -703,7 +703,7 @@ void Engine::RunPatches(uint32_t o) {
         for (const auto& e : g.expect)
             match = match && std::equal(e.bytes.begin(), e.bytes.end(), m_ram.begin() + (e.address & kMask));
         if (!match) {
-            if (!m_patch_skipped[i]++) PRM_LOG_WARN("PATCH", "patch '" + g.name + "' skipped: expected bytes differ (other game version?)");
+            if (!m_patch_skipped[i]++) PRM_LOG_WARN("PATCH", "patch '" + g.name + "' skipped: expected bytes differ (another overlay at that address, or another game version)");
             continue;
         }
         const uint32_t dst = g.write.address & kMask;

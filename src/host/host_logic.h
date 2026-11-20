@@ -52,6 +52,7 @@ struct HostOptions {
     std::string disc, screenshot, input_script, dump_dir;
     std::string texture_dump, mods; // --texture-dump D (dump used VRAM textures as PNG), --mods D (HD replacement)
     std::string text_speed;         // --text-speed normal|fast|instant (empty = the mods manifests decide)
+    std::string encounters;         // --encounters normal|reduced|none (empty = the settings file decides)
     std::string widescreen;         // --widescreen off|16:9|21:9|W:H (empty = the settings file decides)
     std::string memcard[2];         // --memcard1/2: raw .mcd per slot, empty = no card
     uint64_t max_frames = 0, dump_from = 0, dump_to = 0;

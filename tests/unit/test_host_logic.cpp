@@ -83,6 +83,10 @@ int main() {
     const char* tsbad[] = {"personarm_sdl", "d.cue", "--text-speed", "warp"};
     CHECK(!ParseHostArgs(4, tsbad, o));
     CHECK(ParseHostArgs(2, plain, o) && o.text_speed.empty());
+    const char* enc[] = {"personarm_sdl", "d.cue", "--encounters", "none"};
+    CHECK(ParseHostArgs(4, enc, o) && o.encounters == "none");
+    const char* encbad[] = {"personarm_sdl", "d.cue", "--encounters", "half"};
+    CHECK(!ParseHostArgs(4, encbad, o));
     const char* missing[] = {"personarm_sdl", "d.cue", "--memcard1"};
     CHECK(!ParseHostArgs(3, missing, o));
     const char* unknown[] = {"personarm_sdl", "d.cue", "--bogus", "1"};

@@ -142,6 +142,7 @@ Settings ParseSettings(const std::string& text, std::vector<std::string>* w) {
             GetString(&g, where, "memcard2", gs.memcard[1], w);
             GetString(&g, where, "mods", gs.mods, w);
             GetEnum(&g, where, "text_speed", {"normal", "fast", "instant"}, gs.text_speed, w);
+            GetEnum(&g, where, "encounter_rate", {"normal", "reduced", "none"}, gs.encounter_rate, w);
             if (!Missing(&g, "recomp")) {
                 if (g.Find("recomp")->IsBool()) gs.recomp = g.Find("recomp")->AsBool();
                 else Warn(w, where + ".recomp: expected true/false, ignored");
@@ -199,6 +200,7 @@ std::string DumpSettings(const Settings& s) {
         if (!gs.memcard[1].empty()) o.Set("memcard2", gs.memcard[1]);
         if (!gs.mods.empty()) o.Set("mods", gs.mods);
         if (!gs.text_speed.empty()) o.Set("text_speed", gs.text_speed);
+        if (!gs.encounter_rate.empty()) o.Set("encounter_rate", gs.encounter_rate);
         if (gs.recomp) o.Set("recomp", *gs.recomp);
         games.Set(serial, o);
     }
@@ -234,6 +236,7 @@ Settings ApplyCli(Settings s, const HostOptions& o, const std::string& serial) {
     GameSettings g = GameFor(s, serial);
     for (int i = 0; i < 2; ++i) if (!o.memcard[i].empty()) g.memcard[i] = o.memcard[i];
     if (!o.text_speed.empty()) g.text_speed = o.text_speed;
+    if (!o.encounters.empty()) g.encounter_rate = o.encounters;
     if (!o.mods.empty()) g.mods = o.mods;
     if (o.recomp) g.recomp = true;
     if (!g.Empty()) s.games[serial] = g;
