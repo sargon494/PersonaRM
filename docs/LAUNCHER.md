@@ -121,6 +121,8 @@ Test it without GitHub (debug builds only; release builds ignore these variables
    tag name) creates a **draft** release instead: review it and publish it by hand.
 
 The zip `PersonaRM-vX.Y.Z-windows-x64.zip` contains `launcher.exe`, `personarm_sdl.exe`, `SDL3.dll`,
-`personarm.exe`, `README.md`, `LICENSE`, `docs/LAUNCHER.md` and `docs/SETTINGS.md`. It never contains game data,
-BIOS files or recompiled game code (the release build does not set `PRM_RECOMP_GENERATED_DIR`). Only a
+`personarm.exe`, `personarm_native.exe`, `libtcc.dll` (TinyCC, LGPL; licence and source offer in `licenses/`),
+`README.md`, `LICENSE`, `docs/LAUNCHER.md`, `docs/SETTINGS.md` and `docs/NATIVE_CODE.md`. It never contains game data,
+BIOS files or recompiled game code (the release build does not set `PRM_RECOMP_GENERATED_DIR`; `scripts/check-release-files.ps1`
+fails the release on any file outside that list). Only a
 published (non-draft, non-pre-release) release counts as "latest" for the updater.

@@ -38,6 +38,14 @@ if(WIN32)
 else()
     target_compile_definitions(libtcc PRIVATE TCC_TARGET_X86_64)
 endif()
+# Licence and source offer travel with the DLL (LGPL-2.1 section 6): the release copies both.
+file(WRITE ${_tcc_gen}/TinyCC-SOURCE.txt
+    "libtcc.dll is TinyCC ${_tcc_version} (GNU LGPL 2.1, see TinyCC-LICENSE.txt), built unmodified from\n"
+    "https://repo.or.cz/tinycc.git commit ${TINYCC_COMMIT}\n"
+    "by cmake/TinyCC.cmake in https://github.com/sargon494/PersonaRM. Source: either repository.\n")
+add_custom_command(TARGET libtcc POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${TINYCC_SOURCE_DIR}/COPYING $<TARGET_FILE_DIR:libtcc>/TinyCC-LICENSE.txt
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${_tcc_gen}/TinyCC-SOURCE.txt $<TARGET_FILE_DIR:libtcc>/TinyCC-SOURCE.txt)
 if(MSVC)
     target_compile_options(libtcc PRIVATE /W0)
 else()
