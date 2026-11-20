@@ -7,6 +7,7 @@ mod update;
 use eframe::egui::{self, Color32, FontFamily, RichText, ViewportCommand};
 use model::*;
 use serde_json::Value;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::mpsc;
 
@@ -93,7 +94,19 @@ enum Upd {
     Failed(String),
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum Page {
+    Library,
+    Game,
+    Settings,
+}
+
 struct App {
+    page: Page,
+    /// Index into `cfg.games` of the game being shown / edited.
+    sel: usize,
+    /// Cover textures by path (None = could not be loaded); loaded once.
+    covers: HashMap<String, Option<egui::TextureHandle>>,
     cfg: LauncherConfig,
     settings: GameSettings,
     doc: Value,
@@ -125,8 +138,17 @@ impl App {
         if let Some(p) = find_game_exe(&cfg) {
             cfg.game_exe = p.to_string_lossy().into_owned();
         }
+        if cfg.games.is_empty() {
+            cfg.games = LauncherConfig::default().games;
+        }
         let doc = load_game_doc();
         let settings = GameSettings::from_value(&doc, &cfg.games[0].serials);
+        // Hidden: `--page game|settings` opens that page (used for screenshots).
+        let page = match std::env::args().skip_while(|a| a != "--page").nth(1).as_deref() {
+            Some("game") => Page::Game,
+            Some("settings") => Page::Settings,
+            _ => Page::Library,
+        };
         let last = log_dir().join("last_error.txt");
         let error = std::fs::read_to_string(&last).ok();
         let _ = std::fs::remove_file(last);
@@ -141,11 +163,11 @@ impl App {
                 }
             });
         }
-        Self { cfg, settings, doc, dirty: false, error, logo, upd: Upd::None, tx, rx }
+        Self { page, sel: 0, covers: HashMap::new(), cfg, settings, doc, dirty: false, error, logo, upd: Upd::None, tx, rx }
     }
 
     fn save(&mut self) {
-        let serials = self.cfg.games[0].serials.clone();
+        let serials = self.cfg.games[self.sel].serials.clone();
         self.settings.apply(&mut self.doc, &serials, self.cfg.resolution);
         if let Err(e) = save_game_doc(&self.doc).and_then(|_| save_launcher(&self.cfg)) {
             self.error = Some(format!("Could not save settings: {e}"));
@@ -156,17 +178,19 @@ impl App {
     fn play(&mut self, ctx: &egui::Context) {
         self.error = None;
         self.save();
-        let Some(exe) = find_game_exe(&self.cfg) else {
-            self.error = Some(format!("{} not found: pick it under Game executable.", exe_name()));
+        let g = &self.cfg.games[self.sel];
+        let Some(exe) = game_exe_for(&self.cfg, g) else {
+            self.error = Some(format!("{} not found: pick it under Settings > Game executable.", exe_name()));
             return;
         };
         let lang = self.settings.language.clone();
-        let Some(cue) = disc_for(&self.cfg.games[0], &lang) else {
+        let Some(cue) = disc_for(g, &lang) else {
             let name = if lang == "ja" { "Japanese" } else { "English" };
             self.error = Some(format!("Set the {name} disc (.cue) first."));
             return;
         };
-        let args = build_args(&game_settings_json().to_string_lossy(), cue, &self.cfg, &self.settings);
+        let mut args = build_args(&game_settings_json().to_string_lossy(), cue, &self.cfg, &self.settings);
+        args.extend(g.args.iter().cloned());
         // The UI process exits while the game runs (an OpenGL window costs ~100 MB even hidden); a
         // windowless watcher (`--run`, a few MB) waits for the game and reopens the launcher.
         let me = std::env::current_exe().unwrap_or_default();
@@ -213,6 +237,258 @@ fn caps(t: &str, size: f32) -> RichText {
     RichText::new(t.to_uppercase()).family(cond()).size(size).extra_letter_spacing(2.0)
 }
 
+
+/// Decode a PNG into a texture, shrunk (nearest) so its longest side is at most 512 px.
+fn load_cover(ctx: &egui::Context, path: &str) -> Option<egui::TextureHandle> {
+    let mut d = png::Decoder::new(std::io::BufReader::new(std::fs::File::open(path).ok()?));
+    d.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
+    let mut r = d.read_info().ok()?;
+    let mut buf = vec![0; r.output_buffer_size()?];
+    let info = r.next_frame(&mut buf).ok()?;
+    let (w, h) = (info.width as usize, info.height as usize);
+    let n = match info.color_type {
+        png::ColorType::Rgba => 4,
+        png::ColorType::Rgb => 3,
+        png::ColorType::GrayscaleAlpha => 2,
+        _ => 1,
+    };
+    let k = (w.max(h) / 512).max(1);
+    let (tw, th) = (w / k, h / k);
+    let mut px = Vec::with_capacity(tw * th * 4);
+    for y in 0..th {
+        for x in 0..tw {
+            let i = ((y * k) * w + x * k) * n;
+            let c = &buf[i..i + n];
+            px.extend(match n {
+                4 => [c[0], c[1], c[2], c[3]],
+                3 => [c[0], c[1], c[2], 255],
+                2 => [c[0], c[0], c[0], c[1]],
+                _ => [c[0], c[0], c[0], 255],
+            });
+        }
+    }
+    Some(ctx.load_texture(path, egui::ColorImage::from_rgba_unmultiplied([tw, th], &px), egui::TextureOptions::LINEAR))
+}
+
+const CARD: egui::Vec2 = egui::vec2(190.0, 270.0);
+
+/// One library card. Returns true when clicked.
+fn card(ui: &mut egui::Ui, g: &Game, st: Status, cover: Option<&egui::TextureHandle>) -> bool {
+    let (rect, resp) = ui.allocate_exact_size(CARD, egui::Sense::click());
+    let p = ui.painter_at(rect);
+    let hot = resp.hovered();
+    p.rect_filled(rect, 0.0, INK_2);
+    let band = 54.0;
+    let art = egui::Rect::from_min_max(rect.min, egui::pos2(rect.max.x, rect.max.y - band));
+    let title = |size: f32, wrap: f32| p.layout(g.name.clone(), egui::FontId::new(size, cond()), PAPER, wrap);
+    if let Some(t) = cover {
+        // Fill the art area, cropping the overflow (centred).
+        let ts = t.size_vec2();
+        let s = (art.width() / ts.x).max(art.height() / ts.y);
+        let uv = egui::vec2(art.width() / s / ts.x, art.height() / s / ts.y);
+        let uv = egui::Rect::from_center_size(egui::pos2(0.5, 0.5), uv);
+        p.image(t.id(), art, uv, Color32::WHITE);
+        let gal = title(20.0, art.width() - 24.0);
+        let h = gal.size().y + 16.0;
+        p.rect_filled(egui::Rect::from_min_max(egui::pos2(art.min.x, art.max.y - h), art.max), 0.0, Color32::from_black_alpha(190));
+        p.galley(egui::pos2(art.min.x + 12.0, art.max.y - h + 8.0), gal, PAPER);
+    } else {
+        p.rect_filled(art, 0.0, INK_3);
+        p.rect_filled(egui::Rect::from_min_size(art.min, egui::vec2(5.0, art.height())), 0.0, RED);
+        let gal = title(30.0, art.width() - 36.0);
+        let y = art.center().y - gal.size().y / 2.0;
+        p.galley(egui::pos2(art.min.x + 20.0, y), gal, PAPER);
+    }
+    // Footer: platform badge + status.
+    let foot_y = rect.max.y - band / 2.0;
+    let badge = p.layout_no_wrap(g.platform.to_uppercase(), egui::FontId::new(14.0, cond()), Color32::WHITE);
+    let br = egui::Rect::from_min_size(egui::pos2(rect.min.x + 12.0, foot_y - 11.0), badge.size() + egui::vec2(12.0, 4.0));
+    p.rect_filled(br, 0.0, RED);
+    p.galley(br.min + egui::vec2(6.0, 2.0), badge, Color32::WHITE);
+    let (txt, col) = match st {
+        Status::Ready => ("Ready", PAPER),
+        Status::NeedsDisc => ("Needs disc", RED_HI),
+        Status::NotPlayable => ("Not playable yet", MUTED),
+    };
+    let sg = p.layout_no_wrap(txt.into(), egui::FontId::proportional(14.0), col);
+    p.galley(egui::pos2(rect.max.x - 12.0 - sg.size().x, foot_y - sg.size().y / 2.0), sg, col);
+    p.rect_stroke(rect, 0.0, egui::Stroke::new(1.0, if hot { RED_HI } else { LINE }), egui::StrokeKind::Inside);
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
+}
+
+/// Gear icon button (drawn: the embedded fonts have no gear glyph).
+fn gear_button(ui: &mut egui::Ui) -> bool {
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(38.0, 38.0), egui::Sense::click());
+    let col = if resp.hovered() { RED_HI } else { PAPER };
+    let p = ui.painter();
+    p.rect_filled(rect, 0.0, INK_3);
+    p.rect_stroke(rect, 0.0, egui::Stroke::new(1.0, if resp.hovered() { RED_HI } else { LINE }), egui::StrokeKind::Inside);
+    let c = rect.center();
+    for i in 0..8 {
+        let a = i as f32 * std::f32::consts::FRAC_PI_4;
+        let d = egui::vec2(a.cos(), a.sin());
+        p.line_segment([c + d * 8.0, c + d * 12.0], egui::Stroke::new(4.0, col));
+    }
+    p.circle_stroke(c, 8.0, egui::Stroke::new(3.0, col));
+    resp.on_hover_text("Settings").on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
+}
+
+fn grid_row(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui)) {
+    ui.label(label);
+    add(ui);
+    ui.end_row();
+}
+
+fn play_button(ui: &mut egui::Ui) -> bool {
+    // Primary button like .btn-primary on the site (hover: #a80f1f).
+    ui.scope(|ui| {
+        let w = &mut ui.visuals_mut().widgets;
+        w.inactive.weak_bg_fill = RED;
+        w.inactive.bg_stroke = egui::Stroke::new(1.0, RED);
+        w.hovered.weak_bg_fill = Color32::from_rgb(0xa8, 0x0f, 0x1f);
+        let btn = egui::Button::new(caps("Play", 24.0).color(Color32::WHITE)).min_size(egui::vec2(ui.available_width(), 46.0));
+        ui.add(btn).clicked()
+    })
+    .inner
+}
+
+impl App {
+    fn library(&mut self, ui: &mut egui::Ui) {
+        heading(ui, "LIBRARY");
+        let gap = 14.0;
+        let cols = (((ui.available_width() + gap) / (CARD.x + gap)) as usize).max(1);
+        let ctx = ui.ctx().clone();
+        let mut open = None;
+        egui::Grid::new("lib").spacing([gap, gap]).show(ui, |ui| {
+            for (i, g) in self.cfg.games.iter().enumerate() {
+                if !g.cover.is_empty() {
+                    self.covers.entry(g.cover.clone()).or_insert_with(|| load_cover(&ctx, &g.cover));
+                }
+                let tex = self.covers.get(&g.cover).and_then(Option::as_ref);
+                if card(ui, g, status(&self.cfg, g), tex) {
+                    open = Some(i);
+                }
+                if (i + 1) % cols == 0 {
+                    ui.end_row();
+                }
+            }
+        });
+        if let Some(i) = open {
+            self.open_game(i);
+        }
+    }
+
+    fn open_game(&mut self, i: usize) {
+        self.sel = i;
+        // text_speed is per game: re-read it for this game's serials.
+        self.settings.text_speed = GameSettings::from_value(&self.doc, &self.cfg.games[i].serials).text_speed;
+        self.page = Page::Game;
+    }
+
+    /// Returns (dirty, play).
+    fn game_page(&mut self, ui: &mut egui::Ui) -> (bool, bool) {
+        let mut dirty = false;
+        let s = &mut self.settings;
+        let g = &mut self.cfg.games[self.sel];
+        ui.label(RichText::new(g.name.clone()).family(cond()).size(26.0).extra_letter_spacing(2.0));
+        ui.label(RichText::new(g.platform.to_uppercase()).color(RED_HI));
+        egui::ScrollArea::vertical().max_height(ui.available_height() - 74.0).show(ui, |ui| {
+            heading(ui, "DISCS");
+            egui::Grid::new("discs").num_columns(2).min_col_width(130.0).show(ui, |ui| {
+                for (code, label) in [("ja", "Japanese disc"), ("en", "English disc")] {
+                    grid_row(ui, label, |ui| {
+                        let mut p = g.discs.get(code).cloned().unwrap_or_default();
+                        let pick = || rfd::FileDialog::new().add_filter("Disc image", &["cue"]).pick_file();
+                        if path_row(ui, &mut p, pick) {
+                            g.discs.insert(code.into(), p);
+                            dirty = true;
+                        }
+                    });
+                }
+            });
+            heading(ui, "OPTIONS");
+            egui::Grid::new("opts").num_columns(2).min_col_width(130.0).show(ui, |ui| {
+                grid_row(ui, "Language", |ui| dirty |= combo(ui, "lang", &mut s.language, &[("ja", "Japanese"), ("en", "English")]));
+                grid_row(ui, "Text speed", |ui| dirty |= combo(ui, "ts", &mut s.text_speed, &[("normal", "Normal"), ("fast", "Fast"), ("instant", "Instant")]));
+                grid_row(ui, "Cover image (PNG)", |ui| {
+                    let pick = || rfd::FileDialog::new().add_filter("PNG image", &["png"]).pick_file();
+                    dirty |= path_row(ui, &mut g.cover, pick);
+                });
+            });
+        });
+        if let Some(e) = &self.error {
+            ui.label(RichText::new(e).color(RED_HI).small());
+        }
+        ui.add_space(4.0);
+        (dirty, play_button(ui))
+    }
+
+    fn settings_page(&mut self, ui: &mut egui::Ui) -> bool {
+        let mut dirty = false;
+        let s = &mut self.settings;
+        let c = &mut self.cfg;
+        ui.label(RichText::new("SETTINGS").family(cond()).size(26.0).extra_letter_spacing(2.0));
+        ui.label(RichText::new("Shared by all games").color(MUTED));
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            heading(ui, "VIDEO");
+            egui::Grid::new("video").num_columns(2).min_col_width(130.0).show(ui, |ui| {
+                grid_row(ui, "Renderer", |ui| {
+                    if combo(ui, "rend", &mut c.renderer, &[("software", "Software"), ("gpu", "GPU")]) {
+                        if c.renderer != "gpu" {
+                            c.resolution = c.resolution.clamp(1, 4);
+                        }
+                        dirty = true;
+                    }
+                });
+                grid_row(ui, "Internal resolution", |ui| {
+                    let gpu = c.renderer == "gpu";
+                    let label = if c.resolution == 0 { "Auto".to_string() } else { format!("{}x", c.resolution) };
+                    egui::ComboBox::from_id_salt("res").selected_text(label).width(170.0).show_ui(ui, |ui| {
+                        let max = if gpu { 9 } else { 4 };
+                        for n in (if gpu { 0 } else { 1 })..=max {
+                            let l = if n == 0 { "Auto".to_string() } else { format!("{n}x") };
+                            dirty |= ui.selectable_value(&mut c.resolution, n, l).changed();
+                        }
+                    });
+                });
+                grid_row(ui, "Frame rate", |ui| {
+                    ui.horizontal(|ui| {
+                        for f in [30, 60, 90, 120] {
+                            dirty |= ui.selectable_value(&mut s.fps, f, format!("{f}")).changed();
+                        }
+                    });
+                });
+                grid_row(ui, "Widescreen", |ui| dirty |= combo(ui, "ws", &mut s.widescreen, &[("off", "Off (4:3)"), ("16:9", "16:9"), ("21:9", "21:9")]));
+                grid_row(ui, "Window mode", |ui| dirty |= combo(ui, "wm", &mut s.window_mode, &[("windowed", "Windowed"), ("fullscreen", "Fullscreen"), ("borderless", "Borderless")]));
+            });
+            if matches!(s.fps, 30 | 90) {
+                ui.label(RichText::new("30 and 90 FPS currently run at 60.").small().color(Color32::GRAY));
+            }
+            heading(ui, "AUDIO");
+            egui::Grid::new("audio").num_columns(2).min_col_width(130.0).show(ui, |ui| {
+                grid_row(ui, "Volume", |ui| {
+                    ui.horizontal(|ui| {
+                        let mut v = s.volume as f32;
+                        if ui.add(egui::Slider::new(&mut v, 0.0..=100.0).integer()).changed() {
+                            s.volume = v as u32;
+                            dirty = true;
+                        }
+                        dirty |= ui.checkbox(&mut s.mute, "Mute").changed();
+                    });
+                });
+            });
+            heading(ui, "GENERAL");
+            egui::Grid::new("general").num_columns(2).min_col_width(130.0).show(ui, |ui| {
+                grid_row(ui, "Save folder", |ui| dirty |= path_row(ui, &mut s.save_dir, || rfd::FileDialog::new().pick_folder()));
+                grid_row(ui, "Game executable", |ui| dirty |= path_row(ui, &mut c.game_exe, || rfd::FileDialog::new().pick_file()));
+                grid_row(ui, "", |ui| dirty |= ui.checkbox(&mut s.pause_on_focus_loss, "Pause when unfocused").changed());
+                grid_row(ui, "", |ui| dirty |= ui.checkbox(&mut c.check_updates, "Check for updates on start").changed());
+            });
+        });
+        dirty
+    }
+}
+
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
@@ -231,7 +507,6 @@ impl eframe::App for App {
                 }
             }
         }
-        let game_name = self.cfg.games[0].name.clone();
         egui::CentralPanel::default().show(ui, |ui| {
             egui::Frame::new().inner_margin(egui::Margin::symmetric(20, 14)).show(ui, |ui| {
                 ui.horizontal(|ui| {
@@ -241,7 +516,17 @@ impl eframe::App for App {
                     ui.vertical(|ui| {
                         ui.spacing_mut().item_spacing.y = 0.0;
                         ui.label(RichText::new("PersonaRM").family(cond()).size(30.0).extra_letter_spacing(4.0));
-                        ui.label(RichText::new(format!("{game_name}  \u{b7}  launcher v{}", update::VERSION)).color(MUTED));
+                        ui.label(RichText::new(format!("launcher v{}", update::VERSION)).color(MUTED));
+                    });
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if self.page == Page::Library {
+                            if gear_button(ui) {
+                                self.page = Page::Settings;
+                            }
+                        } else if ui.add(egui::Button::new(caps("\u{2190} Back", 16.0))).clicked() {
+                            self.page = Page::Library;
+                            self.error = None;
+                        }
                     });
                 });
                 ui.separator();
@@ -266,112 +551,13 @@ impl eframe::App for App {
                         });
                     }
                 }
-                egui::ScrollArea::vertical().max_height(ui.available_height() - 74.0).show(ui, |ui| {
-                    let s = &mut self.settings;
-                    let c = &mut self.cfg;
-                    heading(ui, "GAME");
-                    egui::Grid::new("game").num_columns(2).min_col_width(130.0).show(ui, |ui| {
-                        ui.label("Language");
-                        dirty |= combo(ui, "lang", &mut s.language, &[("ja", "Japanese"), ("en", "English")]);
-                        ui.end_row();
-                        for (code, label) in [("ja", "Japanese disc"), ("en", "English disc")] {
-                            ui.label(label);
-                            let mut p = c.games[0].discs.get(code).cloned().unwrap_or_default();
-                            let pick = || rfd::FileDialog::new().add_filter("Disc image", &["cue"]).pick_file();
-                            if path_row(ui, &mut p, pick) {
-                                c.games[0].discs.insert(code.into(), p);
-                                dirty = true;
-                            }
-                            ui.end_row();
-                        }
-                        ui.label("Game executable");
-                        let pick = || rfd::FileDialog::new().pick_file();
-                        dirty |= path_row(ui, &mut c.game_exe, pick);
-                        ui.end_row();
-                    });
-                    heading(ui, "VIDEO");
-                    egui::Grid::new("video").num_columns(2).min_col_width(130.0).show(ui, |ui| {
-                        ui.label("Renderer");
-                        if combo(ui, "rend", &mut c.renderer, &[("software", "Software"), ("gpu", "GPU")]) {
-                            if c.renderer != "gpu" {
-                                c.resolution = c.resolution.clamp(1, 4);
-                            }
-                            dirty = true;
-                        }
-                        ui.end_row();
-                        ui.label("Internal resolution");
-                        let gpu = c.renderer == "gpu";
-                        let label = if c.resolution == 0 { "Auto".to_string() } else { format!("{}x", c.resolution) };
-                        egui::ComboBox::from_id_salt("res").selected_text(label).width(170.0).show_ui(ui, |ui| {
-                            let max = if gpu { 9 } else { 4 };
-                            for n in (if gpu { 0 } else { 1 })..=max {
-                                let l = if n == 0 { "Auto".to_string() } else { format!("{n}x") };
-                                dirty |= ui.selectable_value(&mut c.resolution, n, l).changed();
-                            }
-                        });
-                        ui.end_row();
-                        ui.label("Frame rate");
-                        ui.horizontal(|ui| {
-                            for f in [30, 60, 90, 120] {
-                                dirty |= ui.selectable_value(&mut s.fps, f, format!("{f}")).changed();
-                            }
-                        });
-                        ui.end_row();
-                        ui.label("Widescreen");
-                        dirty |= combo(ui, "ws", &mut s.widescreen, &[("off", "Off (4:3)"), ("16:9", "16:9"), ("21:9", "21:9")]);
-                        ui.end_row();
-                        ui.label("Window mode");
-                        dirty |= combo(ui, "wm", &mut s.window_mode, &[("windowed", "Windowed"), ("fullscreen", "Fullscreen"), ("borderless", "Borderless")]);
-                        ui.end_row();
-                    });
-                    if matches!(s.fps, 30 | 90) {
-                        ui.label(RichText::new("30 and 90 FPS currently run at 60.").small().color(Color32::GRAY));
+                match self.page {
+                    Page::Library => {
+                        egui::ScrollArea::vertical().show(ui, |ui| self.library(ui));
                     }
-                    heading(ui, "AUDIO");
-                    egui::Grid::new("audio").num_columns(2).min_col_width(130.0).show(ui, |ui| {
-                        ui.label("Volume");
-                        ui.horizontal(|ui| {
-                            let mut v = s.volume as f32;
-                            if ui.add(egui::Slider::new(&mut v, 0.0..=100.0).integer()).changed() {
-                                s.volume = v as u32;
-                                dirty = true;
-                            }
-                            dirty |= ui.checkbox(&mut s.mute, "Mute").changed();
-                        });
-                        ui.end_row();
-                    });
-                    heading(ui, "GAMEPLAY");
-                    egui::Grid::new("play").num_columns(2).min_col_width(130.0).show(ui, |ui| {
-                        ui.label("Text speed");
-                        dirty |= combo(ui, "ts", &mut s.text_speed, &[("normal", "Normal"), ("fast", "Fast"), ("instant", "Instant")]);
-                        ui.end_row();
-                        ui.label("Save folder");
-                        let pick = || rfd::FileDialog::new().pick_folder();
-                        dirty |= path_row(ui, &mut s.save_dir, pick);
-                        ui.end_row();
-                        ui.label("");
-                        dirty |= ui.checkbox(&mut s.pause_on_focus_loss, "Pause when unfocused").changed();
-                        ui.end_row();
-                        ui.label("");
-                        dirty |= ui.checkbox(&mut c.check_updates, "Check for updates on start").changed();
-                        ui.end_row();
-                    });
-                });
-                ui.add_space(8.0);
-                if let Some(e) = &self.error {
-                    ui.label(RichText::new(e).color(RED_HI).small());
+                    Page::Game => (dirty, play) = self.game_page(ui),
+                    Page::Settings => dirty = self.settings_page(ui),
                 }
-                ui.add_space(4.0);
-                ui.scope(|ui| {
-                    // Primary button like .btn-primary on the site (hover: #a80f1f).
-                    let w = &mut ui.visuals_mut().widgets;
-                    w.inactive.weak_bg_fill = RED;
-                    w.inactive.bg_stroke = egui::Stroke::new(1.0, RED);
-                    w.hovered.weak_bg_fill = Color32::from_rgb(0xa8, 0x0f, 0x1f);
-                    let btn = egui::Button::new(caps("Play", 24.0).color(Color32::WHITE))
-                        .min_size(egui::vec2(ui.available_width(), 46.0));
-                    play = ui.add(btn).clicked();
-                });
             });
         });
         if let Some(r) = start {
@@ -443,9 +629,8 @@ fn main() -> eframe::Result {
     });
     let mut vp = egui::ViewportBuilder::default()
         .with_title("PersonaRM")
-        .with_inner_size([560.0, 870.0])
-        .with_resizable(false)
-        .with_maximize_button(false);
+        .with_inner_size([940.0, 680.0])
+        .with_min_inner_size([480.0, 520.0]);
     if let Some(i) = icon {
         vp = vp.with_icon(i);
     }

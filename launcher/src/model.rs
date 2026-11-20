@@ -17,6 +17,46 @@ pub struct Game {
     /// Language ("ja" / "en") -> disc image (.cue), chosen by the user.
     #[serde(default)]
     pub discs: BTreeMap<String, String>,
+    /// Platform badge shown on the card ("PS1", later "PSP", ...).
+    #[serde(default = "default_platform")]
+    pub platform: String,
+    /// Optional cover image (PNG) picked by the user; empty = drawn title card. Never shipped.
+    #[serde(default)]
+    pub cover: String,
+    /// Executable that runs this game; empty = the launcher's `game_exe` / `personarm_sdl` next to it.
+    #[serde(default)]
+    pub exe: String,
+    /// Extra command-line arguments appended after the disc and the launcher's own ones.
+    #[serde(default)]
+    pub args: Vec<String>,
+}
+
+fn default_platform() -> String { "PS1".into() }
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Status {
+    Ready,
+    NeedsDisc,
+    NotPlayable,
+}
+
+/// Executable for `g`: its own `exe` if set and present, else the shared one.
+pub fn game_exe_for(cfg: &LauncherConfig, g: &Game) -> Option<PathBuf> {
+    if !g.exe.is_empty() {
+        let p = PathBuf::from(&g.exe);
+        return p.is_file().then_some(p);
+    }
+    find_game_exe(cfg)
+}
+
+pub fn status(cfg: &LauncherConfig, g: &Game) -> Status {
+    if game_exe_for(cfg, g).is_none() {
+        Status::NotPlayable
+    } else if g.discs.values().any(|d| !d.is_empty()) {
+        Status::Ready
+    } else {
+        Status::NeedsDisc
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -44,6 +84,10 @@ impl Default for LauncherConfig {
                 name: "Persona 2: Eternal Punishment".into(),
                 serials: ["SLPS-02785", "SLPS-02786", "SLUS-01158", "SLUS-01339"].map(String::from).to_vec(),
                 discs: BTreeMap::new(),
+                platform: default_platform(),
+                cover: String::new(),
+                exe: String::new(),
+                args: Vec::new(),
             }],
         }
     }
@@ -301,6 +345,30 @@ mod tests {
         assert_eq!(build_args("S", "d", &c, &s)[6], "1");
         let fast = GameSettings { fps: 120, ..Default::default() };
         assert_eq!(build_args("S", "d", &c, &fast), ["d", "--settings", "S", "--renderer", "software"]);
+    }
+
+    #[test]
+    fn old_launcher_json_still_loads() {
+        let old = r#"{"game_exe":"x.exe","renderer":"gpu","resolution":2,"check_updates":false,
+            "games":[{"name":"P2","serials":["SLPS-02785"],"discs":{"ja":"a.cue"}}]}"#;
+        let c: LauncherConfig = serde_json::from_str(old).unwrap();
+        let g = &c.games[0];
+        assert_eq!((g.platform.as_str(), g.cover.as_str(), g.exe.as_str()), ("PS1", "", ""));
+        assert!(g.args.is_empty());
+        assert_eq!(disc_for(g, "ja"), Some("a.cue"));
+        assert_eq!(c.renderer, "gpu");
+    }
+
+    #[test]
+    fn status_values() {
+        let mut c = LauncherConfig::default();
+        let mut g = c.games.remove(0);
+        g.exe = "does/not/exist".into();
+        assert_eq!(status(&c, &g), Status::NotPlayable);
+        g.exe = std::env::current_exe().unwrap().to_string_lossy().into_owned();
+        assert_eq!(status(&c, &g), Status::NeedsDisc);
+        g.discs.insert("ja".into(), "a.cue".into());
+        assert_eq!(status(&c, &g), Status::Ready);
     }
 
     #[test]
