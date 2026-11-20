@@ -8,11 +8,19 @@
     <meta name="description"
         content="PersonaRM is an open-source native PC runtime and launcher for Persona 2: Eternal Punishment. Bring your own copy." />
     <meta name="theme-color" content="#07070b" />
-    <link rel="icon" href="assets/logo.png" />
+    <link rel="icon" href="assets/logo-96.png" />
+    <link rel="canonical" href="https://sargon494.github.io/PersonaRM/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://sargon494.github.io/PersonaRM/" />
     <meta property="og:title" content="PersonaRM" />
     <meta property="og:description"
         content="Native PC runtime for Persona 2: Eternal Punishment. Bring your own copy." />
-    <meta property="og:image" content="assets/logo.png" />
+    <meta property="og:image" content="https://sargon494.github.io/PersonaRM/assets/logo.png" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="PersonaRM" />
+    <meta name="twitter:description"
+        content="Native PC runtime for Persona 2: Eternal Punishment. Bring your own copy." />
+    <meta name="twitter:image" content="https://sargon494.github.io/PersonaRM/assets/logo.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -31,20 +39,21 @@
 
     <header class="topbar">
         <a class="brand" href="#top" aria-label="PersonaRM home">
-            <img src="assets/logo.png" alt="" width="34" height="34" />
+            <img src="assets/logo-96.png" alt="" width="34" height="34" />
             <span>PersonaRM</span>
         </a>
         <nav aria-label="Primary">
-            <a href="#features">Features</a>
-            <a href="#status">Status</a>
-            <a href="#start">Quick start</a>
-            <a href="#developers">Developers</a>
+            <span class="links">
+                <a href="#status">Status</a>
+                <a href="#start">Quick start</a>
+                <a href="#developers">Developers</a>
+            </span>
             <span class="lang" role="group" aria-label="Language">
                 <a class="lang-link" href="index.html" hreflang="en" lang="en" aria-current="true">EN</a>
                 <a class="lang-link" href="es/index.html" hreflang="es" lang="es">ES</a>
                 <a class="lang-link" href="ja/index.html" hreflang="ja" lang="ja">日本語</a>
             </span>
-            <a class="nav-cta" href="https://github.com/sargon494/PersonaRM">GitHub</a>
+            <a class="nav-cta" href="https://github.com/sargon494/PersonaRM/releases/latest">Download</a>
         </nav>
     </header>
 
@@ -54,25 +63,24 @@
         <section class="hero" id="top">
             <div class="smoke" aria-hidden="true"></div>
             <div class="hero-inner">
-                <img class="hero-logo" src="assets/logo.png" alt="PersonaRM logo" />
+                <img class="hero-logo" src="assets/logo-480.png" alt="PersonaRM logo" width="480" height="480" />
                 <p class="eyebrow">Native PC runtime · Persona 2: Eternal Punishment</p>
-                <h1>Run the game natively. <span>Bring your own copy.</span></h1>
+                <h1><span class="l1">Run the game natively.</span> <span class="l2">Bring your own copy.</span></h1>
                 <p class="lead">
-                    PersonaRM is an open-source runtime and launcher for Windows and Linux, in
-                    active development. It rebuilds the PlayStation 1 hardware the game needs.
-                    Not fully playable yet, but the game's real executable already plays its intro, shows the
-                    title screen and, on a new game, reaches free movement of the player character and the
-                    main menu, in an optional SDL3 window, with music and sound effects.
+                    An open-source launcher and runtime for Persona 2: Eternal Punishment on PC. Very experimental:
+                    the intro, story scenes, free movement and the first battles already run.
                 </p>
                 <div class="actions">
-                    <a class="btn btn-primary" href="#start">Get started</a>
+                    <div class="dl">
+                        <a class="btn btn-primary" href="https://github.com/sargon494/PersonaRM/releases/latest">Download v0.1.4</a>
+                        <small>Windows · bring your own disc · experimental</small>
+                    </div>
                     <a class="btn" href="https://github.com/sargon494/PersonaRM">View source</a>
                 </div>
                 <ul class="chips" aria-label="Project facts">
                     <li>GPL v3+</li>
-                    <li>Windows · Linux</li>
-                    <li>C++17</li>
                     <li>No game files included</li>
+                    <li>Linux: untested</li>
                 </ul>
             </div>
         </section>
@@ -80,34 +88,116 @@
         <!-- PRINCIPLES -->
         <section class="section principles" aria-labelledby="principles-title">
             <header class="section-head reveal">
-                <span class="num">01</span>
                 <h2 id="principles-title">Built on <em>Bring Your Own Copy</em></h2>
             </header>
             <div class="grid three">
                 <article class="card reveal">
                     <h3>No game content</h3>
-                    <p>PersonaRM contains no game binaries, ROMs, or assets. The runtime is the only thing you download.
-                    </p>
+                    <p>PersonaRM includes no game data, BIOS or game code. The only thing you download is the launcher
+                        and runtime.</p>
                 </article>
                 <article class="card reveal">
                     <h3>Your disc, your files</h3>
-                    <p>Point PersonaRM at a disc image from a copy you own: <code>.cue/.bin</code>, <code>.iso</code>,
-                        or <code>.img</code>.</p>
+                    <p>Point it at a disc image from a copy you own. Supported: the Japanese release (disc 1, the main
+                        target) and the US English release. The Japanese disc 2, a promo disc, also boots.</p>
                 </article>
                 <article class="card reveal">
-                    <h3>Enhancements</h3>
-                    <p>Save states (F5 / F8, ten slots), hold-to-fast-forward up to 16×, and experimental widescreen
-                        work now; controller glyphs come next.</p>
+                    <h3>The launcher is the product</h3>
+                    <p>A game library with auto-update. Later, PersonaRM plans to bring more Atlus games from other
+                        consoles into the same launcher. No dates promised.</p>
                 </article>
             </div>
         </section>
 
-        <!-- FEATURES -->
-        <section class="section" id="features" aria-labelledby="features-title">
+        <!-- STATUS -->
+        <section class="section" id="status" aria-labelledby="status-title">
             <header class="section-head reveal">
-                <span class="num">02</span>
-                <h2 id="features-title">Hardware, <em>being rebuilt</em></h2>
+                <h2 id="status-title"><em>Status</em></h2>
             </header>
+            <p class="intro reveal">Very experimental, and not fully playable yet. What works today:</p>
+            <ul class="today reveal">
+                <li>Intro, title screen, new game, story scenes, free movement and the first battles.</li>
+                <li>Saving and loading memory cards, and save states.</li>
+                <li>30, 60, 90 and 120 fps, and internal resolution up to 4K with the GPU renderer.</li>
+                <li>A game-library launcher that updates itself.</li>
+            </ul>
+            <ul class="status-list reveal" aria-label="Status by area">
+                <li><span class="chip works">Works</span>
+                    <p><strong>Story</strong> Intro, title, new game, story scenes, free movement.</p>
+                </li>
+                <li><span class="chip progress">In progress</span>
+                    <p><strong>Battles</strong> The first battles play. More of the story is still to be played and
+                        checked.</p>
+                </li>
+                <li><span class="chip works">Works</span>
+                    <p><strong>Saves</strong> Memory cards, plus save states.</p>
+                </li>
+                <li><span class="chip works">Works</span>
+                    <p><strong>Frame rate and resolution</strong> 30/60/90/120 fps; up to 4K with the GPU renderer.</p>
+                </li>
+                <li><span class="chip works">Works</span>
+                    <p><strong>Launcher</strong> Game library with auto-update.</p>
+                </li>
+                <li><span class="chip works">Works</span>
+                    <p><strong>Discs</strong> JP disc 1 (primary), US English release; JP disc 2 (promo) boots.</p>
+                </li>
+                <li><span class="chip experimental">Experimental</span>
+                    <p><strong>Widescreen</strong> Available, but rough. 4:3 is the recommended mode.</p>
+                </li>
+                <li><span class="chip experimental">Experimental</span>
+                    <p><strong>Linux</strong> It builds, but it is untested.</p>
+                </li>
+            </ul>
+            <p class="fine reveal"><a class="link" href="https://github.com/sargon494/PersonaRM#readme">Full technical
+                    status in the README →</a></p>
+        </section>
+
+        <!-- QUICK START -->
+        <section class="section" id="start" aria-labelledby="start-title">
+            <header class="section-head reveal">
+                <h2 id="start-title">Quick <em>start</em></h2>
+            </header>
+            <ol class="steps">
+                <li class="reveal">
+                    <h3>Get a legal copy</h3>
+                    <p>You need the disc of <em>Persona 2: Eternal Punishment</em>, from a copy you own, as a disc image.
+                    </p>
+                </li>
+                <li class="reveal">
+                    <h3>Download PersonaRM</h3>
+                    <p>Get the Windows zip from the <a href="https://github.com/sargon494/PersonaRM/releases/latest">latest
+                            release</a> (v0.1.4), unzip it and run <code>launcher.exe</code>.</p>
+                </li>
+                <li class="reveal">
+                    <h3>Set your disc and press PLAY</h3>
+                    <p>In the launcher, set your disc <code>.cue</code> (the Japanese or the English US release) and
+                        press <strong>PLAY</strong>.</p>
+                </li>
+            </ol>
+            <div class="devblock reveal">
+                <h3>Build from source (developers)</h3>
+                <p>For contributors. Build from source (see the README), then scan a folder and verify the image:</p>
+                <div class="code">
+                    <pre><code>personarm --scan "/path/to/discs"
+personarm --verify-disc "/path/to/disc1.cue"
+personarm --portal
+# developer build (-DPRM_WITH_SDL3=ON, recompiled code generated locally):
+personarm_sdl "/path/to/disc1.cue" --recomp --memcard1 "/path/to/card1.mcd"</code></pre>
+                    <button class="copy" type="button" aria-label="Copy commands" data-copied="Copied"
+                        data-failed="Failed: select and copy">Copy</button>
+                </div>
+            </div>
+            <p class="fine reveal">Settings are stored in <code>settings.json</code> (see <a
+                    href="https://github.com/sargon494/PersonaRM/blob/main/docs/SETTINGS.md">docs/SETTINGS.md</a>).
+                Run <code>personarm --help</code> for all developer options.</p>
+        </section>
+
+        <!-- DEVELOPERS -->
+        <section class="section" id="developers" aria-labelledby="dev-title">
+            <header class="section-head reveal">
+                <h2 id="dev-title">For <em>developers</em></h2>
+            </header>
+            <h3 class="sub reveal">The hardware being rebuilt</h3>
             <div class="grid features">
                 <article class="feature reveal">
                     <h3>MIPS-I CPU</h3>
@@ -148,230 +238,11 @@
                 </article>
                 <article class="feature reveal">
                     <h3>Memory card and saves</h3>
-                    <p>Standard 128 KB card files via <code>--memcard1</code> and <code>--memcard2</code>. Disc 1 saves
-                        and CONTINUE work, and save states snapshot the whole machine at any moment.</p>
+                    <p>Standard 128 KB card files via <code>--memcard1</code> and <code>--memcard2</code>. Save states
+                        snapshot the whole machine at any moment.</p>
                 </article>
             </div>
-        </section>
-
-        <!-- STATUS -->
-        <section class="section" id="status" aria-labelledby="status-title">
-            <header class="section-head reveal">
-                <span class="num">03</span>
-                <h2 id="status-title">Project <em>status</em></h2>
-            </header>
-            <p class="intro reveal">PersonaRM is in active development and not playable yet. The plan:
-                get the CPU provably correct, finish the machine core, boot the game, then compile its code ahead of
-                time.</p>
-            <p class="intro reveal"><strong>Current phase: making the game as playable as possible from user
-                    reports.</strong> The first public releases are out (see Quick start). The CPU and the machine core
-                are done. Step 3, first boot, continues for playing further: on JP disc 1 the first battle is reached
-                and won from a save at the school, with no emulator bugs on that path, and several battles played by
-                hand showed no glitches. The lightweight launcher (Rust + egui) is out: it starts the game with these
-                settings and updates itself from GitHub Releases. Disc 1 plays its intro with sound, shows the title
-                screen and, on a new game, reaches free
-                movement and the main menu. The boot matches the PCSX-Redux reference emulator up to the first
-                overlay loads. Music and sound effects now play, with the SPU on emulated time. The recompiler now
-                covers
-                overlays too, each validated by a hash of its code in RAM, with the interpreter as fallback. On disc 1
-                it
-                runs essentially 100% of instructions as native code, and the trace still matches the interpreter
-                exactly
-                up to free movement. Device timing now advances lazily, with exact results: on a fast PC the interpreter
-                went from about 74 to 129 fps, and the recompiled mode from about 100 to 370 fps. Memory cards work:
-                standard 128 KB <code>.mcd</code> files via <code>--memcard1</code> and <code>--memcard2</code>. On disc
-                1 the game saves from the main menu, and after a reboot CONTINUE loads the save. The SDL3 window can run
-                the recompiled mode (<code>--recomp</code>) with memory cards, as a developer build. Mods: a first
-                version of texture dump and replacement is in the SDL3 window (<code>--texture-dump</code> and
-                <code>--mods</code>; see the mods row in the status table). The game's text system has been located:
-                dialogue uses the game's own 16-bit character codes in event banks, drawn with a 12x12 font, and text
-                speed is a single setting in the main executable. The faster-text option is in:
-                <code>personarm_sdl --text-speed normal|fast|instant</code> (or <code>gameplay.text_speed</code> in a
-                mod manifest). It is built on a small, game-agnostic gameplay-patch layer: patches are applied when the
-                game writes a given memory word, guarded by the expected bytes. The first dialogue line takes 138 frames
-                to appear at normal, 48 at fast and 6 at instant. Disc 1 only for now. Disc 2, the Sumaru TV Special
-                Preview Disc, now boots and runs: it is a promotional TV-channel disc with ATLUS and channel videos and
-                a newspaper TV listing, and each programme is a short in-engine scene with dialogue (a weather report, a
-                variety show, Igor in the Velvet Room). Its interpreter and recompiled modes match exactly, with about
-                99.99% of instructions running as native code. The US release (SLUS-01158) boots to free movement and
-                the main menu with English text, and its recompiled mode matches the interpreter. The JP release is
-                still the primary target; the future launcher will let you pick English by booting the US disc. A
-                settings file (<code>settings.json</code>, see <a
-                    href="https://github.com/sargon494/PersonaRM/blob/main/docs/SETTINGS.md">docs/SETTINGS.md</a>)
-                covers window mode and scale, integer scaling, aspect, vsync, fps target, internal resolution, volume
-                and mute, key and pad remapping, save folder, per-game options and pause on focus loss; command-line
-                flags override it. Internal resolution (<code>--resolution-scale 1-4</code>) runs 2x in real time on the
-                software rasterizer; the GPU renderer (<code>--renderer gpu</code>) runs 1 to 9x and also works with
-                frame interpolation. The <code>p2text</code> tool extracts and reinserts field dialogue (<a
-                    href="https://github.com/sargon494/PersonaRM/blob/main/docs/TRANSLATION_TOOLS.md">docs/TRANSLATION_TOOLS.md</a>);
-                it round-trips all of disc 1 with 0 failures. With file mods (<a
-                    href="https://github.com/sargon494/PersonaRM/blob/main/docs/MOD_FILES.md">docs/MOD_FILES.md</a>),
-                edited dialogue now shows in the running game, verified on the shrine scene. Translations ship only as
-                patches, never as game text. Recent additions: the menu cursor and UI labels on JP disc 1 are visible
-                again (a GPU reset no longer wipes video memory); the gamepad's left stick drives the d-pad, and button
-                presses are logged; <code>--record-input</code> records a play session as a replayable input script (the
-                replay is byte-identical from the same starting state); widescreen (<code>--widescreen 16:9</code> or
-                <code>21:9</code>) is experimental; the GPU renderer (<code>--renderer gpu</code>) runs at up to 9x (4K)
-                or auto; save states (F5 / F8) and hold-to-fast-forward are in; <code>p2text</code> warns when a
-                translated line overflows the 288 px dialogue window. Next: widescreen polish, smoother 90 and 120 fps
-                pacing, and more of the story played and checked.</p>
-            <div class="status-table reveal" role="table" aria-label="Subsystem status">
-                <div class="row head" role="row"><span role="columnheader">Subsystem</span><span
-                        role="columnheader">Status</span></div>
-                <div class="row" role="row"><span role="cell">Launcher (Rust + egui)</span><span role="cell"
-                        class="tag ok">Settings for language, frame rate (30/60/90/120), renderer, resolution,
-                        widescreen, window mode, volume, text speed, save folder and pause on focus loss. Plays the game
-                        with no console window and hides while you play. Auto-update from GitHub Releases: SHA-256
-                        checked, never touches settings, saves or memory cards</span></div>
-                <div class="row" role="row"><span role="cell">Disc reader and PS-X EXE loader</span><span role="cell"
-                        class="tag ok">Implemented</span></div>
-                <div class="row" role="row"><span role="cell">Static analysis tools</span><span role="cell"
-                        class="tag ok">Implemented</span></div>
-                <div class="row" role="row"><span role="cell">MIPS-I CPU interpreter</span><span role="cell"
-                        class="tag ok">Conformance suite passing</span></div>
-                <div class="row" role="row"><span role="cell">GTE and GPU rasterizer</span><span role="cell"
-                        class="tag ok">Implemented</span></div>
-                <div class="row" role="row"><span role="cell">MDEC video and XA audio</span><span role="cell"
-                        class="tag progress">Wired in, timing approximated</span></div>
-                <div class="row" role="row"><span role="cell">SPU audio</span><span role="cell"
-                        class="tag progress">Music and sound effects play; interpolation approximated</span></div>
-                <div class="row" role="row"><span role="cell">BIOS HLE and kernel events</span><span role="cell"
-                        class="tag ok">Implemented</span></div>
-                <div class="row" role="row"><span role="cell">Interrupts, VBlank and timers</span><span role="cell"
-                        class="tag ok">Implemented</span></div>
-                <div class="row" role="row"><span role="cell">DMA, CD-ROM and SPU</span><span role="cell"
-                        class="tag ok">Wired into the bus</span></div>
-                <div class="row" role="row"><span role="cell">Real-game boot</span><span role="cell"
-                        class="tag progress">Disc 1: free movement and main menu; the menu cursor and UI labels on JP
-                        disc 1 are visible again (a GPU reset no longer wipes video memory); a first battle reached and
-                        won from a school save, with no emulator bugs on that path; disc 2 (Sumaru TV Special Preview
-                        Disc) boots and runs</span></div>
-                <div class="row" role="row"><span role="cell">Static recompiler</span><span role="cell"
-                        class="tag progress">v0: function-level C++ generation, synthetic G2 passing; overlays covered
-                        (code-hash checked); not yet playable end to end</span></div>
-                <div class="row" role="row"><span role="cell">Memory cards and saves</span><span role="cell"
-                        class="tag ok">Works: 128 KB .mcd cards; disc 1 saves and CONTINUE</span></div>
-                <div class="row" role="row"><span role="cell">Mods: texture dump and replacement</span><span role="cell"
-                        class="tag progress">First version; texture mods are in the SDL3 window only, off by default.
-                        <code>--texture-dump</code> saves each texture uploaded to video memory as PNG (once per content
-                        hash); <code>--mods</code> draws replacement PNGs from <code>mods/&lt;name&gt;/textures/</code>
-                        (optional <code>manifest.json</code> priority). Output stays at native resolution; palette
-                        variants share one PNG; textures uploaded in pieces give one PNG per piece. Mods must contain
-                        only the modder's own images, never original game files. File mods
-                        (<code>files/Fnnnn.BIN</code>): a mod can replace a whole disc file, and the running game loads
-                        it instead of the disc copy; the file may grow. Works with <code>--mods</code> in
-                        <code>personarm --boot</code> and <code>personarm_sdl</code>, on JP disc 1 and the US release,
-                        in interpreter and recompiled modes. With no mods active, output is byte-identical. See <a
-                            href="https://github.com/sargon494/PersonaRM/blob/main/docs/MOD_FILES.md">docs/MOD_FILES.md</a></span>
-                </div>
-                <div class="row" role="row"><span role="cell">Text speed option</span><span role="cell"
-                        class="tag progress">Disc 1 only; <code>--text-speed</code> takes normal, fast or instant (or
-                        <code>gameplay.text_speed</code> in a mod manifest). Built on a small, game-agnostic
-                        gameplay-patch layer. The first dialogue line takes 138 frames to appear at normal, 48 at fast
-                        and 6 at instant</span></div>
-                <div class="row" role="row"><span role="cell">Window, input and audio (SDL3)</span><span role="cell"
-                        class="tag progress">Works; the gamepad's left stick drives the d-pad and button presses are
-                        logged; full SPU and CD/XA mix in the window; runs with --recomp and --memcard1/2; optional
-                        frame interpolation (off by default)</span></div>
-                <div class="row" role="row"><span role="cell">US release (SLUS-01158)</span><span role="cell"
-                        class="tag progress">Boots to free movement and the main menu with English text; recompiled mode
-                        matches the interpreter. The JP release remains the primary target</span></div>
-                <div class="row" role="row"><span role="cell">Settings file (<code>settings.json</code>)</span><span
-                        role="cell" class="tag progress">In the per-user config folder, or given with
-                        <code>--settings</code>; command-line flags override it. <code>fps_target</code> 30, 60, 90 and
-                        120 all work; <code>language</code> is stored only</span></div>
-                <div class="row" role="row"><span role="cell">Internal resolution
-                        (<code>--resolution-scale</code>)</span><span role="cell" class="tag progress">1 to 4 on the
-                        software renderer, 1 to 9 or <code>auto</code> on the GPU renderer, or
-                        <code>video.resolution_scale</code> in the settings file. 2x runs in real time on the software
-                        rasterizer; the GPU renderer (<code>--renderer gpu</code>, see below) also works with frame
-                        interpolation</span></div>
-                <div class="row" role="row"><span role="cell">Translation tools (<code>p2text</code>)</span><span
-                        role="cell" class="tag progress">Extracts and reinserts field dialogue; round-trips all of disc
-                        1 with 0 failures. With file mods, edited dialogue shows in the running game (JP disc 1,
-                        verified on the shrine scene). Translations ship only as patches. <code>p2text</code> warns when
-                        a translated line overflows the 288 px dialogue window; US glyph widths are read from the user's
-                        disc.</span></div>
-                <div class="row" role="row"><span role="cell">GPU renderer (<code>--renderer gpu</code>)</span><span
-                        role="cell" class="tag progress">On SDL_gpu (D3D12 on Windows; other platforms use the software
-                        renderer). Presents directly with no readback: about 8 ms per frame at 4x and about 11 ms at 9x
-                        (4K), against about 37 ms in software at 4x. Lines and the mask run on the GPU; works with
-                        widescreen and frame interpolation. Scale 1 to 9 or <code>auto</code>. Some features still fall
-                        back to the software renderer or are missing. See <a
-                            href="https://github.com/sargon494/PersonaRM/blob/main/docs/GPU_RENDERER.md">docs/GPU_RENDERER.md</a></span>
-                </div>
-                <div class="row" role="row"><span role="cell">Widescreen (<code>--widescreen</code>,
-                        <code>video.widescreen</code>)</span><span role="cell" class="tag progress">Experimental:
-                        <code>--widescreen 16:9</code> or <code>21:9</code> shows a wider 3D view. Dialogue, text and
-                        portraits over 3D keep 4:3; menus and FMV stay 4:3. Known issues: empty room edges are visible
-                        at the sides; sprite parts can separate, text can jitter, and fades can uncover the sides first.
-                        4:3 is the recommended mode. See <a
-                            href="https://github.com/sargon494/PersonaRM/blob/main/docs/WIDESCREEN.md">docs/WIDESCREEN.md</a></span>
-                </div>
-                <div class="row" role="row"><span role="cell">Save states and fast-forward</span><span role="cell"
-                        class="tag ok">F5 save, F8 load, F6/F7 slot. Deterministic. The memory card is never touched by
-                        states. A crash when loading a state saved with widescreen on is fixed;
-                        <code>personarm_sdl --load-state N</code> loads slot N at start. States load only in the build
-                        they were made with (not across releases); memory-card saves always carry over. Hold Tab or R3
-                        to fast-forward: up to 4x by default (<code>video.fast_forward_max</code>), 16x max</span></div>
-                <div class="row" role="row"><span role="cell">Input recording (<code>--record-input</code>)</span><span
-                        role="cell" class="tag ok">Records a play session as a replayable input script; the replay is
-                        byte-identical from the same starting state</span></div>
-            </div>
-        </section>
-
-        <!-- QUICK START -->
-        <section class="section" id="start" aria-labelledby="start-title">
-            <header class="section-head reveal">
-                <span class="num">04</span>
-                <h2 id="start-title">Quick <em>start</em></h2>
-            </header>
-            <div class="notice reveal">
-                <strong>Early builds.</strong> You need your own disc image; the release contains no game data, BIOS or
-                game code. The developer commands below manage disc images and
-                configuration for development.
-            </div>
-            <ol class="steps">
-                <li class="reveal">
-                    <h3>Get a legal copy</h3>
-                    <p>You need the disc of <em>Persona 2: Eternal Punishment</em>, from a copy you own.</p>
-                </li>
-                <li class="reveal">
-                    <h3>Download PersonaRM</h3>
-                    <p>Download the latest zip from <a href="https://github.com/sargon494/PersonaRM/releases">GitHub
-                            Releases</a> (v0.1.4), unzip it and run <code>launcher.exe</code>.</p>
-                </li>
-                <li class="reveal">
-                    <h3>Set your disc and press PLAY</h3>
-                    <p>In the launcher, set your disc <code>.cue</code> (the Japanese and/or the English US release) and
-                        press <strong>PLAY</strong>.</p>
-                </li>
-                <li class="reveal">
-                    <h3>For developers</h3>
-                    <p>Build from source (see the README), then scan a folder and verify the image:</p>
-                    <div class="code">
-                        <pre><code>personarm --scan "/path/to/discs"
-personarm --verify-disc "/path/to/disc1.cue"
-personarm --portal
-# developer build (-DPRM_WITH_SDL3=ON, recompiled code generated locally):
-personarm_sdl "/path/to/disc1.cue" --recomp --memcard1 "/path/to/card1.mcd"</code></pre>
-                        <button class="copy" type="button" aria-label="Copy commands">Copy</button>
-                    </div>
-                </li>
-            </ol>
-            <p class="fine reveal">Settings are stored in <code>personarm_config.json</code>. The SDL3 window also reads
-                <code>settings.json</code> (see <a
-                    href="https://github.com/sargon494/PersonaRM/blob/main/docs/SETTINGS.md">docs/SETTINGS.md</a>). Run
-                <code>personarm --help</code> for all options.
-            </p>
-        </section>
-
-        <!-- DEVELOPERS -->
-        <section class="section" id="developers" aria-labelledby="dev-title">
-            <header class="section-head reveal">
-                <span class="num">05</span>
-                <h2 id="dev-title">For <em>developers</em></h2>
-            </header>
+            <h3 class="sub reveal">Work on it</h3>
             <div class="grid two">
                 <article class="card reveal">
                     <h3>Architecture</h3>
@@ -407,15 +278,19 @@ personarm_sdl "/path/to/disc1.cue" --recomp --memcard1 "/path/to/card1.mcd"</cod
         <section class="cta reveal">
             <div class="smoke" aria-hidden="true"></div>
             <h2>Ready to <em>descend</em>?</h2>
-            <p>Clone the repository, build it, and bring your own disc.</p>
-            <a class="btn btn-primary" href="https://github.com/sargon494/PersonaRM">Open on GitHub</a>
+            <p>Download the launcher, point it at your own disc and press PLAY.</p>
+            <div class="dl">
+                <a class="btn btn-primary" href="https://github.com/sargon494/PersonaRM/releases/latest">Download v0.1.4</a>
+                <small>Windows · bring your own disc · experimental</small>
+            </div>
+            <p class="dev-note">Developer? <a href="https://github.com/sargon494/PersonaRM">Clone and build from source</a>.</p>
         </section>
 
     </main>
 
     <footer class="footer">
         <div class="footer-inner">
-            <img src="assets/logo.png" alt="" width="64" height="64" />
+            <img src="assets/logo-192.png" alt="" width="64" height="64" />
             <p class="legal">
                 PersonaRM is an independent, unofficial project. It is not affiliated with, endorsed by, or sponsored by
                 Atlus, Sega, or Sony Interactive Entertainment. It distributes no game discs, binaries, ROMs, or assets.
