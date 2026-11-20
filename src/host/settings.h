@@ -43,6 +43,12 @@ struct GameSettings {
     }
 };
 
+/// In-game hotkeys that cycle a gameplay option. The action names are the keys of input.hotkeys.
+enum class Hotkey { EncounterRate, BattleSpeed, SkipFmv, TextSpeed };
+constexpr Hotkey kHotkeys[] = {Hotkey::EncounterRate, Hotkey::BattleSpeed, Hotkey::SkipFmv, Hotkey::TextSpeed};
+const char* HotkeyAction(Hotkey h);  // "encounter_rate", "battle_speed", "skip_fmv", "text_speed"
+const char* HotkeyDefaultKey(Hotkey h);  // "F1".."F4"
+
 struct Settings {
     int version = kSettingsVersion;
     VideoSettings video;
@@ -52,6 +58,8 @@ struct Settings {
     std::string save_dir;         // memory card directory (see MemcardFor)
     /// action -> key/button names (SDL spelling). Always the full set: defaults, overridden per action.
     std::map<std::string, std::vector<std::string>> keyboard, gamepad;
+    /// action (HotkeyAction) -> SDL key name; always all four, defaults F1..F4.
+    std::map<std::string, std::string> hotkeys;
     std::map<std::string, GameSettings> games;
     JsonValue raw = JsonValue::MakeObject();  // the document as read: unknown keys survive a write
 };
@@ -70,6 +78,11 @@ bool SaveSettings(const std::string& path, const Settings& s, std::string* err =
 /// `serial`, "" = not known yet), so it can also be written back (--save-settings).
 Settings ApplyCli(Settings s, const HostOptions& o, const std::string& serial);
 GameSettings GameFor(const Settings& s, const std::string& serial);
+
+/// Advances one option to its next value (encounter_rate normal>reduced>none, battle_speed 1>2>3,
+/// skip_fmv off>on, text_speed normal>fast>instant; unset counts as the default) and returns the new
+/// value as text ("reduced", "2", "on").
+std::string CycleGameOption(GameSettings& g, Hotkey h);
 
 /// Card path for a slot: the game's explicit memcard, else (slot 0, known serial, save_dir set)
 /// <save_dir>/<serial>-1.mcd, else "" (no card).

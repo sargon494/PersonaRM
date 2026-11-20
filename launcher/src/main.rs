@@ -117,6 +117,8 @@ struct App {
     cfg: LauncherConfig,
     settings: GameSettings,
     doc: Value,
+    /// Hotkey action waiting for a key press (game page).
+    capture: Option<&'static str>,
     dirty: bool,
     error: Option<String>,
     logo: Option<egui::TextureHandle>,
@@ -177,7 +179,7 @@ impl App {
                 }
             });
         }
-        Self { page, sel: 0, covers: HashMap::new(), cfg, settings, doc, dirty: false, error, logo, upd: Upd::None, tx, rx, t0: -10.0, dir: 1.0, shot: arg("--shot"), frames: 0, focus_first: std::env::args().any(|a| a == "--focus") }
+        Self { page, sel: 0, covers: HashMap::new(), cfg, settings, doc, capture: None, dirty: false, error, logo, upd: Upd::None, tx, rx, t0: -10.0, dir: 1.0, shot: arg("--shot"), frames: 0, focus_first: std::env::args().any(|a| a == "--focus") }
     }
 
     fn save(&mut self) {
@@ -615,8 +617,11 @@ impl App {
 
     fn select(&mut self, i: usize) {
         self.sel = i;
-        // text_speed is per game: re-read it for this game's serials.
-        self.settings.text_speed = GameSettings::from_value(&self.doc, &self.cfg.games[i].serials).text_speed;
+        // text speed, encounters, battle speed and movies are per game: re-read them for this game's serials.
+        let g = GameSettings::from_value(&self.doc, &self.cfg.games[i].serials);
+        let s = &mut self.settings;
+        (s.text_speed, s.encounter_rate, s.battle_speed, s.skip_fmv) = (g.text_speed, g.encounter_rate, g.battle_speed, g.skip_fmv);
+        self.capture = None;
     }
 
     fn go(&mut self, ctx: &egui::Context, page: Page) {
@@ -629,6 +634,7 @@ impl App {
     fn game_page(&mut self, ui: &mut egui::Ui) -> (bool, bool) {
         let mut dirty = false;
         let s = &mut self.settings;
+        let cap = &mut self.capture;
         let g = &mut self.cfg.games[self.sel];
         let name = g.name.clone();
         ui.horizontal(|ui| {
@@ -636,7 +642,11 @@ impl App {
             ui.add_space(6.0);
             ui.label(RichText::new(g.platform.to_uppercase()).family(cond()).size(18.0).color(RED_HI));
         });
-        egui::ScrollArea::vertical().max_height(ui.available_height() - 66.0).auto_shrink([false, false]).show(ui, |ui| {
+        let mut area = egui::ScrollArea::vertical().max_height(ui.available_height() - 66.0).auto_shrink([false, false]);
+        if let Some(y) = self.shot.as_ref().and_then(|_| arg("--scroll")).and_then(|y| y.parse().ok()) {
+            area = area.vertical_scroll_offset(y); // hidden `--scroll <px>`: screenshots of the lower part
+        }
+        area.show(ui, |ui| {
             heading(ui, "DISCS");
             hint(ui, &format!("Pick the .cue of your own {name} disc image (Japanese and/or US release). The Language option below chooses which disc boots."));
             ui.add_space(2.0);
@@ -656,11 +666,64 @@ impl App {
             grid("opts").show(ui, |ui| {
                 grid_row(ui, "Language", |ui| dirty |= combo(ui, "lang", &mut s.language, &[("ja", "Japanese"), ("en", "English")]));
                 grid_row(ui, "Text speed", |ui| dirty |= combo(ui, "ts", &mut s.text_speed, &[("normal", "Normal"), ("fast", "Fast"), ("instant", "Instant")]));
+                grid_row(ui, "Encounters", |ui| {
+                    dirty |= combo(ui, "enc", &mut s.encounter_rate, &[("normal", "Normal"), ("reduced", "Reduced (about half)"), ("none", "None")]);
+                    hint(ui, "Scripted and boss battles still happen.");
+                });
+                grid_row(ui, "Battle speed", |ui| {
+                    ui.horizontal(|ui| {
+                        for n in 1..=3u32 {
+                            dirty |= ui.selectable_value(&mut s.battle_speed, n, format!("x{n}")).changed();
+                        }
+                    });
+                    hint(ui, "Faster battles; the sound is muted above x1.");
+                });
+                grid_row(ui, "Movies", |ui| {
+                    dirty |= ui.checkbox(&mut s.skip_fmv, "Skip movies").changed();
+                    hint(ui, "Start ends any movie.");
+                });
                 grid_row(ui, "Cover image (PNG)", |ui| {
                     let pick = || rfd::FileDialog::new().add_filter("PNG image", &["png"]).pick_file();
                     dirty |= path_row(ui, &mut g.cover, false, PathState::NotSet, "not set (title card)", pick);
                 });
             });
+            heading(ui, "HOTKEYS");
+            hint(ui, "In game these change the options above and save them. Click a field, then press a key (Esc cancels).");
+            hint(ui, "F5-F8, Tab and Esc are used by the game itself.");
+            ui.add_space(2.0);
+            grid("hotkeys").show(ui, |ui| {
+                for (action, _, label) in HOTKEYS {
+                    grid_row(ui, label, |ui| {
+                        let waiting = *cap == Some(action);
+                        let shown = if waiting { "press a key...".to_string() } else { s.hotkeys[action].clone() };
+                        if ui.add(egui::Button::new(shown).min_size(egui::vec2(170.0, 0.0)).selected(waiting)).clicked() {
+                            *cap = if waiting { None } else { Some(action) };
+                        }
+                    });
+                }
+            });
+            if let Some(action) = *cap {
+                let pressed = ui.input(|i| i.events.iter().find_map(|e| match e {
+                    egui::Event::Key { key, pressed: true, repeat: false, .. } => Some(*key),
+                    _ => None,
+                }));
+                if let Some(key) = pressed {
+                    match sdl_key_name(key.name()) {
+                        _ if key == egui::Key::Escape => *cap = None,
+                        Some(k) if !RESERVED_KEYS.contains(&k.as_str()) => {
+                            // a key already bound to another action swaps places with this one's old key
+                            let old = s.hotkeys[action].clone();
+                            if let Some(other) = s.hotkeys.iter().find(|(a, v)| **v == k && **a != action).map(|(a, _)| a.clone()) {
+                                s.hotkeys.insert(other, old);
+                            }
+                            s.hotkeys.insert(action.to_string(), k);
+                            *cap = None;
+                            dirty = true;
+                        }
+                        _ => {} // reserved or not an SDL key: keep waiting
+                    }
+                }
+            }
         });
         ui.add_space(4.0);
         let r = ui.allocate_space(egui::vec2(ui.available_width(), 46.0)).1;

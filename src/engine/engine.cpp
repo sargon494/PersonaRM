@@ -714,6 +714,24 @@ void Engine::RunPatches(uint32_t o) {
     m_in_patch = false;
 }
 
+bool Engine::ApplyPatchNow(const GamePatch& g) {
+    constexpr uint32_t kMask = PS1_MAIN_RAM_SIZE - 1;
+    auto in_ram = [&](uint32_t a, size_t n) { return (a & 0x1FFFFFFFu) < 0x00800000u && (a & kMask) + n <= PS1_MAIN_RAM_SIZE; };
+    const uint32_t w = g.trigger & kMask & ~3u;
+    if (!in_ram(g.trigger, 4) || g.write.bytes.empty() || !in_ram(g.write.address, g.write.bytes.size())) return false;
+    if (g.only_if_nonzero && !(m_ram[w] | m_ram[w + 1] | m_ram[w + 2] | m_ram[w + 3])) return false;
+    for (const auto& e : g.expect) {
+        if (!in_ram(e.address, e.bytes.size()) || !std::equal(e.bytes.begin(), e.bytes.end(), m_ram.begin() + (e.address & kMask))) return false;
+    }
+    const uint32_t dst = g.write.address & kMask;
+    const bool was = m_in_patch;
+    m_in_patch = true;
+    std::copy(g.write.bytes.begin(), g.write.bytes.end(), m_ram.begin() + dst);
+    OnRamRangeWritten(dst, static_cast<uint32_t>(g.write.bytes.size()));
+    m_in_patch = was;
+    return true;
+}
+
 void Engine::OnRamRangeWritten(uint32_t addr, uint32_t len) {
     const uint32_t p = addr & 0x1FFFFFFFu;
     if (m_wake.empty() || p >= PS1_MAIN_RAM_SIZE || len == 0) return;

@@ -42,6 +42,14 @@ GameplayOptions LoadGameplayMods(const std::string& mods_dir, const std::string&
 /// An option the disc has no patch for is logged and left out.
 std::vector<GamePatch> BuildGamePatches(const std::string& serial, const GameplayOptions& options);
 
+/// For live toggles: patches that undo `applied` ones whose written bytes lie inside one of their `expect`
+/// ranges (the encounter and movie code rewrites). Each guards on the patched bytes being in RAM. Text speed
+/// has no such range (its original value is only known at run time) and gets no revert.
+std::vector<GamePatch> BuildRevertPatches(const std::vector<GamePatch>& applied);
+
+/// RAM word holding the per-glyph text delay (0 = unknown disc); the game's own value is what "normal" means.
+uint32_t TextSpeedGlobal(const std::string& serial);
+
 /// RAM word holding the scene mode of the disc (game state +0x10B0: 0x8007E298 JP disc 1, 0x8007F9B8 US), 0 when
 /// unknown. The scene loop loads the overlay of table entry (mode & 0xFF); 2 = F0789, the battle overlay (field
 /// encounters store 0x1002).

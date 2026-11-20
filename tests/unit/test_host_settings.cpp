@@ -188,6 +188,42 @@ int main() {
     CHECK(p.x == 0 && p.w == 1920 && p.h == 1080);
     p = PresentRect(1920, 1080, false, true, 240, 16, 9);  // 426x240 x4 = 1704x960
     CHECK(p.w == 1704 && p.h == 960);
+    // Hotkeys: cycling (unset = default), defaults F1..F4, rebinding round trip, bad entries warn.
+    GameSettings cg;
+    CHECK(CycleGameOption(cg, Hotkey::EncounterRate) == "reduced" && CycleGameOption(cg, Hotkey::EncounterRate) == "none" &&
+          CycleGameOption(cg, Hotkey::EncounterRate) == "normal" && CycleGameOption(cg, Hotkey::EncounterRate) == "reduced");
+    CHECK(CycleGameOption(cg, Hotkey::BattleSpeed) == "2" && CycleGameOption(cg, Hotkey::BattleSpeed) == "3" &&
+          CycleGameOption(cg, Hotkey::BattleSpeed) == "1" && cg.battle_speed == 1);
+    CHECK(CycleGameOption(cg, Hotkey::SkipFmv) == "on" && *cg.skip_fmv && CycleGameOption(cg, Hotkey::SkipFmv) == "off" && !*cg.skip_fmv);
+    CHECK(CycleGameOption(cg, Hotkey::TextSpeed) == "fast" && CycleGameOption(cg, Hotkey::TextSpeed) == "instant" &&
+          CycleGameOption(cg, Hotkey::TextSpeed) == "normal" && cg.text_speed == "normal");
+    const Settings hd = DefaultSettings();
+    CHECK(hd.hotkeys.size() == 4 && hd.hotkeys.at("encounter_rate") == "F1" && hd.hotkeys.at("battle_speed") == "F2" &&
+          hd.hotkeys.at("skip_fmv") == "F3" && hd.hotkeys.at("text_speed") == "F4");
+    w.clear();
+    Settings hk = ParseSettings(R"({"input":{"hotkeys":{"skip_fmv":"F9","bogus":"F1","text_speed":3}}, "launcher":{"x":1}})", &w);
+    CHECK(w.size() == 2 && hk.hotkeys.at("skip_fmv") == "F9" && hk.hotkeys.at("text_speed") == "F4");
+    const Settings hk2 = ParseSettings(DumpSettings(hk), &w);
+    CHECK(hk2.hotkeys.at("skip_fmv") == "F9" && DumpSettings(hk2).find("\"launcher\"") != std::string::npos);
+    // Live toggle persistence: change one game key on the file as it is, everything else stays.
+    {
+        const fs::path d2 = fs::temp_directory_path() / "prm_hotkey_test";
+        fs::remove_all(d2);
+        fs::create_directories(d2);
+        const std::string f2 = (d2 / "settings.json").string();
+        std::ofstream(f2) << R"({"launcher":{"a":1},"game":{"SLPS-02785":{"mods":"m","note":"keep"}}})";
+        Settings disk = LoadSettings(f2, nullptr);
+        GameSettings& dg = disk.games["SLPS-02785"];
+        CycleGameOption(dg, Hotkey::EncounterRate);
+        CycleGameOption(dg, Hotkey::BattleSpeed);
+        CHECK(SaveSettings(f2, disk, nullptr));
+        const Settings back = LoadSettings(f2, nullptr);
+        const GameSettings bg = GameFor(back, "SLPS-02785");
+        CHECK(bg.encounter_rate == "reduced" && bg.battle_speed == 2 && bg.mods == "m");
+        const std::string text = Slurp(f2);
+        CHECK(text.find("\"launcher\"") != std::string::npos && text.find("\"note\": \"keep\"") != std::string::npos);
+        fs::remove_all(d2);
+    }
     std::printf("host settings tests passed\n");
     return 0;
 }
