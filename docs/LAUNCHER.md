@@ -5,19 +5,30 @@ Dark theme, resizable window (minimum 480x520), no repaint loop while idle (idle
 
 ## Pages
 
-- **Library** (home): a grid of cards, one per entry of `games` in `launcher.json`; it reflows with the window width.
-  A card shows the title, a platform badge (`PS1`) and a status: **Ready** (a disc is set), **Needs disc**, or
-  **Not playable yet** (the executable is not found). With a cover the card shows it (title over a dark strip);
-  without one it is a title card in the site style (dark surface, red accent, Barlow Condensed). No box art is
-  shipped: a cover is only a PNG the user picks (copyrighted art stays on the user's disk).
-- **Game page** (click a card, **Back** returns): discs per language, language, text speed, cover picker and a big
-  PLAY. Language and text speed go to `general.language` and `game.<serial>.text_speed`.
-- **Settings** (gear icon in the header): options shared by all games: renderer, internal resolution, frame rate,
-  widescreen, window mode (`video`), volume and mute (`audio`), save folder, pause when unfocused (`general`),
-  game executable and check for updates.
+- **Library** (home): a grid of 250x330 px cards (it reflows with the window width), one per entry of `games`, with
+  a summary next to the heading ("1 game · 1 ready"). A card shows the title, a platform badge (`PS1`) and a status
+  with an icon (shape, not only colour): check **Ready**, ring **Set up** (no valid disc yet), cross **Game exe
+  missing**. Ready cards have a **PLAY** button that launches directly; **Set up** opens the game page. With a cover the
+  card shows it; without one it is the red-bar title card. No box art is shipped.
+- **Game page**: a one-line explanation (pick the `.cue` of your own disc image, Japanese and/or US release; the
+  Language option chooses which disc boots), the discs, language, text speed, cover picker and PLAY. Every path
+  field shows its state, validated on each edit: check found, cross file missing, dash not set.
+- **Settings** (gear + "Settings" in the header): shared options in two columns (one when narrow), each technical
+  option with a one-line hint (renderer, resolution, frame rate; widescreen is tagged EXPERIMENTAL), plus
+  **Reduce motion**. All fit at the default window size; scroll bars are thin and always visible.
 
-The update banner is shown above every page. A hidden `--page game|settings` argument opens that page (used for
-screenshots).
+Keyboard: Tab / arrows move focus (red focus ring), Enter plays (or opens Set up) on a focused card, Esc goes back
+from the game and settings pages. The header shows `Release vX.Y.Z` (`PRM_VERSION` or the crate version).
+
+## Motion
+
+Snappy, 70-180 ms, ease-out, drawn with egui's `animate_bool_with_time_and_easing` and a time tween: page change
+(28 px slide + fade), card hover/focus (lift, red bar grows), PLAY hover/press, update banner slide-in. Repaints are
+requested only while something moves, so idle CPU stays 0. `"reduce_motion": true` in `launcher.json` (or the
+Settings checkbox) makes every transition instant.
+
+Hidden arguments for screenshots: `--page game|settings`, `--focus` (focus the first card) and `--shot <png>`
+(saves the window's own pixels and quits).
 
 ## Adding a game
 

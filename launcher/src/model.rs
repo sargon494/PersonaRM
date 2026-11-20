@@ -49,10 +49,28 @@ pub fn game_exe_for(cfg: &LauncherConfig, g: &Game) -> Option<PathBuf> {
     find_game_exe(cfg)
 }
 
+/// State of a path the user typed: shown next to every path field.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum PathState {
+    Found,
+    Missing,
+    NotSet,
+}
+
+/// Empty = not set; otherwise it must exist as a file (or a folder when `dir`). Pasted quotes are ignored.
+pub fn path_state(p: &str, dir: bool) -> PathState {
+    let p = p.trim().trim_matches('"');
+    if p.is_empty() {
+        return PathState::NotSet;
+    }
+    let path = std::path::Path::new(p);
+    if if dir { path.is_dir() } else { path.is_file() } { PathState::Found } else { PathState::Missing }
+}
+
 pub fn status(cfg: &LauncherConfig, g: &Game) -> Status {
     if game_exe_for(cfg, g).is_none() {
         Status::NotPlayable
-    } else if g.discs.values().any(|d| !d.is_empty()) {
+    } else if g.discs.values().any(|d| path_state(d, false) == PathState::Found) {
         Status::Ready
     } else {
         Status::NeedsDisc
@@ -70,6 +88,8 @@ pub struct LauncherConfig {
     pub resolution: u32,
     /// Look for a newer release on start (one background request, silent when offline).
     pub check_updates: bool,
+    /// Make every launcher transition instant.
+    pub reduce_motion: bool,
     pub games: Vec<Game>,
 }
 
@@ -80,6 +100,7 @@ impl Default for LauncherConfig {
             renderer: "software".into(),
             resolution: 1,
             check_updates: true,
+            reduce_motion: false,
             games: vec![Game {
                 name: "Persona 2: Eternal Punishment".into(),
                 serials: ["SLPS-02785", "SLPS-02786", "SLUS-01158", "SLUS-01339"].map(String::from).to_vec(),
@@ -210,7 +231,7 @@ pub fn build_args(settings: &str, cue: &str, cfg: &LauncherConfig, s: &GameSetti
 
 /// Disc for the selected language, if the user set one.
 pub fn disc_for<'a>(g: &'a Game, language: &str) -> Option<&'a str> {
-    g.discs.get(language).map(String::as_str).filter(|p| !p.is_empty())
+    g.discs.get(language).map(|p| p.trim().trim_matches('"')).filter(|p| !p.is_empty())
 }
 
 // ── paths ──
@@ -367,8 +388,23 @@ mod tests {
         assert_eq!(status(&c, &g), Status::NotPlayable);
         g.exe = std::env::current_exe().unwrap().to_string_lossy().into_owned();
         assert_eq!(status(&c, &g), Status::NeedsDisc);
-        g.discs.insert("ja".into(), "a.cue".into());
+        g.discs.insert("ja".into(), "missing.cue".into());
+        assert_eq!(status(&c, &g), Status::NeedsDisc); // a path that does not exist is not a disc
+        g.discs.insert("ja".into(), g.exe.clone());
         assert_eq!(status(&c, &g), Status::Ready);
+    }
+
+    #[test]
+    fn path_states() {
+        let exe = std::env::current_exe().unwrap();
+        let (f, d) = (exe.to_string_lossy().into_owned(), exe.parent().unwrap().to_string_lossy().into_owned());
+        assert_eq!(path_state("", false), PathState::NotSet);
+        assert_eq!(path_state("  ", true), PathState::NotSet);
+        assert_eq!(path_state(&f, false), PathState::Found);
+        assert_eq!(path_state(&format!("\"{f}\""), false), PathState::Found); // "Copy as path" quotes
+        assert_eq!(path_state(&d, false), PathState::Missing); // a folder is not a file
+        assert_eq!(path_state(&d, true), PathState::Found);
+        assert_eq!(path_state("no/such/file.cue", false), PathState::Missing);
     }
 
     #[test]
@@ -378,5 +414,7 @@ mod tests {
         g.discs.insert("en".into(), String::new());
         assert_eq!(disc_for(&g, "ja"), Some("a.cue"));
         assert_eq!(disc_for(&g, "en"), None);
+        g.discs.insert("en".into(), "\"b.cue\"".into());
+        assert_eq!(disc_for(&g, "en"), Some("b.cue"));
     }
 }
