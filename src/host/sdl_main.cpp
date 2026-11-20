@@ -360,7 +360,19 @@ int main(int argc, char** argv) {
         SDL_Event ev;
         while (SDL_PollEvent(&ev)) {
             if (ev.type == SDL_EVENT_QUIT) quit = true;
-            else if (ev.type == SDL_EVENT_KEY_DOWN && ev.key.scancode == SDL_SCANCODE_ESCAPE) quit = true;
+            else if (ev.type == SDL_EVENT_KEY_DOWN && ev.key.scancode == SDL_SCANCODE_ESCAPE && !ev.key.repeat) {
+                // Ask first: Esc sits next to keys used in play, and quitting loses unsaved progress.
+                if (hidden) { quit = true; continue; }
+                const SDL_MessageBoxButtonData buttons[] = {
+                    {SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 0, "Keep playing"},
+                    {SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 1, "Quit"},
+                };
+                const SDL_MessageBoxData box{SDL_MESSAGEBOX_WARNING, window, "PersonaRM",
+                                             "Quit the game? Unsaved progress will be lost.", 2, buttons, nullptr};
+                int choice = 0;
+                if (SDL_ShowMessageBox(&box, &choice) && choice == 1) quit = true;
+                next = SDL_GetTicksNS();  // the dialog paused us: don't race to catch up
+            }
             else if (ev.type == SDL_EVENT_KEY_DOWN && ev.key.scancode == SDL_SCANCODE_RETURN && (ev.key.mod & SDL_KMOD_ALT) &&
                      !ev.key.repeat && !hidden) {  // Alt+Enter: leave fullscreen / enter the configured (else borderless) one
                 if (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) window_mode = "windowed";
