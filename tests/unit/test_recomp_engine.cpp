@@ -14,6 +14,7 @@
 
 #include "engine/engine.h"
 #include "loader/exe_loader.h"
+#include "recomp/runtime/module_loader.h"
 #include "recomp_engine_program.h"
 #include "recomp_overlay_program.h"
 
@@ -138,6 +139,25 @@ int main() {
                 (unsigned long long)st.native_instructions, (unsigned long long)st.interp_resident,
                 (unsigned long long)st.entries, (unsigned long long)st.stops, (unsigned long long)st.hle_calls,
                 (unsigned long long)st.dispatch_misses);
+
+    // The same generated C built as a separate library and loaded at run time (the on-device path).
+    {
+        std::vector<const recomp::Module*> loaded;
+        std::string err;
+        CHECK(recomp::LoadModuleLibrary(PRM_TEST_MODULE_LIBRARY, loaded, &err));
+        if (!err.empty()) std::fprintf(stderr, "%s\n", err.c_str());
+        CHECK(loaded.size() == 1);
+        if (loaded.size() == 1) {
+            CHECK(std::strcmp(loaded[0]->name, "rengine") == 0);
+            CHECK(loaded[0]->code_hash == recomp::FromAbi(&kRecompModule_rengine)->code_hash);
+            CHECK(loaded[0]->entries[0].fn != recomp::FromAbi(&kRecompModule_rengine)->entries[0].fn);  // really the DLL's code
+            const Run dll = Boot(exe, loaded, 1);
+            CHECK(FirstDifference(native, dll) == 0 && dll.ram == native.ram);
+            CHECK(dll.stats.native_instructions == native.stats.native_instructions);
+        }
+        std::vector<const recomp::Module*> none;
+        CHECK(!recomp::LoadModuleLibrary("no_such_module_library", none, &err) && none.empty() && !err.empty());
+    }
 
     // Hash guard: code generated from another image is never run.
     recomp::Module other = *recomp::FromAbi(&kRecompModule_rengine);

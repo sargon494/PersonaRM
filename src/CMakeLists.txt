@@ -30,6 +30,11 @@ set(CORE_SOURCES
     recomp/codegen.cpp
     recomp/runtime/recomp_runtime.h
     recomp/runtime/recomp_runtime.cpp
+    recomp/runtime/prm_abi.h
+    recomp/runtime/module_loader.h
+    recomp/runtime/module_loader.cpp
+    recomp/runtime/native_cache.h
+    recomp/runtime/native_cache.cpp
     core/save_manager.cpp
     core/save_manager.h
     trace/trace.cpp
@@ -134,6 +139,7 @@ target_include_directories(personarm_core PUBLIC
 )
 
 target_compile_features(personarm_core PUBLIC cxx_std_17)
+target_link_libraries(personarm_core PUBLIC ${CMAKE_DL_LIBS})  # module_loader: dlopen
 
 # Save states record the build that wrote them (Engine::BuildId; another build loads with a warning).
 # shortcut: the commit is read at configure time, so a rebuild after a new commit keeps the old id

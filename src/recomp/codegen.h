@@ -48,4 +48,8 @@ CodegenResult GenerateC(const uint8_t* image, size_t size, uint32_t base,
                         const std::vector<uint32_t>& entries, const std::string& module,
                         const std::vector<uint32_t>& exclude = {}, bool comments = true);
 
+/// The registry of a module library: exports `prm_modules` (prm_abi.h) listing `modules`, each
+/// defined by its own GenerateC output. Built with TinyCC -nostdlib it also defines the DLL entry.
+std::string GenerateRegistryC(const std::vector<std::string>& modules);
+
 } // namespace personarm::recomp

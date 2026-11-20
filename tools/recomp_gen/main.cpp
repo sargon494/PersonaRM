@@ -3,6 +3,7 @@
 //
 //   recomp_gen <image> <base> <out.c> [--skip N] [--size N] [--entries a,b,...] [--entries-file f]
 //              [--cfg-entry a,b,...] [--cfg-entries-file f] [--module name] [--exclude a,b,...]
+//   recomp_gen --registry <out.c> <module>...    registry of a module library (exports prm_modules)
 //
 // <image> is read from byte offset --skip (0x800 for a PS-X EXE payload) and loaded at <base>.
 // Entries come from the list, from a file (one address per line), and/or from the control-flow
@@ -57,6 +58,14 @@ int Usage() {
 } // namespace
 
 int main(int argc, char** argv) {
+    if (argc >= 3 && std::string(argv[1]) == "--registry") {   // recomp_gen --registry <out.c> <module>...
+        std::ofstream out(argv[2], std::ios::binary);
+        if (!out || !(out << GenerateRegistryC(std::vector<std::string>(argv + 3, argv + argc)))) {
+            std::cerr << "cannot write " << argv[2] << "\n";
+            return 1;
+        }
+        return 0;
+    }
     if (argc < 4) return Usage();
     const std::string in_path = argv[1], out_path = argv[3];
     uint32_t base = 0, skip = 0, size_limit = 0;
