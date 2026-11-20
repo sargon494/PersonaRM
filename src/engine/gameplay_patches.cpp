@@ -195,6 +195,37 @@ std::vector<GamePatch> BuildGamePatches(const std::string& serial, const Gamepla
     }
     if (options.encounter_rate != EncounterRate::Normal && !found)
         unsupported("encounter_rate", EncounterRateName(options.encounter_rate));
+
+    // Disc 1 movies: overlay F0000 (slot A: 0x80093000 JP, 0x80097000 US) plays STR movie a0 with skip
+    // mode a1 (scene mode 10 passes game state +0x10CC/+0x10D0). Each frame of its loop dispatches on
+    // the mode: 1 = Start, 2 = Cross, 3 = any button (pad edge bytes 0x80083860[] JP, 0x80084F80[]
+    // US, bit 7 = pressed this frame; [14] = Start), 4 = countdown; 0 = no skip (the new game opening,
+    // movie 1). A skip calls the stream stop (0x800935D0 JP) and takes the game's own "skipped" exit
+    // (screen cleared, then back to the caller as at the end). The patch sends mode 0 to the Start
+    // check: its `j <no check>` becomes `j <mode 1 check>`. Trigger = last guarded word.
+    struct FmvSite { const char* serial; uint32_t base; uint32_t words[24]; uint32_t jump_to_start_check; };
+    static const FmvSite kFmv[] = {
+        {"SLPS02785", 0x80093B48u, {0x24020002, 0x12A20016, 0x2AA20003, 0x10400005, 0x24020001, 0x12A2000A, 0x3C088008, 0x08024F0C,
+                                    0x00000000, 0x24020003, 0x12A20016, 0x24020004, 0x12A20028, 0x00000000, 0x08024F0C, 0x00000000,
+                                    0x25083860, 0x8102000E, 0x00000000, 0x30420080, 0x10400025, 0x00000000, 0x08024F0A, 0x00000000},
+         0x08024EE2u},  // j 0x80093B88
+        {"SLUS01158", 0x80097B48u, {0x24020002, 0x12A20016, 0x2AA20003, 0x10400005, 0x24020001, 0x12A2000A, 0x3C088008, 0x08025F0C,
+                                    0x00000000, 0x24020003, 0x12A20016, 0x24020004, 0x12A20028, 0x00000000, 0x08025F0C, 0x00000000,
+                                    0x25084F80, 0x8102000E, 0x00000000, 0x30420080, 0x10400025, 0x00000000, 0x08025F0A, 0x00000000},
+         0x08025EE2u},  // j 0x80097B88
+    };
+    found = false;
+    for (const auto& site : kFmv) {
+        if (disc != site.serial || !options.skip_fmv) continue;
+        found = true;
+        GamePatch g;
+        g.name = "skip_fmv";
+        g.trigger = site.base + 23 * 4;
+        g.expect.push_back({site.base, Le32s(site.words, 24)});
+        g.write = {site.base + 7 * 4, Le32s(&site.jump_to_start_check, 1)};
+        patches.push_back(std::move(g));
+    }
+    if (options.skip_fmv && !found) unsupported("skip_fmv", "true");
     return patches;
 }
 

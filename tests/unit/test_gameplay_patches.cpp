@@ -98,6 +98,17 @@ int main() {
     both.encounter_rate = EncounterRate::None;
     CHECK(BuildGamePatches("SLPS-02785", both).size() == 2);
 
+    // Skip FMV: F0000's "no skip" jump (mode 0) retargeted to the Start check.
+    GameplayOptions skip;
+    skip.skip_fmv = true;
+    CHECK(BuildGamePatches("SLPS-02786", skip).empty());
+    const auto sj = BuildGamePatches("SLPS-02785", skip), su = BuildGamePatches("SLUS-01158", skip);
+    CHECK(sj.size() == 1 && su.size() == 1 && sj[0].name == "skip_fmv");
+    CHECK(sj[0].trigger == 0x80093BA4u && sj[0].expect[0].address == 0x80093B48u && sj[0].expect[0].bytes.size() == 96);
+    CHECK(sj[0].write.address == 0x80093B64u && word(sj[0].write.bytes, 0) == 0x08024EE2u);   // j 0x80093B88
+    CHECK(word(sj[0].expect[0].bytes, 7 * 4) == 0x08024F0Cu);                                   // was j 0x80093C30
+    CHECK(su[0].write.address == 0x80097B64u && word(su[0].write.bytes, 0) == 0x08025EE2u);   // US: slot 0x80097000
+
     std::printf("test_gameplay_patches: %d failures\n", g_fail);
     return g_fail == 0 ? 0 : 1;
 }

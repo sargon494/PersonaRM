@@ -35,10 +35,10 @@ struct AudioSettings { int master_volume = 100; bool mute = false; };
 /// One game, keyed by disc serial. Empty string / nullopt = not set.
 struct GameSettings {
     std::string memcard[2], text_speed, encounter_rate, mods;
-    std::optional<bool> recomp;
+    std::optional<bool> recomp, skip_fmv;
     bool Empty() const {
         return memcard[0].empty() && memcard[1].empty() && text_speed.empty() && encounter_rate.empty() && mods.empty() &&
-               !recomp;
+               !recomp && !skip_fmv;
     }
 };
 

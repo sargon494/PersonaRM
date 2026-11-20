@@ -84,6 +84,7 @@ static void PrintUsage(const char* prog) {
               << "                     --input-script <file>  presses from lines <frame> <btn> [<n>] (# comments)\n"
               << "                     --watch-pc <hex>       log the first 20 hits of a PC (repeatable)\n"
               << "                     --encounters <r>       normal, reduced or none (gameplay patch, docs/SETTINGS.md)\n"
+              << "                     --skip-fmv             Start ends any movie (gameplay patch, docs/SETTINGS.md)\n"
               << "                     --recomp               run recompiled code linked into this build (local\n"
               << "                                            -DPRM_RECOMP_GENERATED_DIR builds) and report counters\n"
               << "                     --recomp-quantum <n>   cycles between service points (default 1 = exact\n"
@@ -825,6 +826,7 @@ struct BootOptions {
     std::string memcard[2];          // --memcard1/2: raw .mcd image per slot (empty = no card)
     std::string mods;                // --mods: mod folders (only file mods here, docs/MOD_FILES.md)
     std::string encounters;          // --encounters normal|reduced|none (gameplay patch, docs/SETTINGS.md)
+    bool skip_fmv = false;           // --skip-fmv: Start ends any movie (gameplay patch)
     uint64_t save_state_at = 0;      // --save-state-at N file: state at the end of frame N (0 = off)
     std::string save_state, load_state;  // --save-state-at file / --load-state file
     int widescreen_w = 4, widescreen_h = 3; // --widescreen W:H (4:3 = off)
@@ -906,6 +908,7 @@ static int RunBootHarness(const std::string& disc_path, const BootOptions& opt) 
             std::cerr << "--encounters needs normal, reduced or none\n";
             return EXIT_FAILURE;
         }
+        gameplay.skip_fmv = opt.skip_fmv;
         std::vector<personarm::GamePatch> patches = personarm::BuildGamePatches(engine.DiscSerial(), gameplay);
         for (const auto& g : patches) gameplay_names.push_back(g.name), std::cout << "[gameplay] " << g.name << "\n";
         if (!opt.mods.empty()) {
@@ -1227,6 +1230,7 @@ int main(int argc, char* argv[]) {
                 for (int k = 1; k < argc; ++k) {
                     if (std::strcmp(argv[k], "--stop-at-first-load") == 0) opt.stop_at_first_load = true;
                     if (std::strcmp(argv[k], "--recomp") == 0) opt.recomp = true;
+                    if (std::strcmp(argv[k], "--skip-fmv") == 0) opt.skip_fmv = true;
                     if (std::strcmp(argv[k], "--eager-devices") == 0) opt.eager_devices = true;
                     if (k + 1 >= argc) continue;
                     if (std::strcmp(argv[k], "--max-frames") == 0) opt.max_frames = std::strtoull(argv[k + 1], nullptr, 10);
@@ -1280,7 +1284,7 @@ int main(int argc, char* argv[]) {
                 return RunBootHarness(disc, opt);
             }
             if (std::strcmp(argv[i], "--stop-at-first-load") == 0 || std::strcmp(argv[i], "--recomp") == 0 ||
-                std::strcmp(argv[i], "--eager-devices") == 0) continue; // read by --boot
+                std::strcmp(argv[i], "--eager-devices") == 0 || std::strcmp(argv[i], "--skip-fmv") == 0) continue; // read by --boot
             if (std::strcmp(argv[i], "--max-frames") == 0 || std::strcmp(argv[i], "--dump-ram") == 0 ||
                 std::strcmp(argv[i], "--dump-vram") == 0 || std::strcmp(argv[i], "--dump-frames") == 0 || std::strcmp(argv[i], "--dump-audio") == 0 ||
                 std::strcmp(argv[i], "--every") == 0 || std::strcmp(argv[i], "--press") == 0 ||

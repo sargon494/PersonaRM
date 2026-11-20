@@ -72,6 +72,7 @@ struct HostOptions {
     bool save_settings = false;     // --save-settings: write the effective settings back to the file
     int load_slot = -1;             // --load-state N: load save-state slot N right after boot (as F8)
     std::string record_input;       // --record-input F: write the played pad presses as an --input-script
+    bool skip_fmv = false;          // --skip-fmv: Start ends any movie (false = the settings file decides)
     bool stats = false, unthrottled = false, hidden = false;
 };
 /// False on an unknown option, a missing value, no disc, --interp not 30, 90 or a multiple of 60, a resolution

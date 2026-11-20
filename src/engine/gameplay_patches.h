@@ -18,6 +18,7 @@ enum class EncounterRate { Normal, Reduced, None };
 struct GameplayOptions {
     TextSpeed text_speed = TextSpeed::Normal;
     EncounterRate encounter_rate = EncounterRate::Normal;
+    bool skip_fmv = false;   // Start ends every movie (the game's own skip, otherwise only on some movies)
 };
 
 /// "normal" | "fast" | "instant" (case-insensitive). False for anything else (`out` untouched).

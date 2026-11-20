@@ -56,6 +56,8 @@ static void Usage() {
                          "                       manifest \"gameplay\": {\"text_speed\": ...} (this flag wins). Disc 1 (JP, US) only\n"
                          "  --encounters E       random encounters: normal (default), reduced (about half) or none\n"
                          "                       (scripted and boss battles stay). Disc 1 (JP, US) only\n"
+                         "  --skip-fmv           Start ends any movie (the game's own skip; without this flag only\n"
+                         "                       some movies can be skipped). Disc 1 (JP, US) only\n"
                          "  --stats             per second: game flips, distinct pictures, interpolable pairs\n"
                          "  --memcard1 F, --memcard2 F   memory card in slot 1/2: raw 128 KB .mcd, created and\n"
                          "                       formatted if missing, rewritten atomically when the game saves\n"
@@ -223,6 +225,7 @@ int main(int argc, char** argv) {
         if (!game.mods.empty()) gameplay = LoadGameplayMods(game.mods, engine.DiscSerial());
         if (!game.text_speed.empty()) ParseTextSpeed(game.text_speed, gameplay.text_speed);
         if (!game.encounter_rate.empty()) ParseEncounterRate(game.encounter_rate, gameplay.encounter_rate);
+        gameplay.skip_fmv = game.skip_fmv.value_or(false);
         std::vector<GamePatch> patches = BuildGamePatches(engine.DiscSerial(), gameplay);  // logs what the disc lacks
         for (const GamePatch& g : patches) std::printf("[gameplay] %s\n", g.name.c_str());
         if (!game.mods.empty()) {

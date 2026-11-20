@@ -100,14 +100,15 @@ One object per game, keyed by the disc serial the engine recognises (e.g. `SLPS-
 | `memcard1`, `memcard2` | raw `.mcd` path per slot | `--memcard1/2` |
 | `text_speed` | `normal`, `fast`, `instant` | `--text-speed` |
 | `encounter_rate` | `normal` (default), `reduced` (about half the random battles), `none` (no random battles; scripted and boss battles still happen) | `--encounters` |
+| `skip_fmv` | `true`: Start ends any movie (the game's own skip path; without it the new-game opening and some story movies cannot be skipped) | `--skip-fmv` |
 | `mods` | mods directory | `--mods` |
 | `recomp` | run the recompiled code linked into the build | `--recomp` |
 
-Gameplay options (`text_speed`, `encounter_rate`) exist for disc 1 of `SLPS-02785` (JP) and
+Gameplay options (`text_speed`, `encounter_rate`, `skip_fmv`) exist for disc 1 of `SLPS-02785` (JP) and
 `SLUS-01158` (US) only. On another disc, or when the game's code is not the expected one, the option
 is skipped with a line on stderr (`[GAMEPLAY] ... no patch for disc ...` or `[PATCH] ... skipped`) and
-the game runs untouched. Left at their defaults they change nothing. `encounter_rate` rewrites a few
-instructions of the field code each time it is loaded: with `recomp` that code then runs interpreted.
+the game runs untouched. Left at their defaults they change nothing. `encounter_rate` and `skip_fmv` rewrite a few
+instructions of the field / movie code each time it is loaded: with `recomp` that code then runs interpreted.
 
 ## Save states and fast-forward
 

@@ -87,6 +87,9 @@ int main() {
     CHECK(ParseHostArgs(4, enc, o) && o.encounters == "none");
     const char* encbad[] = {"personarm_sdl", "d.cue", "--encounters", "half"};
     CHECK(!ParseHostArgs(4, encbad, o));
+    const char* sk[] = {"personarm_sdl", "d.cue", "--skip-fmv"};
+    CHECK(ParseHostArgs(3, sk, o) && o.skip_fmv);
+    CHECK(ParseHostArgs(2, plain, o) && !o.skip_fmv);
     const char* missing[] = {"personarm_sdl", "d.cue", "--memcard1"};
     CHECK(!ParseHostArgs(3, missing, o));
     const char* unknown[] = {"personarm_sdl", "d.cue", "--bogus", "1"};

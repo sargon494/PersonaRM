@@ -126,6 +126,7 @@ bool ParseHostArgs(int argc, const char* const* argv, HostOptions& o) {
         else if (is("--hidden")) o.hidden = true;
         else if (is("--recomp")) o.recomp = true;
         else if (is("--mute")) o.mute = true;
+        else if (is("--skip-fmv")) o.skip_fmv = true;
         else if (is("--save-settings")) o.save_settings = true;
         else if (a[0] != '-') {
             if (!o.disc.empty()) return false;
