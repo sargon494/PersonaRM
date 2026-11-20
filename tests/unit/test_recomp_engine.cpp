@@ -14,13 +14,14 @@
 
 #include "engine/engine.h"
 #include "loader/exe_loader.h"
+#include "recomp/runtime/module_loader.h"
 #include "recomp_engine_program.h"
 #include "recomp_overlay_program.h"
 
-extern const personarm::recomp::Module kRecompModule_rengine;
-extern const personarm::recomp::Module kRecompModule_rovl_main;
-extern const personarm::recomp::Module kRecompModule_rovl_a;
-extern const personarm::recomp::Module kRecompModule_rovl_b;
+extern "C" const prm_module kRecompModule_rengine;
+extern "C" const prm_module kRecompModule_rovl_main;
+extern "C" const prm_module kRecompModule_rovl_a;
+extern "C" const prm_module kRecompModule_rovl_b;
 
 using namespace personarm;
 
@@ -117,14 +118,14 @@ int main() {
     CHECK(Word(interp.ram, d + 24) > 300);           // unlisted
     CHECK(Word(interp.ram, d + 0x100) != 0);         // memset filled from a counter
 
-    const Run native = Boot(exe, {&kRecompModule_rengine}, 1);
+    const Run native = Boot(exe, {recomp::FromAbi(&kRecompModule_rengine)}, 1);
     const int diff = FirstDifference(interp, native);
     if (diff) std::fprintf(stderr, "recompiled run differs from the interpreter at frame %d\n", diff);
     CHECK(diff == 0);
     CHECK(native.ram == interp.ram);
     // Lazy device time vs ticking after every instruction (the reference), both modes.
     CHECK(FirstDifference(interp, Boot(exe, {}, 1, true)) == 0);
-    CHECK(FirstDifference(interp, Boot(exe, {&kRecompModule_rengine}, 1, true)) == 0);
+    CHECK(FirstDifference(interp, Boot(exe, {recomp::FromAbi(&kRecompModule_rengine)}, 1, true)) == 0);
     const auto& st = native.stats;
     CHECK(st.active.size() == 1 && st.rejected.empty());
     CHECK(st.native_instructions > 4 * st.interp_resident);  // resume points bring the main loop back
@@ -139,15 +140,34 @@ int main() {
                 (unsigned long long)st.entries, (unsigned long long)st.stops, (unsigned long long)st.hle_calls,
                 (unsigned long long)st.dispatch_misses);
 
+    // The same generated C built as a separate library and loaded at run time (the on-device path).
+    {
+        std::vector<const recomp::Module*> loaded;
+        std::string err;
+        CHECK(recomp::LoadModuleLibrary(PRM_TEST_MODULE_LIBRARY, loaded, &err));
+        if (!err.empty()) std::fprintf(stderr, "%s\n", err.c_str());
+        CHECK(loaded.size() == 1);
+        if (loaded.size() == 1) {
+            CHECK(std::strcmp(loaded[0]->name, "rengine") == 0);
+            CHECK(loaded[0]->code_hash == recomp::FromAbi(&kRecompModule_rengine)->code_hash);
+            CHECK(loaded[0]->entries[0].fn != recomp::FromAbi(&kRecompModule_rengine)->entries[0].fn);  // really the DLL's code
+            const Run dll = Boot(exe, loaded, 1);
+            CHECK(FirstDifference(native, dll) == 0 && dll.ram == native.ram);
+            CHECK(dll.stats.native_instructions == native.stats.native_instructions);
+        }
+        std::vector<const recomp::Module*> none;
+        CHECK(!recomp::LoadModuleLibrary("no_such_module_library", none, &err) && none.empty() && !err.empty());
+    }
+
     // Hash guard: code generated from another image is never run.
-    recomp::Module other = kRecompModule_rengine;
+    recomp::Module other = *recomp::FromAbi(&kRecompModule_rengine);
     other.code_hash ^= 1;
     const Run guarded = Boot(exe, {&other}, 1);
     CHECK(guarded.stats.rejected.size() == 1 && guarded.stats.native_instructions == 0);
     CHECK(FirstDifference(interp, guarded) == 0);
 
     // Larger quantum: IRQs may come late (not compared), but frames still end and the program runs.
-    const Run coarse = Boot(exe, {&kRecompModule_rengine}, 256);
+    const Run coarse = Boot(exe, {recomp::FromAbi(&kRecompModule_rengine)}, 256);
     CHECK(coarse.frames.size() == static_cast<size_t>(kFrames));
     CHECK(coarse.stats.native_instructions > 0);
     CHECK(Word(coarse.ram, d + 32) > kFrames);
@@ -174,15 +194,15 @@ int main() {
     CHECK(pi.applied > 100);
     CHECK(Word(pi.ram, d + 0x200) == 0x88776655u);                 // fired from the HLE copy
     CHECK(FirstDifference(interp, pi) != 0);                       // the patch changed the run
-    const Run pn = Boot(exe, {&kRecompModule_rengine}, 1, false, make_patches(true));
+    const Run pn = Boot(exe, {recomp::FromAbi(&kRecompModule_rengine)}, 1, false, make_patches(true));
     CHECK(FirstDifference(pi, pn) == 0 && pn.ram == pi.ram && pn.applied == pi.applied);
     CHECK(pn.stats.native_instructions > 4 * pn.stats.interp_resident);   // still native, not unwound to a PC
     CHECK(FirstDifference(pi, Boot(exe, {}, 1, true, make_patches(true))) == 0);
-    CHECK(FirstDifference(pi, Boot(exe, {&kRecompModule_rengine}, 1, true, make_patches(true))) == 0);
+    CHECK(FirstDifference(pi, Boot(exe, {recomp::FromAbi(&kRecompModule_rengine)}, 1, true, make_patches(true))) == 0);
     // Expected-bytes guard: a mismatch skips the patch (counted) and leaves the run as without it.
     std::vector<GamePatch> only_guarded = make_patches(false);
     only_guarded.pop_back();
-    const Run pg = Boot(exe, {&kRecompModule_rengine}, 1, false, only_guarded);
+    const Run pg = Boot(exe, {recomp::FromAbi(&kRecompModule_rengine)}, 1, false, only_guarded);
     CHECK(pg.applied == 0 && pg.skipped > 100);
     CHECK(FirstDifference(native, pg) == 0 && pg.ram == native.ram);
     // Patches given but no trigger ever hit: the same run as none.
@@ -190,14 +210,14 @@ int main() {
     never.trigger = d + 0x800;
     never.write = {d + 0x808, {1}};
     CHECK(FirstDifference(interp, Boot(exe, {}, 1, false, {never})) == 0);
-    CHECK(FirstDifference(native, Boot(exe, {&kRecompModule_rengine}, 1, false, {never})) == 0);
+    CHECK(FirstDifference(native, Boot(exe, {recomp::FromAbi(&kRecompModule_rengine)}, 1, false, {never})) == 0);
     std::printf("gameplay patches: applied %llu (interpreter), %llu (recompiled); guard skips %llu\n",
                 (unsigned long long)pi.applied, (unsigned long long)pn.applied, (unsigned long long)pg.skipped);
 
     // Overlays: two modules for one slot, live only while their code is in RAM.
     const rovl::Set ov = rovl::Build();
     const std::vector<uint8_t> ovl_exe = Exe(ov.main);
-    const std::vector<const recomp::Module*> ovl_mods = {&kRecompModule_rovl_main, &kRecompModule_rovl_a, &kRecompModule_rovl_b};
+    const std::vector<const recomp::Module*> ovl_mods = {recomp::FromAbi(&kRecompModule_rovl_main), recomp::FromAbi(&kRecompModule_rovl_a), recomp::FromAbi(&kRecompModule_rovl_b)};
     const Run oi = Boot(ovl_exe, {}, 1);
     const uint32_t od = rovl::kData;
     CHECK(Word(oi.ram, od) > 20);                     // main loop iterations
@@ -222,9 +242,9 @@ int main() {
                 (unsigned long long)os.loads.at("rovl_a"), (unsigned long long)os.loads.at("rovl_b"),
                 (unsigned long long)os.hash_mismatches, (unsigned long long)os.invalidations, (unsigned long long)os.stops);
     // Code from another image at the slot is never run: a mismatching overlay stays interpreted.
-    recomp::Module bad_a = kRecompModule_rovl_a;
+    recomp::Module bad_a = *recomp::FromAbi(&kRecompModule_rovl_a);
     bad_a.code_hash ^= 1;
-    const Run ob = Boot(ovl_exe, {&kRecompModule_rovl_main, &bad_a, &kRecompModule_rovl_b}, 1);
+    const Run ob = Boot(ovl_exe, {recomp::FromAbi(&kRecompModule_rovl_main), &bad_a, recomp::FromAbi(&kRecompModule_rovl_b)}, 1);
     CHECK(FirstDifference(oi, ob) == 0);
     CHECK(!ob.stats.loads.count("rovl_a") && ob.stats.loads.count("rovl_b"));
 

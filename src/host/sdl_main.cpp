@@ -25,6 +25,7 @@
 #include "host/settings.h"
 #include "loader/png_codec.h"
 #include "recomp/runtime/generated_modules.h"
+#include "recomp/runtime/native_cache.h"
 #include "rendering/frame_interp.h"
 #include "rendering/gpu_renderer.h"
 #include "rendering/vram_texture_hook.h"
@@ -63,8 +64,8 @@ static void Usage() {
                          "  --stats             per second: game flips, distinct pictures, interpolable pairs\n"
                          "  --memcard1 F, --memcard2 F   memory card in slot 1/2: raw 128 KB .mcd, created and\n"
                          "                       formatted if missing, rewritten atomically when the game saves\n"
-                         "  --recomp             run the recompiled code linked into this build (local\n"
-                         "                       -DPRM_RECOMP_GENERATED_DIR builds)   --recomp-quantum N (default 1)\n"
+                         "  --recomp, --no-recomp  native (recompiled) code prepared for this disc by personarm_native\n"
+                         "                       (game.recomp, default on; interpreter until it exists)   --recomp-quantum N\n"
                          "  --unthrottled        no 60 Hz pacing    --hidden  no visible window\n"
                          "  --settings F         settings file (default: per-user config dir; docs/SETTINGS.md);\n"
                          "                       command line options override it\n"
@@ -189,14 +190,19 @@ int main(int argc, char** argv) {
         if (host::SaveSettings(settings_path, eff, &err)) std::printf("[settings] saved %s\n", settings_path.c_str());
         else std::fprintf(stderr, "[settings] %s\n", err.c_str());
     }
-    if (game.recomp.value_or(false)) {
-        if (recomp::GeneratedModules().empty()) {
-            std::fprintf(stderr, "recomp: this build has no recompiled code (configure with "
-                                 "-DPRM_RECOMP_GENERATED_DIR=<dir outside the repo>)\n");
-            SDL_Quit();
-            return EXIT_FAILURE;
+    // Native code (on by default): the modules prepared for this disc by personarm_native (or linked
+    // into a developer build). Missing or stale: the interpreter runs everything, never an error.
+    if (game.recomp.value_or(true)) {
+        std::string note;
+        const auto mods = recomp::NativeModulesFor(disc, recomp::GeneratedModules(), note);
+        if (mods.empty()) {
+            std::printf("[native] off, running interpreted: %s\n", note.c_str());
+        } else {
+            std::printf("[native] %zu recompiled modules (%s)\n", mods.size(), note.c_str());
+            engine.SetRecompModules(mods, opt.recomp_quantum);
         }
-        engine.SetRecompModules(recomp::GeneratedModules(), opt.recomp_quantum);
+    } else {
+        std::printf("[native] off (setting), running interpreted\n");
     }
     std::string card_path[2];
     for (int slot = 0; slot < 2; ++slot) {

@@ -131,7 +131,7 @@ add_executable(g2_synth_writer g2_synth_writer.cpp)
 target_compile_features(g2_synth_writer PRIVATE cxx_std_17)
 set(G2_BIN ${CMAKE_CURRENT_BINARY_DIR}/g2_synth.bin)
 set(G2_ENTRIES ${CMAKE_CURRENT_BINARY_DIR}/g2_synth.entries)
-set(G2_GEN ${CMAKE_CURRENT_BINARY_DIR}/g2_synth_gen.cpp)
+set(G2_GEN ${CMAKE_CURRENT_BINARY_DIR}/g2_synth_gen.c)
 add_custom_command(OUTPUT ${G2_BIN} ${G2_ENTRIES}
     COMMAND g2_synth_writer ${G2_BIN} ${G2_ENTRIES}
     DEPENDS g2_synth_writer)
@@ -140,6 +140,7 @@ add_custom_command(OUTPUT ${G2_GEN}
     DEPENDS recomp_gen ${G2_BIN} ${G2_ENTRIES})
 add_executable(unit_test_recomp_g2 test_recomp_g2.cpp ${G2_GEN})
 target_link_libraries(unit_test_recomp_g2 PRIVATE personarm_core)
+target_include_directories(unit_test_recomp_g2 PRIVATE ${PROJECT_SOURCE_DIR}/src/recomp/runtime)  # prm_abi.h for the generated C
 target_compile_features(unit_test_recomp_g2 PRIVATE cxx_std_17)
 add_test(NAME unit_test_recomp_g2 COMMAND unit_test_recomp_g2)
 set_tests_properties(unit_test_recomp_g2 PROPERTIES LABELS "unit" TIMEOUT 300)
@@ -150,7 +151,7 @@ add_executable(recomp_engine_writer recomp_engine_writer.cpp)
 target_compile_features(recomp_engine_writer PRIVATE cxx_std_17)
 set(RENGINE_BIN ${CMAKE_CURRENT_BINARY_DIR}/recomp_engine.bin)
 set(RENGINE_ENTRIES ${CMAKE_CURRENT_BINARY_DIR}/recomp_engine.entries)
-set(RENGINE_GEN ${CMAKE_CURRENT_BINARY_DIR}/recomp_engine_gen.cpp)
+set(RENGINE_GEN ${CMAKE_CURRENT_BINARY_DIR}/recomp_engine_gen.c)
 add_custom_command(OUTPUT ${RENGINE_BIN} ${RENGINE_ENTRIES}
     COMMAND recomp_engine_writer ${RENGINE_BIN} ${RENGINE_ENTRIES}
     DEPENDS recomp_engine_writer)
@@ -170,17 +171,38 @@ foreach(_part main:0x80010000 a:0x80040000 b:0x80040000)
     string(REPLACE ":" ";" _pb ${_part})
     list(GET _pb 0 _p)
     list(GET _pb 1 _base)
-    add_custom_command(OUTPUT ${ROVL_STEM}_${_p}_gen.cpp
-        COMMAND recomp_gen ${ROVL_STEM}_${_p}.bin ${_base} ${ROVL_STEM}_${_p}_gen.cpp --entries-file ${ROVL_STEM}_${_p}.entries --module rovl_${_p}
+    add_custom_command(OUTPUT ${ROVL_STEM}_${_p}_gen.c
+        COMMAND recomp_gen ${ROVL_STEM}_${_p}.bin ${_base} ${ROVL_STEM}_${_p}_gen.c --entries-file ${ROVL_STEM}_${_p}.entries --module rovl_${_p}
         DEPENDS recomp_gen ${ROVL_STEM}_${_p}.bin ${ROVL_STEM}_${_p}.entries)
-    list(APPEND ROVL_GEN ${ROVL_STEM}_${_p}_gen.cpp)
+    list(APPEND ROVL_GEN ${ROVL_STEM}_${_p}_gen.c)
 endforeach()
+# The same rengine code as a run-time module library (DLL/.so exporting prm_modules), like the one
+# personarm_native builds on the player's PC: the test loads it with recomp::LoadModuleLibrary.
+set(RENGINE_REG ${CMAKE_CURRENT_BINARY_DIR}/recomp_engine_registry.c)
+add_custom_command(OUTPUT ${RENGINE_REG}
+    COMMAND recomp_gen --registry ${RENGINE_REG} rengine
+    DEPENDS recomp_gen)
+add_library(recomp_engine_modules SHARED ${RENGINE_GEN} ${RENGINE_REG})
+target_include_directories(recomp_engine_modules PRIVATE ${PROJECT_SOURCE_DIR}/src/recomp/runtime)
 add_executable(unit_test_recomp_engine test_recomp_engine.cpp ${RENGINE_GEN} ${ROVL_GEN})
+add_dependencies(unit_test_recomp_engine recomp_engine_modules)  # one writer of RENGINE_GEN at a time
 target_link_libraries(unit_test_recomp_engine PRIVATE personarm_core)
-target_include_directories(unit_test_recomp_engine PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(unit_test_recomp_engine PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/src/recomp/runtime)
+target_compile_definitions(unit_test_recomp_engine PRIVATE PRM_TEST_MODULE_LIBRARY="$<TARGET_FILE:recomp_engine_modules>")
 target_compile_features(unit_test_recomp_engine PRIVATE cxx_std_17)
 add_test(NAME unit_test_recomp_engine COMMAND unit_test_recomp_engine)
 set_tests_properties(unit_test_recomp_engine PROPERTIES LABELS "unit" TIMEOUT 300)
+
+add_executable(unit_test_native_prep test_native_prep.cpp)
+target_link_libraries(unit_test_native_prep PRIVATE native_prep)
+add_test(NAME unit_test_native_prep COMMAND unit_test_native_prep)
+set_tests_properties(unit_test_native_prep PROPERTIES LABELS "unit" TIMEOUT 60)
+
+add_executable(unit_test_native_cache test_native_cache.cpp)
+target_link_libraries(unit_test_native_cache PRIVATE personarm_core)
+target_compile_features(unit_test_native_cache PRIVATE cxx_std_17)
+add_test(NAME unit_test_native_cache COMMAND unit_test_native_cache)
+set_tests_properties(unit_test_native_cache PROPERTIES LABELS "unit" TIMEOUT 60)
 
 add_executable(unit_test_frame_interp test_frame_interp.cpp)
 target_link_libraries(unit_test_frame_interp PRIVATE personarm_core)

@@ -1,8 +1,44 @@
 #include "recomp_runtime.h"
 
 #include <algorithm>
+#include <cstddef>
 
 namespace personarm::recomp {
+
+// prm_abi.h mirrors these structs for generated C code: same layout, field for field.
+#define PRM_SAME(a, b, f) static_assert(offsetof(a, f) == offsetof(b, f), #f " moved: bump PRM_ABI_VERSION and fix prm_abi.h")
+PRM_SAME(CpuState, prm_cpu, gpr); PRM_SAME(CpuState, prm_cpu, hi); PRM_SAME(CpuState, prm_cpu, pc);
+PRM_SAME(CpuState, prm_cpu, sr); PRM_SAME(CpuState, prm_cpu, badvaddr); PRM_SAME(CpuState, prm_cpu, gte);
+PRM_SAME(CpuState, prm_cpu, mem); PRM_SAME(CpuState, prm_cpu, read); PRM_SAME(CpuState, prm_cpu, write);
+PRM_SAME(CpuState, prm_cpu, dispatcher); PRM_SAME(CpuState, prm_cpu, map); PRM_SAME(CpuState, prm_cpu, map_lo);
+PRM_SAME(CpuState, prm_cpu, map_words); PRM_SAME(CpuState, prm_cpu, fallbacks); PRM_SAME(CpuState, prm_cpu, ram);
+PRM_SAME(CpuState, prm_cpu, scratch); PRM_SAME(CpuState, prm_cpu, watch); PRM_SAME(CpuState, prm_cpu, code_write);
+PRM_SAME(CpuState, prm_cpu, ram_stall); PRM_SAME(CpuState, prm_cpu, stalls); PRM_SAME(CpuState, prm_cpu, cycles);
+PRM_SAME(CpuState, prm_cpu, deadline); PRM_SAME(CpuState, prm_cpu, service); PRM_SAME(CpuState, prm_cpu, external);
+PRM_SAME(CpuState, prm_cpu, host); PRM_SAME(CpuState, prm_cpu, stopped); PRM_SAME(CpuState, prm_cpu, next_pc);
+PRM_SAME(CpuState, prm_cpu, load_reg); PRM_SAME(CpuState, prm_cpu, load_val); PRM_SAME(CpuState, prm_cpu, pair_prev);
+PRM_SAME(CpuState, prm_cpu, cop2); PRM_SAME(CpuState, prm_cpu, dispatch);
+static_assert(sizeof(CpuState) == sizeof(prm_cpu) && sizeof(bool) == 1, "CpuState / prm_cpu size");
+PRM_SAME(FunctionEntry, prm_entry, address); PRM_SAME(FunctionEntry, prm_entry, fn);
+static_assert(sizeof(FunctionEntry) == sizeof(prm_entry), "FunctionEntry / prm_entry size");
+PRM_SAME(Module, prm_module, name); PRM_SAME(Module, prm_module, base); PRM_SAME(Module, prm_module, size);
+PRM_SAME(Module, prm_module, hash); PRM_SAME(Module, prm_module, entries); PRM_SAME(Module, prm_module, count);
+PRM_SAME(Module, prm_module, resume); PRM_SAME(Module, prm_module, resume_count); PRM_SAME(Module, prm_module, code);
+PRM_SAME(Module, prm_module, code_count); PRM_SAME(Module, prm_module, words); PRM_SAME(Module, prm_module, code_hash);
+static_assert(sizeof(Module) == sizeof(prm_module), "Module / prm_module size");
+#undef PRM_SAME
+
+uint32_t Cop2(CpuState& s, uint32_t word, uint32_t value) {
+    if (word & 0x02000000u) { s.gte->ExecuteCommand(word); return 0; }
+    const uint32_t rd = (word >> 11) & 31u;
+    switch ((word >> 21) & 31u) {
+        case 0x00: return s.gte->ReadDataRegister(rd);
+        case 0x02: return s.gte->ReadControlRegister(rd);
+        case 0x04: s.gte->WriteDataRegister(rd, value); return 0;
+        case 0x06: s.gte->WriteControlRegister(rd, value); return 0;
+        default: return 0;  // no-op in the interpreter
+    }
+}
 
 void Dispatcher::Add(const FunctionEntry* entries, size_t count) {
     m_entries.insert(m_entries.end(), entries, entries + count);

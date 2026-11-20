@@ -108,7 +108,7 @@ One object per game, keyed by the disc serial the engine recognises (e.g. `SLPS-
 | `skip_fmv` | `true`: Start ends any movie (the game's own skip path; without it the new-game opening and some story movies cannot be skipped) | `--skip-fmv` |
 | `battle_speed` | `1` (default), `2`, `3`: emulated frames per 1/60 s while a battle is on screen (scene mode word `& 0xFF == 2`: JP `0x8007E298`, US `0x8007F9B8`). Like fast-forward: one picture in N, battle sound dropped; the field runs at normal speed and the battle itself is the same. Capped by how fast the PC emulates | `--battle-speed` |
 | `mods` | mods directory | `--mods` |
-| `recomp` | run the recompiled code linked into the build | `--recomp` |
+| `recomp` | native (recompiled) code, default `true`: the modules `personarm_native` built from this disc on this PC (docs/NATIVE_CODE.md), or those linked into a developer build. None yet or stale: the interpreter runs, with a `[native]` line on stdout | `--recomp`, `--no-recomp` |
 
 Gameplay options (`text_speed`, `encounter_rate`, `skip_fmv`, `battle_speed`) exist for disc 1 of `SLPS-02785` (JP) and
 `SLUS-01158` (US) only. On another disc, or when the game's code is not the expected one, the option

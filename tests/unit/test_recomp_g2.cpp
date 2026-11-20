@@ -12,8 +12,7 @@
 #include "g2_synth_program.h"
 #include "recomp/codegen.h"
 
-extern const personarm::recomp::FunctionEntry kRecomp_g2[];
-extern const size_t kRecomp_g2_count;
+extern "C" const prm_module kRecompModule_g2;
 
 using namespace personarm;
 
@@ -37,7 +36,7 @@ std::vector<uint8_t> InitialRam(const g2::Program& p, std::mt19937& rng) {
 int main() {
     const g2::Program p = g2::Build();
     recomp::Dispatcher disp;
-    disp.Add(kRecomp_g2, kRecomp_g2_count);
+    disp.Add(recomp::FromAbi(&kRecompModule_g2)->entries, recomp::FromAbi(&kRecompModule_g2)->count);
 
     // Generator decisions: every entry but the hazard one is compiled.
     CHECK(disp.Size() == p.entries.size() - 1);
@@ -50,7 +49,7 @@ int main() {
         std::vector<uint8_t> img;
         for (uint32_t w : {0x8C880000u, 0x01001021u, 0x03E00008u, 0u})   // lw t0,0(a0); addu v0,t0,zero; jr ra; nop
             for (int i = 0; i < 4; ++i) img.push_back(static_cast<uint8_t>(w >> (8 * i)));
-        const auto r = recomp::GenerateCpp(img.data(), img.size(), g2::kBase, {g2::kBase}, "t");
+        const auto r = recomp::GenerateC(img.data(), img.size(), g2::kBase, {g2::kBase}, "t");
         CHECK(r.functions.size() == 1 && !r.functions[0].generated && r.functions[0].reason.find("load-delay") != std::string::npos);
     }
 

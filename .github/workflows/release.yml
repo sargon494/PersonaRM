@@ -2,7 +2,8 @@ name: Release
 
 # Push a tag `vX.Y.Z` (or run manually with a tag name) to publish a Windows zip + .sha256 on GitHub
 # Releases. The launcher's self-updater reads that release. No game data, BIOS or recompiled game
-# code is ever built or shipped (PRM_RECOMP_GENERATED_DIR is deliberately not set).
+# code is ever built or shipped (PRM_RECOMP_GENERATED_DIR is deliberately not set): players build the
+# native code from their own disc with personarm_native + libtcc.dll, which the zip carries instead.
 
 on:
   push:
@@ -31,11 +32,11 @@ jobs:
         run: |
           if ($env:TAG -notmatch '^v\d+\.\d+\.\d+$') { throw "Tag '$env:TAG' must look like v1.2.3" }
 
-      - name: Build game (SDL3 host, no recompiled code)
+      - name: Build game (SDL3 host, personarm_native + TinyCC, no recompiled code)
         shell: pwsh
         run: |
           cmake -B build -DCMAKE_BUILD_TYPE=Release -DPRM_WITH_SDL3=ON
-          cmake --build build --config Release --target personarm personarm_sdl
+          cmake --build build --config Release --target personarm personarm_sdl personarm_native
 
       - name: Test launcher
         shell: pwsh
@@ -54,6 +55,10 @@ jobs:
         run: |
           $bin = Split-Path (Get-ChildItem build -Recurse -Filter personarm_sdl.exe | Select-Object -First 1).FullName
           ./scripts/package-release.ps1 -Tag $env:TAG -BinDir $bin -Launcher launcher/target/release/launcher.exe -Out dist
+
+      - name: Check the zip holds no generated game code
+        shell: pwsh
+        run: ./scripts/check-release-files.ps1 -Zip (Get-ChildItem dist -Filter "PersonaRM-*.zip" | Select-Object -First 1).FullName
 
       - name: Publish release
         shell: pwsh

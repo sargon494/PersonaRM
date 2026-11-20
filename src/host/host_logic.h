@@ -60,7 +60,8 @@ struct HostOptions {
     int interp_hz = 0;
     uint32_t resolution_scale = 1;  // --resolution-scale 1-4 (display-only internal resolution); gpu: 1-9 or auto (0)
     std::string renderer;           // --renderer software|gpu (docs/GPU_RENDERER.md; empty = the settings file decides)
-    bool recomp = false;            // --recomp: run the recompiled code linked into this build
+    bool recomp = false;            // --recomp: native (recompiled) code on (the default)
+    bool no_recomp = false;         // --no-recomp: interpreter only
     uint32_t recomp_quantum = 1;    // --recomp-quantum
     // Settings file (src/host/settings.h): "unset" = empty / 0 / -1, so the file's value stays.
     std::string settings_path;      // --settings F (default: per-user config dir)

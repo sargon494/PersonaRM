@@ -92,6 +92,9 @@ enum Msg {
     Found(update::Release),
     Done,
     Failed(String),
+    /// personarm_native progress, then its end (None = native code ready, Some = why not).
+    Native(NativeLine),
+    NativeEnd(Option<String>),
 }
 
 enum Upd {
@@ -132,6 +135,8 @@ struct App {
     shot: Option<String>,
     frames: u32,
     focus_first: bool,
+    /// Preparing native code before PLAY: progress 0..1, message, and the game command to start after.
+    native: Option<(f32, String, PathBuf, Vec<String>)>,
 }
 
 impl App {
@@ -179,7 +184,7 @@ impl App {
                 }
             });
         }
-        Self { page, sel: 0, covers: HashMap::new(), cfg, settings, doc, capture: None, dirty: false, error, logo, upd: Upd::None, tx, rx, t0: -10.0, dir: 1.0, shot: arg("--shot"), frames: 0, focus_first: std::env::args().any(|a| a == "--focus") }
+        Self { page, sel: 0, covers: HashMap::new(), cfg, settings, doc, capture: None, dirty: false, error, logo, upd: Upd::None, tx, rx, t0: -10.0, dir: 1.0, shot: arg("--shot"), frames: 0, focus_first: std::env::args().any(|a| a == "--focus"), native: None }
     }
 
     fn save(&mut self) {
@@ -209,6 +214,22 @@ impl App {
         };
         let mut args = build_args(&game_settings_json().to_string_lossy(), cue, &self.cfg, &self.settings);
         args.extend(g.args.iter().cloned());
+        // Native code: personarm_native builds it from this disc on this PC the first time (a no-op
+        // once cached), then the game runs it. Missing tool or failure: play interpreted.
+        let tool = native_tool_for(&exe);
+        if self.settings.native && tool.is_file() {
+            self.native = Some((0.0, "Checking native code...".into(), exe, args));
+            let (tx, ctx, cue) = (self.tx.clone(), ctx.clone(), cue.to_string());
+            std::thread::spawn(move || {
+                let _ = tx.send(Msg::NativeEnd(prepare_native(&tool, &cue, &tx, &ctx)));
+                ctx.request_repaint();
+            });
+            return;
+        }
+        self.launch(ctx, exe, args);
+    }
+
+    fn launch(&mut self, ctx: &egui::Context, exe: PathBuf, args: Vec<String>) {
         // The UI process exits while the game runs (an OpenGL window costs ~100 MB even hidden); a
         // windowless watcher (`--run`, a few MB) waits for the game and reopens the launcher.
         let me = std::env::current_exe().unwrap_or_default();
@@ -217,6 +238,39 @@ impl App {
             return;
         }
         ctx.send_viewport_cmd(ViewportCommand::Close);
+    }
+}
+
+/// Runs `personarm_native <cue> --json`, forwarding its progress. None = native code ready.
+fn prepare_native(tool: &std::path::Path, cue: &str, tx: &mpsc::Sender<Msg>, ctx: &egui::Context) -> Option<String> {
+    use std::io::BufRead;
+    let mut cmd = std::process::Command::new(tool);
+    cmd.arg(cue).arg("--json").stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => return Some(format!("could not start {}: {e}", tool.display())),
+    };
+    let mut last = None;
+    for line in std::io::BufReader::new(child.stdout.take()?).lines().map_while(Result::ok) {
+        if let Some(l) = parse_native_line(&line) {
+            if l.ok.is_some() {
+                last = Some(l);
+            } else {
+                let _ = tx.send(Msg::Native(l));
+                ctx.request_repaint();
+            }
+        }
+    }
+    let _ = child.wait();
+    match last {
+        Some(l) if l.ok == Some(true) => None,
+        Some(l) => Some(l.message),
+        None => Some("the native code tool stopped unexpectedly".into()),
     }
 }
 
@@ -577,6 +631,10 @@ fn audio_general(ui: &mut egui::Ui, s: &mut GameSettings, c: &mut LauncherConfig
             dirty |= path_row(ui, &mut c.game_exe, false, auto, "auto: next to the launcher", || rfd::FileDialog::new().pick_file());
         });
         grid_row(ui, "", |ui| dirty |= ui.checkbox(&mut s.pause_on_focus_loss, "Pause when unfocused").changed());
+        grid_row(ui, "", |ui| {
+            dirty |= ui.checkbox(&mut s.native, "Native code (recompiled)").on_hover_text(
+                "Built from your own disc on this PC the first time you play (about a minute at most), then cached. Off = interpreter.").changed()
+        });
         grid_row(ui, "", |ui| dirty |= ui.checkbox(&mut c.check_updates, "Check for updates on start").changed());
         grid_row(ui, "", |ui| dirty |= ui.checkbox(&mut c.reduce_motion, "Reduce motion").changed());
     });
@@ -784,6 +842,22 @@ impl eframe::App for App {
                 Msg::Found(r) if cfg!(debug_assertions) && std::env::var_os("PRM_UPDATE_AUTO").is_some() => start = Some(r),
                 Msg::Found(r) => self.upd = Upd::Available(r),
                 Msg::Failed(e) => self.upd = Upd::Failed(e),
+                Msg::Native(l) => {
+                    if let Some(n) = &mut self.native {
+                        n.0 = l.progress;
+                        n.1 = l.message;
+                    }
+                }
+                Msg::NativeEnd(err) => {
+                    if let Some((_, _, exe, args)) = self.native.take() {
+                        if let Some(e) = err {
+                            // Shown when the launcher comes back after the game (the game runs interpreted).
+                            let _ = std::fs::create_dir_all(log_dir()).and_then(|_| std::fs::write(log_dir().join("last_error.txt"),
+                                format!("Native code could not be prepared ({e}); the game ran with the interpreter.")));
+                        }
+                        self.launch(&ctx, exe, args);
+                    }
+                }
                 Msg::Done => {
                     // Files are swapped: start the new launcher and let this one go.
                     let _ = std::env::current_exe().map(|me| std::process::Command::new(me).spawn());
@@ -819,6 +893,12 @@ impl eframe::App for App {
                 ui.separator();
                 if let Some(e) = &self.error {
                     ui.label(RichText::new(e).color(RED_HI));
+                }
+                if let Some((p, msg, _, _)) = &self.native {
+                    // Only worth a bar when there is work: a ready cache answers within a moment.
+                    ui.label(RichText::new("Preparing native code for your disc\u{2026} (first time only)").color(PAPER));
+                    ui.add(egui::ProgressBar::new(*p).text(msg.as_str()).animate(true));
+                    ctx.request_repaint_after(std::time::Duration::from_millis(100));
                 }
                 let bt = anim(&ctx, "banner", matches!(self.upd, Upd::Available(_)), 0.18);
                 match &self.upd {
@@ -880,7 +960,7 @@ impl eframe::App for App {
         if self.dirty {
             self.save();
         }
-        if play {
+        if play && self.native.is_none() {
             self.play(&ctx);
         }
     }
