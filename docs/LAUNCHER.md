@@ -1,7 +1,36 @@
 # Launcher
 
-`launcher/` is a small Rust (eframe/egui) program that edits the game settings and starts `personarm_sdl`.
-One window, dark theme, no repaint loop while idle (idle CPU is 0).
+`launcher/` is a small Rust (eframe/egui) program: a game library that edits the game settings and starts `personarm_sdl`.
+Dark theme, resizable window (minimum 480x520), no repaint loop while idle (idle CPU is 0).
+
+## Pages
+
+- **Library** (home): a grid of cards, one per entry of `games` in `launcher.json`; it reflows with the window width.
+  A card shows the title, a platform badge (`PS1`) and a status: **Ready** (a disc is set), **Needs disc**, or
+  **Not playable yet** (the executable is not found). With a cover the card shows it (title over a dark strip);
+  without one it is a title card in the site style (dark surface, red accent, Barlow Condensed). No box art is
+  shipped: a cover is only a PNG the user picks (copyrighted art stays on the user's disk).
+- **Game page** (click a card, **Back** returns): discs per language, language, text speed, cover picker and a big
+  PLAY. Language and text speed go to `general.language` and `game.<serial>.text_speed`.
+- **Settings** (gear icon in the header): options shared by all games: renderer, internal resolution, frame rate,
+  widescreen, window mode (`video`), volume and mute (`audio`), save folder, pause when unfocused (`general`),
+  game executable and check for updates.
+
+The update banner is shown above every page. A hidden `--page game|settings` argument opens that page (used for
+screenshots).
+
+## Adding a game
+
+Only a data change in `launcher.json` (`games`); all fields except `name` and `serials` are optional:
+
+```json
+{ "name": "...", "platform": "PS1", "serials": ["SLPS-00000"], "discs": {"ja": "D:/discs/p2.cue"},
+  "cover": "D:/covers/p2.png", "exe": "path/to/runner", "args": ["--extra"] }
+```
+
+`exe` empty means the shared `personarm_sdl`; `args` are appended after `<cue> --settings ... --renderer ...`.
+Old files without `platform`, `cover`, `exe` or `args` still load (`platform` defaults to `PS1`). Only
+Persona 2: Eternal Punishment ships in the default list.
 
 ## Build
 
@@ -17,13 +46,13 @@ Put `launcher` next to `personarm_sdl`, or use the CMake target (needs `cargo`, 
 cmake --build build --config Release --target launcher
 ```
 
-If `personarm_sdl` is not next to the launcher, pick it under **Game executable**.
+If `personarm_sdl` is not next to the launcher, pick it under Settings > **Game executable**.
 
 ## Files
 
 | file | content |
 |---|---|
-| `%APPDATA%\PersonaRM\launcher.json` | launcher config: game library (name, serials, disc `.cue` per language), `personarm_sdl` path, renderer, internal resolution |
+| `%APPDATA%\PersonaRM\launcher.json` | launcher config: game library (name, platform, serials, disc `.cue` per language, cover, exe, args), `personarm_sdl` path, renderer, internal resolution |
 | `%APPDATA%\PersonaRM\PersonaRM\settings.json` | the game's settings ([SETTINGS.md](SETTINGS.md)); the launcher changes only its keys, every other key is preserved |
 | `%APPDATA%\PersonaRM\logs\personarm_sdl.log` | stderr of the last game run |
 
