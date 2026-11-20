@@ -83,6 +83,23 @@ int main() {
     const char* tsbad[] = {"personarm_sdl", "d.cue", "--text-speed", "warp"};
     CHECK(!ParseHostArgs(4, tsbad, o));
     CHECK(ParseHostArgs(2, plain, o) && o.text_speed.empty());
+    const char* enc[] = {"personarm_sdl", "d.cue", "--encounters", "none"};
+    CHECK(ParseHostArgs(4, enc, o) && o.encounters == "none");
+    const char* encbad[] = {"personarm_sdl", "d.cue", "--encounters", "half"};
+    CHECK(!ParseHostArgs(4, encbad, o));
+    const char* bs[] = {"personarm_sdl", "d.cue", "--battle-speed", "3"};
+    CHECK(ParseHostArgs(4, bs, o) && o.battle_speed == 3);
+    const char* bsbad[] = {"personarm_sdl", "d.cue", "--battle-speed", "4"};
+    CHECK(!ParseHostArgs(4, bsbad, o));
+    CHECK(ParseHostArgs(2, plain, o) && o.battle_speed == 0);
+    // Battle-speed scheduling: fast-forward wins, battle_speed only in battle, field always 1.
+    CHECK(FrameSpeed(false, 4, false, 3) == 1);
+    CHECK(FrameSpeed(false, 4, true, 3) == 3 && FrameSpeed(false, 4, true, 2) == 2 && FrameSpeed(false, 4, true, 1) == 1);
+    CHECK(FrameSpeed(true, 4, false, 1) == 4 && FrameSpeed(true, 8, true, 3) == 8);
+    CHECK(FrameSpeed(false, 4, true, 0) == 1 && FrameSpeed(false, 4, true, 9) == 3);  // out of range clamped
+    const char* sk[] = {"personarm_sdl", "d.cue", "--skip-fmv"};
+    CHECK(ParseHostArgs(3, sk, o) && o.skip_fmv);
+    CHECK(ParseHostArgs(2, plain, o) && !o.skip_fmv);
     const char* missing[] = {"personarm_sdl", "d.cue", "--memcard1"};
     CHECK(!ParseHostArgs(3, missing, o));
     const char* unknown[] = {"personarm_sdl", "d.cue", "--bogus", "1"};

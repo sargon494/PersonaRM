@@ -25,11 +25,22 @@ std::vector<uint8_t> Le32(uint32_t v) {
     return {uint8_t(v), uint8_t(v >> 8), uint8_t(v >> 16), uint8_t(v >> 24)};
 }
 
+std::vector<uint8_t> Le32s(const uint32_t* w, size_t n) {
+    std::vector<uint8_t> out;
+    for (size_t i = 0; i < n; ++i) for (uint8_t b : Le32(w[i])) out.push_back(b);
+    return out;
+}
+
+std::string Lower(const std::string& s) {
+    std::string t;
+    for (char c : s) t += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return t;
+}
+
 } // namespace
 
 bool ParseTextSpeed(const std::string& text, TextSpeed& out) {
-    std::string t;
-    for (char c : text) t += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    const std::string t = Lower(text);
     if (t == "normal") out = TextSpeed::Normal;
     else if (t == "fast") out = TextSpeed::Fast;
     else if (t == "instant") out = TextSpeed::Instant;
@@ -39,6 +50,19 @@ bool ParseTextSpeed(const std::string& text, TextSpeed& out) {
 
 const char* TextSpeedName(TextSpeed s) {
     return s == TextSpeed::Fast ? "fast" : s == TextSpeed::Instant ? "instant" : "normal";
+}
+
+bool ParseEncounterRate(const std::string& text, EncounterRate& out) {
+    const std::string t = Lower(text);
+    if (t == "normal") out = EncounterRate::Normal;
+    else if (t == "reduced") out = EncounterRate::Reduced;
+    else if (t == "none") out = EncounterRate::None;
+    else return false;
+    return true;
+}
+
+const char* EncounterRateName(EncounterRate r) {
+    return r == EncounterRate::Reduced ? "reduced" : r == EncounterRate::None ? "none" : "normal";
 }
 
 bool ParseGameplayManifest(const std::string& manifest_json, GameplayOptions& out, std::string* err) {
@@ -109,8 +133,15 @@ std::vector<GamePatch> BuildGamePatches(const std::string& serial, const Gamepla
         {"SLPS02785", 0x8001C6A0u, 0x8007CF14u},   // JP Deluxe Pack, text_init 0x8001C678
         {"SLUS01158", 0x8001C734u, 0x8007E634u},   // US, text_init 0x8001C70C
     };
+    const std::string disc = Normalize(serial);
+    auto unsupported = [&](const char* option, const char* value) {
+        PRM_LOG_WARN("GAMEPLAY", std::string(option) + "=" + value + ": no patch for disc " +
+                                     (serial.empty() ? "(unrecognized)" : serial) + ", ignored");
+    };
+    bool found = false;
     for (const auto& site : kSites) {
-        if (Normalize(serial) != site.serial || options.text_speed == TextSpeed::Normal) continue;
+        if (disc != site.serial || options.text_speed == TextSpeed::Normal) continue;
+        found = true;
         GamePatch g;
         g.name = std::string("text_speed=") + TextSpeedName(options.text_speed);
         g.trigger = site.global;
@@ -119,7 +150,88 @@ std::vector<GamePatch> BuildGamePatches(const std::string& serial, const Gamepla
         g.write = {site.global, Le32(options.text_speed == TextSpeed::Fast ? 1u : 0u)};
         patches.push_back(std::move(g));
     }
+    if (options.text_speed != TextSpeed::Normal && !found) unsupported("text_speed", TextSpeedName(options.text_speed));
+
+    // Disc 1 random encounters. The field overlay F0736 (slot 0x800AB000 JP, 0x800AF000 US) runs its encounter step once per
+    // frame: s0 = distance walked this frame (word 0 below, lhu), halved when event flag 0xC12 is set
+    // and doubled when 0xC13 is (words 3..14), then passed to the resident encounter roll (JP
+    // 0x80017A04, US 0x800178BC). That adds it to the step accumulator (game state +0x10FC: JP
+    // 0x8007E2E4, US 0x8007FA04) and rolls the zone's battle table each 512 units past 2048.
+    // Scripted encounters take another path in the same function (s0 = 0x7FFF, untouched) and the
+    // battle overlay F0789 calls the roll itself with constants, so both keep working. The patch
+    // rewrites overlay code right after each load (trigger = its last word, so the whole range is in
+    // RAM by then; other overlays loaded at that address fail the guard). With --recomp the patched
+    // overlay fails its code hash and runs interpreted.
+    struct EncounterSite { const char* serial; uint32_t base; uint32_t words[15]; };
+    static const EncounterSite kEncounter[] = {
+        {"SLPS02785", 0x800ABA5Cu, {0x9470A7C8, 0x00021182, 0x3042007F, 0x0C0091C4, 0xA4A21100, 0x10400003, 0x00101400,
+                                    0x0802AEAC, 0x00028443, 0x0C0091C4, 0x24040C13, 0x1040000A, 0x3C02800D, 0x0802AEAD,
+                                    0x00108040}},
+        {"SLUS01158", 0x800AFA5Cu, {0x9470E838, 0x00021182, 0x3042007F, 0x0C009271, 0xA4A21100, 0x10400003, 0x00101400,
+                                    0x0802BEAC, 0x00028443, 0x0C009271, 0x24040C13, 0x1040000A, 0x3C02800D, 0x0802BEAD,
+                                    0x00108040}},
+    };
+    found = false;
+    for (const auto& site : kEncounter) {
+        if (disc != site.serial || options.encounter_rate == EncounterRate::Normal) continue;
+        found = true;
+        GamePatch g;
+        g.name = std::string("encounter_rate=") + EncounterRateName(options.encounter_rate);
+        g.trigger = site.base + 14 * 4;
+        g.expect.push_back({site.base, Le32s(site.words, 15)});
+        if (options.encounter_rate == EncounterRate::None) {
+            const uint32_t w = 0x00008021u;  // addu s0,zero,zero: nothing walked, nothing rolled
+            g.write = {site.base, Le32s(&w, 1)};
+        } else {
+            // Halve on every path: flag 0xC12 >>1 becomes >>2, flag 0xC13 <<1 becomes x1, else >>1.
+            uint32_t w[7];
+            std::copy(site.words + 8, site.words + 15, w);
+            w[0] = 0x00028483u;  // +0x20 sra s0,v0,18 (was 17)
+            w[3] = 0x1440000Au;  // +0x2C bne v0,zero (was beq): flag 0xC13 skips the halving at +0x38
+            w[6] = 0x00108043u;  // +0x38 sra s0,s0,1 (was sll s0,s0,1)
+            g.write = {site.base + 8 * 4, Le32s(w, 7)};
+        }
+        patches.push_back(std::move(g));
+    }
+    if (options.encounter_rate != EncounterRate::Normal && !found)
+        unsupported("encounter_rate", EncounterRateName(options.encounter_rate));
+
+    // Disc 1 movies: overlay F0000 (slot A: 0x80093000 JP, 0x80097000 US) plays STR movie a0 with skip
+    // mode a1 (scene mode 10 passes game state +0x10CC/+0x10D0). Each frame of its loop dispatches on
+    // the mode: 1 = Start, 2 = Cross, 3 = any button (pad edge bytes 0x80083860[] JP, 0x80084F80[]
+    // US, bit 7 = pressed this frame; [14] = Start), 4 = countdown; 0 = no skip (the new game opening,
+    // movie 1). A skip calls the stream stop (0x800935D0 JP) and takes the game's own "skipped" exit
+    // (screen cleared, then back to the caller as at the end). The patch sends mode 0 to the Start
+    // check: its `j <no check>` becomes `j <mode 1 check>`. Trigger = last guarded word.
+    struct FmvSite { const char* serial; uint32_t base; uint32_t words[24]; uint32_t jump_to_start_check; };
+    static const FmvSite kFmv[] = {
+        {"SLPS02785", 0x80093B48u, {0x24020002, 0x12A20016, 0x2AA20003, 0x10400005, 0x24020001, 0x12A2000A, 0x3C088008, 0x08024F0C,
+                                    0x00000000, 0x24020003, 0x12A20016, 0x24020004, 0x12A20028, 0x00000000, 0x08024F0C, 0x00000000,
+                                    0x25083860, 0x8102000E, 0x00000000, 0x30420080, 0x10400025, 0x00000000, 0x08024F0A, 0x00000000},
+         0x08024EE2u},  // j 0x80093B88
+        {"SLUS01158", 0x80097B48u, {0x24020002, 0x12A20016, 0x2AA20003, 0x10400005, 0x24020001, 0x12A2000A, 0x3C088008, 0x08025F0C,
+                                    0x00000000, 0x24020003, 0x12A20016, 0x24020004, 0x12A20028, 0x00000000, 0x08025F0C, 0x00000000,
+                                    0x25084F80, 0x8102000E, 0x00000000, 0x30420080, 0x10400025, 0x00000000, 0x08025F0A, 0x00000000},
+         0x08025EE2u},  // j 0x80097B88
+    };
+    found = false;
+    for (const auto& site : kFmv) {
+        if (disc != site.serial || !options.skip_fmv) continue;
+        found = true;
+        GamePatch g;
+        g.name = "skip_fmv";
+        g.trigger = site.base + 23 * 4;
+        g.expect.push_back({site.base, Le32s(site.words, 24)});
+        g.write = {site.base + 7 * 4, Le32s(&site.jump_to_start_check, 1)};
+        patches.push_back(std::move(g));
+    }
+    if (options.skip_fmv && !found) unsupported("skip_fmv", "true");
     return patches;
+}
+
+uint32_t SceneModeAddress(const std::string& serial) {
+    const std::string disc = Normalize(serial);
+    return disc == "SLPS02785" ? 0x8007E298u : disc == "SLUS01158" ? 0x8007F9B8u : 0u;
 }
 
 } // namespace personarm

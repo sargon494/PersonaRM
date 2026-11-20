@@ -52,6 +52,8 @@ struct HostOptions {
     std::string disc, screenshot, input_script, dump_dir;
     std::string texture_dump, mods; // --texture-dump D (dump used VRAM textures as PNG), --mods D (HD replacement)
     std::string text_speed;         // --text-speed normal|fast|instant (empty = the mods manifests decide)
+    std::string encounters;         // --encounters normal|reduced|none (empty = the settings file decides)
+    int battle_speed = 0;           // --battle-speed 1..3 (0 = the settings file decides)
     std::string widescreen;         // --widescreen off|16:9|21:9|W:H (empty = the settings file decides)
     std::string memcard[2];         // --memcard1/2: raw .mcd per slot, empty = no card
     uint64_t max_frames = 0, dump_from = 0, dump_to = 0;
@@ -71,12 +73,17 @@ struct HostOptions {
     bool save_settings = false;     // --save-settings: write the effective settings back to the file
     int load_slot = -1;             // --load-state N: load save-state slot N right after boot (as F8)
     std::string record_input;       // --record-input F: write the played pad presses as an --input-script
+    bool skip_fmv = false;          // --skip-fmv: Start ends any movie (false = the settings file decides)
     bool stats = false, unthrottled = false, hidden = false;
 };
 /// False on an unknown option, a missing value, no disc, --interp not 30, 90 or a multiple of 60, a resolution
 /// scale outside 1-9 or auto (--renderer software: 1-4), or --interp above 60 with a resolution scale above 1
 /// and --renderer software (the software interpolator replays at 1x only).
 bool ParseHostArgs(int argc, const char* const* argv, HostOptions& out);
+
+/// Emulated frames per 1/60 s: held fast-forward wins (ff_max), else battle_speed (1..3) while in battle, else 1.
+/// Above 1 the host shows one picture in that many and drops the sound, as fast-forward always did.
+int FrameSpeed(bool fast_forward, int ff_max, bool in_battle, int battle_speed);
 
 /// --record-input: turns the pad mask of each emulated frame into --input-script lines.
 class InputRecorder {

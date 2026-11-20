@@ -54,6 +54,12 @@ static void Usage() {
                          "  --mods D             mods: D/<mod>/textures/<HASH>.png, D/<mod>/files/Fnnnn.BIN (+ manifest.json priority/serial)\n"
                          "  --text-speed S       dialogue speed: normal (game default), fast or instant; also set by a mod\n"
                          "                       manifest \"gameplay\": {\"text_speed\": ...} (this flag wins). Disc 1 (JP, US) only\n"
+                         "  --encounters E       random encounters: normal (default), reduced (about half) or none\n"
+                         "                       (scripted and boss battles stay). Disc 1 (JP, US) only\n"
+                         "  --skip-fmv           Start ends any movie (the game's own skip; without this flag only\n"
+                         "                       some movies can be skipped). Disc 1 (JP, US) only\n"
+                         "  --battle-speed N     1 (default), 2 or 3 emulated frames per 1/60 s while in battle (like\n"
+                         "                       fast-forward: one picture in N, battle sound dropped). Disc 1 (JP, US) only\n"
                          "  --stats             per second: game flips, distinct pictures, interpolable pairs\n"
                          "  --memcard1 F, --memcard2 F   memory card in slot 1/2: raw 128 KB .mcd, created and\n"
                          "                       formatted if missing, rewritten atomically when the game saves\n"
@@ -220,11 +226,10 @@ int main(int argc, char** argv) {
         GameplayOptions gameplay;
         if (!game.mods.empty()) gameplay = LoadGameplayMods(game.mods, engine.DiscSerial());
         if (!game.text_speed.empty()) ParseTextSpeed(game.text_speed, gameplay.text_speed);
-        std::vector<GamePatch> patches = BuildGamePatches(engine.DiscSerial(), gameplay);
-        if (gameplay.text_speed != TextSpeed::Normal && patches.empty())
-            std::fprintf(stderr, "[gameplay] text_speed=%s: no patch for disc %s, ignored\n", TextSpeedName(gameplay.text_speed),
-                         engine.DiscSerial().empty() ? "(unrecognized)" : engine.DiscSerial().c_str());
-        if (!patches.empty()) std::printf("[gameplay] text_speed=%s\n", TextSpeedName(gameplay.text_speed));
+        if (!game.encounter_rate.empty()) ParseEncounterRate(game.encounter_rate, gameplay.encounter_rate);
+        gameplay.skip_fmv = game.skip_fmv.value_or(false);
+        std::vector<GamePatch> patches = BuildGamePatches(engine.DiscSerial(), gameplay);  // logs what the disc lacks
+        for (const GamePatch& g : patches) std::printf("[gameplay] %s\n", g.name.c_str());
         if (!game.mods.empty()) {
             std::vector<GamePatch> files = InstallFileMods(engine, file_redirect, game.mods);
             if (!files.empty()) std::printf("[files] %zu replacement files from %s\n", files.size(), game.mods.c_str());
@@ -354,6 +359,13 @@ int main(int argc, char** argv) {
     // Fast-forward (held): up to fast_forward_max emulated frames per 1/60 s, one picture each, audio dropped.
     const int ff_max = std::clamp(cfg.video.fast_forward_max, 2, 16);
     uint64_t ff_frames = 0;
+    // battle_speed: the same, automatically, while the scene mode says battle (game.<serial>.battle_speed).
+    const int battle_speed = game.battle_speed > 1 ? game.battle_speed : 1;
+    const uint32_t scene_mode_addr = battle_speed > 1 ? SceneModeAddress(engine.DiscSerial()) : 0;
+    if (battle_speed > 1 && !scene_mode_addr)
+        std::fprintf(stderr, "[gameplay] battle_speed=%d: no battle flag known for disc %s, ignored\n", battle_speed,
+                     engine.DiscSerial().empty() ? "(unrecognized)" : engine.DiscSerial().c_str());
+    else if (battle_speed > 1) std::printf("[gameplay] battle_speed=%d\n", battle_speed);
 
     if (opt.load_slot >= 0) { state_slot = opt.load_slot; load_state(); }  // reproduce a reported moment
     while (!quit && engine.GetState() == EngineState::Running && (!max_frames || engine.GetFrameCount() < max_frames)) {
@@ -427,7 +439,9 @@ int main(int argc, char** argv) {
         bool ff = ks[SDL_SCANCODE_TAB];
         for (SDL_Gamepad* g : gamepads) ff |= SDL_GetGamepadButton(g, SDL_GAMEPAD_BUTTON_RIGHT_STICK);
         if (title_until && SDL_GetTicksNS() > title_until) { SDL_SetWindowTitle(window, "PersonaRM"); title_until = 0; }
-        const uint64_t slot_ns = frame_ns / uint64_t(ff ? ff_max : 1);  // wall time per emulated frame
+        const bool in_battle = scene_mode_addr && IsBattleScene(engine.Read(scene_mode_addr, 4));
+        const int speed = host::FrameSpeed(ff, ff_max, in_battle, battle_speed);
+        const uint64_t slot_ns = frame_ns / uint64_t(speed);  // wall time per emulated frame
         auto pace = [&](uint64_t ns) {
             if (unthrottled) return;
             const uint64_t now = SDL_GetTicksNS();  // wait for this slot's deadline, then book the next one
@@ -446,7 +460,7 @@ int main(int argc, char** argv) {
 
         engine.TakeAudio(pcm);
         audio_samples += pcm.size();
-        if (audio && !pcm.empty() && !ff) {  // fast-forward: dropped (no pitched or broken audio)
+        if (audio && !pcm.empty() && speed == 1) {  // fast-forward / battle speed: dropped (no pitched or broken audio)
             // Keep latency bounded if the emulator ran ahead of the device clock (> 0.25 s queued).
             if (SDL_GetAudioStreamQueued(audio) > 44100 * 4 / 4) SDL_ClearAudioStream(audio);
             SDL_PutAudioStreamData(audio, pcm.data(), int(pcm.size() * sizeof(int16_t)));
@@ -498,7 +512,7 @@ int main(int argc, char** argv) {
         }
 
         // Fast-forward presents one emulated frame out of ff_max (the display rate stays ~60 Hz, vsync or not).
-        if (ff && ++ff_frames % uint64_t(ff_max) != 0 && !(max_frames && frame >= max_frames)) {
+        if (speed > 1 && ++ff_frames % uint64_t(speed) != 0 && !(max_frames && frame >= max_frames)) {
             pace(slot_ns);
             continue;
         }

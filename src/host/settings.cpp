@@ -142,9 +142,12 @@ Settings ParseSettings(const std::string& text, std::vector<std::string>* w) {
             GetString(&g, where, "memcard2", gs.memcard[1], w);
             GetString(&g, where, "mods", gs.mods, w);
             GetEnum(&g, where, "text_speed", {"normal", "fast", "instant"}, gs.text_speed, w);
-            if (!Missing(&g, "recomp")) {
-                if (g.Find("recomp")->IsBool()) gs.recomp = g.Find("recomp")->AsBool();
-                else Warn(w, where + ".recomp: expected true/false, ignored");
+            GetEnum(&g, where, "encounter_rate", {"normal", "reduced", "none"}, gs.encounter_rate, w);
+            GetInt(&g, where.c_str(), "battle_speed", 1, 3, gs.battle_speed, w);
+            for (auto [key, out] : {std::pair<const char*, std::optional<bool>*>{"recomp", &gs.recomp}, {"skip_fmv", &gs.skip_fmv}}) {
+                if (Missing(&g, key)) continue;
+                if (g.Find(key)->IsBool()) *out = g.Find(key)->AsBool();
+                else Warn(w, where + "." + key + ": expected true/false, ignored");
             }
         }
     }
@@ -199,7 +202,10 @@ std::string DumpSettings(const Settings& s) {
         if (!gs.memcard[1].empty()) o.Set("memcard2", gs.memcard[1]);
         if (!gs.mods.empty()) o.Set("mods", gs.mods);
         if (!gs.text_speed.empty()) o.Set("text_speed", gs.text_speed);
+        if (!gs.encounter_rate.empty()) o.Set("encounter_rate", gs.encounter_rate);
         if (gs.recomp) o.Set("recomp", *gs.recomp);
+        if (gs.skip_fmv) o.Set("skip_fmv", *gs.skip_fmv);
+        if (gs.battle_speed) o.Set("battle_speed", gs.battle_speed);
         games.Set(serial, o);
     }
     doc.Set("game", games);
@@ -234,8 +240,11 @@ Settings ApplyCli(Settings s, const HostOptions& o, const std::string& serial) {
     GameSettings g = GameFor(s, serial);
     for (int i = 0; i < 2; ++i) if (!o.memcard[i].empty()) g.memcard[i] = o.memcard[i];
     if (!o.text_speed.empty()) g.text_speed = o.text_speed;
+    if (!o.encounters.empty()) g.encounter_rate = o.encounters;
     if (!o.mods.empty()) g.mods = o.mods;
     if (o.recomp) g.recomp = true;
+    if (o.skip_fmv) g.skip_fmv = true;
+    if (o.battle_speed) g.battle_speed = o.battle_speed;
     if (!g.Empty()) s.games[serial] = g;
     return s;
 }

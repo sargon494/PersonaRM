@@ -68,6 +68,52 @@ int main() {
     CHECK(pu.size() == 1 && pu[0].trigger == 0x8007E634u && pu[0].expect[0].address == 0x8001C734u);
     CHECK(BuildGamePatches("SLUS-01339", fast).empty());
 
+    // Encounter rate: parse, and the field overlay code patch (trigger = last guarded word).
+    EncounterRate r = EncounterRate::Normal;
+    CHECK(ParseEncounterRate("Reduced", r) && r == EncounterRate::Reduced);
+    CHECK(ParseEncounterRate("none", r) && r == EncounterRate::None);
+    CHECK(!ParseEncounterRate("half", r) && r == EncounterRate::None);
+    CHECK(std::string(EncounterRateName(EncounterRate::Reduced)) == "reduced");
+    GameplayOptions none, reduced;
+    none.encounter_rate = EncounterRate::None;
+    reduced.encounter_rate = EncounterRate::Reduced;
+    CHECK(BuildGamePatches("SLPS-02786", none).empty());
+    CHECK(BuildGamePatches("", reduced).empty());
+    const auto en = BuildGamePatches("SLPS-02785", none), er = BuildGamePatches("SLPS-02785", reduced);
+    CHECK(en.size() == 1 && er.size() == 1);
+    CHECK(en[0].trigger == 0x800ABA94u && en[0].expect.size() == 1 && en[0].expect[0].address == 0x800ABA5Cu &&
+          en[0].expect[0].bytes.size() == 60);
+    CHECK(en[0].write.address == 0x800ABA5Cu && (en[0].write.bytes == std::vector<uint8_t>{0x21, 0x80, 0, 0}));  // addu s0,zero,zero
+    // reduced: words +0x20..+0x38, three of them changed (sra 18, bne, sra 1), the rest as guarded
+    CHECK(er[0].write.address == 0x800ABA7Cu && er[0].write.bytes.size() == 28);
+    const auto& eb = er[0].write.bytes;
+    const auto& orig = er[0].expect[0].bytes;
+    auto word = [](const std::vector<uint8_t>& b, size_t at) { return uint32_t(b[at] | b[at + 1] << 8 | b[at + 2] << 16 | uint32_t(b[at + 3]) << 24); };
+    CHECK(word(eb, 0) == 0x00028483u && word(eb, 12) == 0x1440000Au && word(eb, 24) == 0x00108043u);
+    for (size_t i : {4u, 8u, 16u, 20u}) CHECK(word(eb, i) == word(orig, 0x20 + i));
+    CHECK(word(orig, 0) == 0x9470A7C8u && word(orig, 0x38) == 0x00108040u);
+    const auto eu = BuildGamePatches("SLUS-01158", reduced);   // US: overlay linked at 0x800AF000
+    CHECK(eu.size() == 1 && eu[0].trigger == 0x800AFA94u && eu[0].write.address == 0x800AFA7Cu);
+    GameplayOptions both = fast;
+    both.encounter_rate = EncounterRate::None;
+    CHECK(BuildGamePatches("SLPS-02785", both).size() == 2);
+
+    // Skip FMV: F0000's "no skip" jump (mode 0) retargeted to the Start check.
+    GameplayOptions skip;
+    skip.skip_fmv = true;
+    CHECK(BuildGamePatches("SLPS-02786", skip).empty());
+    const auto sj = BuildGamePatches("SLPS-02785", skip), su = BuildGamePatches("SLUS-01158", skip);
+    CHECK(sj.size() == 1 && su.size() == 1 && sj[0].name == "skip_fmv");
+    CHECK(sj[0].trigger == 0x80093BA4u && sj[0].expect[0].address == 0x80093B48u && sj[0].expect[0].bytes.size() == 96);
+    CHECK(sj[0].write.address == 0x80093B64u && word(sj[0].write.bytes, 0) == 0x08024EE2u);   // j 0x80093B88
+    CHECK(word(sj[0].expect[0].bytes, 7 * 4) == 0x08024F0Cu);                                   // was j 0x80093C30
+    CHECK(su[0].write.address == 0x80097B64u && word(su[0].write.bytes, 0) == 0x08025EE2u);   // US: slot 0x80097000
+
+    // Battle flag: scene mode word per disc; mode 2 (field encounters store 0x1002) = battle overlay.
+    CHECK(SceneModeAddress("SLPS_027.85") == 0x8007E298u && SceneModeAddress("SLUS-01158") == 0x8007F9B8u);
+    CHECK(SceneModeAddress("SLPS-02786") == 0 && SceneModeAddress("") == 0);
+    CHECK(IsBattleScene(0x1002) && IsBattleScene(2) && !IsBattleScene(0) && !IsBattleScene(4) && !IsBattleScene(0xA));
+
     std::printf("test_gameplay_patches: %d failures\n", g_fail);
     return g_fail == 0 ? 0 : 1;
 }

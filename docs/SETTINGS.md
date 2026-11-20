@@ -43,7 +43,7 @@ can read and write the same file. Implementation: `src/host/settings.{h,cpp}`.
   "game": {
     "SLPS-02192": {
       "memcard1": "C:/saves/p2ep-1.mcd", "memcard2": "",
-      "text_speed": "fast", "mods": "C:/mods", "recomp": false
+      "text_speed": "fast", "encounter_rate": "reduced", "skip_fmv": true, "battle_speed": 2, "mods": "C:/mods", "recomp": false
     }
   }
 }
@@ -99,8 +99,17 @@ One object per game, keyed by the disc serial the engine recognises (e.g. `SLPS-
 |---|---|---|
 | `memcard1`, `memcard2` | raw `.mcd` path per slot | `--memcard1/2` |
 | `text_speed` | `normal`, `fast`, `instant` | `--text-speed` |
+| `encounter_rate` | `normal` (default), `reduced` (about half the random battles), `none` (no random battles; scripted and boss battles still happen) | `--encounters` |
+| `skip_fmv` | `true`: Start ends any movie (the game's own skip path; without it the new-game opening and some story movies cannot be skipped) | `--skip-fmv` |
+| `battle_speed` | `1` (default), `2`, `3`: emulated frames per 1/60 s while a battle is on screen (scene mode word `& 0xFF == 2`: JP `0x8007E298`, US `0x8007F9B8`). Like fast-forward: one picture in N, battle sound dropped; the field runs at normal speed and the battle itself is the same. Capped by how fast the PC emulates | `--battle-speed` |
 | `mods` | mods directory | `--mods` |
 | `recomp` | run the recompiled code linked into the build | `--recomp` |
+
+Gameplay options (`text_speed`, `encounter_rate`, `skip_fmv`, `battle_speed`) exist for disc 1 of `SLPS-02785` (JP) and
+`SLUS-01158` (US) only. On another disc, or when the game's code is not the expected one, the option
+is skipped with a line on stderr (`[GAMEPLAY] ... no patch for disc ...` or `[PATCH] ... skipped`) and
+the game runs untouched. Left at their defaults they change nothing. `encounter_rate` and `skip_fmv` rewrite a few
+instructions of the field / movie code each time it is loaded: with `recomp` that code then runs interpreted.
 
 ## Save states and fast-forward
 
@@ -128,7 +137,7 @@ Keys in `personarm_sdl` (fixed for now, not in `input`):
   git commit), u64 frame, then tagged sections. A state from another disc or another format version is
   refused with a message and the game keeps running untouched; so is a truncated file. A state from
   another build with the same format version loads (warning on stderr), so states survive updates.
-  A state loads the same with or without `recomp`. Different mods or `text_speed` than when it was saved:
+  A state loads the same with or without `recomp`. Different mods or gameplay options than when it was saved:
   it loads, the current options stay active (warning on stderr).
 - **Fast-forward**: while held, up to `video.fast_forward_max` emulated frames run per 1/60 s (less if the
   PC is slower), one picture in `fast_forward_max` is shown and the sound is dropped (no pitched or
