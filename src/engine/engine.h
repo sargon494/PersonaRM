@@ -168,6 +168,9 @@ public:
     /// Gameplay patches (see GamePatch): replaced as a whole, kept across Reset/boot. Empty (the
     /// default) = nothing is watched and no store path does anything new.
     void SetGamePatches(std::vector<GamePatch> patches);
+    /// Applies `g` to RAM right now (live toggles: the trigger may have fired long ago). Same guards as a
+    /// store-triggered run (expect bytes, only_if_nonzero) but silent and uncounted; false when it did not apply.
+    bool ApplyPatchNow(const GamePatch& g);
     uint64_t PatchesApplied(size_t i) const { return i < m_patch_applied.size() ? m_patch_applied[i] : 0; }
     uint64_t PatchesSkipped(size_t i) const { return i < m_patch_skipped.size() ? m_patch_skipped[i] : 0; }
     /// Serial of the recognized disc ("SLPS-02785"), empty when the boot executable is not a known one.

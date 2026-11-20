@@ -122,17 +122,23 @@ GameplayOptions LoadGameplayMods(const std::string& mods_dir, const std::string&
     return result;
 }
 
+struct TextSpeedSite { const char* serial; uint32_t store_pc, global; };
+static const TextSpeedSite kSites[] = {
+    {"SLPS02785", 0x8001C6A0u, 0x8007CF14u},   // JP Deluxe Pack, text_init 0x8001C678
+    {"SLUS01158", 0x8001C734u, 0x8007E634u},   // US, text_init 0x8001C70C
+};
+
+uint32_t TextSpeedGlobal(const std::string& serial) {
+    for (const auto& site : kSites) if (Normalize(serial) == site.serial) return site.global;
+    return 0;
+}
+
 std::vector<GamePatch> BuildGamePatches(const std::string& serial, const GameplayOptions& options) {
     std::vector<GamePatch> patches;
     // Disc 1: text_init stores the per-glyph delay with `sw a2,0x74(a3)` into a global, which
     // msg_win_create copies into each window (+54) and that into each text node
     // (docs/research/TEXT_SYSTEM.md TS-012). Overwrite it after every store. US addresses are the
     // same code shifted (docs/research/DISC_US_FORENSICS.md).
-    struct TextSpeedSite { const char* serial; uint32_t store_pc, global; };
-    static const TextSpeedSite kSites[] = {
-        {"SLPS02785", 0x8001C6A0u, 0x8007CF14u},   // JP Deluxe Pack, text_init 0x8001C678
-        {"SLUS01158", 0x8001C734u, 0x8007E634u},   // US, text_init 0x8001C70C
-    };
     const std::string disc = Normalize(serial);
     auto unsupported = [&](const char* option, const char* value) {
         PRM_LOG_WARN("GAMEPLAY", std::string(option) + "=" + value + ": no patch for disc " +
@@ -227,6 +233,24 @@ std::vector<GamePatch> BuildGamePatches(const std::string& serial, const Gamepla
     }
     if (options.skip_fmv && !found) unsupported("skip_fmv", "true");
     return patches;
+}
+
+std::vector<GamePatch> BuildRevertPatches(const std::vector<GamePatch>& applied) {
+    std::vector<GamePatch> out;
+    for (const GamePatch& g : applied) {
+        const uint32_t w0 = g.write.address, w1 = w0 + uint32_t(g.write.bytes.size());
+        for (const GamePatch::Bytes& e : g.expect) {
+            if (w0 < e.address || w1 > e.address + e.bytes.size()) continue;
+            GamePatch r;
+            r.name = "revert " + g.name;
+            r.trigger = g.trigger;
+            r.expect.push_back(g.write);
+            r.write = {w0, std::vector<uint8_t>(e.bytes.begin() + (w0 - e.address), e.bytes.begin() + (w1 - e.address))};
+            out.push_back(std::move(r));
+            break;
+        }
+    }
+    return out;
 }
 
 uint32_t SceneModeAddress(const std::string& serial) {

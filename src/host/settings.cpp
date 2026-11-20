@@ -1,5 +1,6 @@
 #include "host/settings.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -78,8 +79,41 @@ JsonValue StringList(const std::vector<std::string>& l) {
 }
 } // namespace
 
+const char* HotkeyAction(Hotkey h) {
+    switch (h) {
+        case Hotkey::EncounterRate: return "encounter_rate";
+        case Hotkey::BattleSpeed: return "battle_speed";
+        case Hotkey::SkipFmv: return "skip_fmv";
+        default: return "text_speed";
+    }
+}
+const char* HotkeyDefaultKey(Hotkey h) {
+    switch (h) {
+        case Hotkey::EncounterRate: return "F1";
+        case Hotkey::BattleSpeed: return "F2";
+        case Hotkey::SkipFmv: return "F3";
+        default: return "F4";
+    }
+}
+
+std::string CycleGameOption(GameSettings& g, Hotkey h) {
+    auto next = [](const std::string& cur, std::initializer_list<const char*> order) {  // unset = first = the default
+        std::vector<const char*> v(order);
+        size_t i = 0;
+        for (size_t k = 0; k < v.size(); ++k) if (cur == v[k]) i = k;
+        return std::string(v[(i + 1) % v.size()]);
+    };
+    switch (h) {
+        case Hotkey::EncounterRate: return g.encounter_rate = next(g.encounter_rate, {"normal", "reduced", "none"});
+        case Hotkey::TextSpeed: return g.text_speed = next(g.text_speed, {"normal", "fast", "instant"});
+        case Hotkey::BattleSpeed: g.battle_speed = g.battle_speed >= 3 ? 1 : std::max(g.battle_speed, 1) + 1; return std::to_string(g.battle_speed);
+        default: g.skip_fmv = !g.skip_fmv.value_or(false); return *g.skip_fmv ? "on" : "off";
+    }
+}
+
 Settings DefaultSettings() {
     Settings s;
+    for (Hotkey h : kHotkeys) s.hotkeys[HotkeyAction(h)] = HotkeyDefaultKey(h);
     DefaultBindings(KeyboardMap(), s.keyboard);
     DefaultBindings(GamepadMap(), s.gamepad);
     return s;
@@ -133,6 +167,13 @@ Settings ParseSettings(const std::string& text, std::vector<std::string>* w) {
     const JsonValue* input = Section(&*doc, "input");
     ParseBindings(Section(input, "keyboard"), "keyboard", s.keyboard, w);
     ParseBindings(Section(input, "gamepad"), "gamepad", s.gamepad, w);
+    if (const JsonValue* hk = Section(input, "hotkeys")) {
+        for (const auto& [action, key] : hk->Members()) {
+            if (!s.hotkeys.count(action)) Warn(w, "input.hotkeys." + action + ": unknown action, kept untouched");
+            else if (key.IsString() && !key.AsString().empty()) s.hotkeys[action] = key.AsString();
+            else Warn(w, "input.hotkeys." + action + ": expected a key name, using " + s.hotkeys[action]);
+        }
+    }
     if (const JsonValue* game = Section(&*doc, "game")) {
         for (const auto& [serial, g] : game->Members()) {
             const std::string where = "game." + serial;
@@ -193,6 +234,9 @@ std::string DumpSettings(const Settings& s) {
     for (const auto& [act, l] : s.gamepad) gp.Set(act, StringList(l));
     in.Set("keyboard", kb);
     in.Set("gamepad", gp);
+    JsonValue hk = Sub(in, "hotkeys");
+    for (const auto& [act, key] : s.hotkeys) hk.Set(act, key);
+    in.Set("hotkeys", hk);
     doc.Set("input", in);
     JsonValue games = Sub(doc, "game");
     for (const auto& [serial, gs] : s.games) {
