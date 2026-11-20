@@ -9,6 +9,7 @@ use model::*;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 
 // Colour tokens of the site (site/styles.css :root).
@@ -22,6 +23,10 @@ const RED: Color32 = Color32::from_rgb(0xd7, 0x17, 0x2a);
 const RED_HI: Color32 = Color32::from_rgb(0xff, 0x33, 0x47);
 const RED_DEEP: Color32 = Color32::from_rgb(0x6e, 0x0b, 0x14);
 const LOGO: &[u8] = include_bytes!("../assets/logo.png");
+
+fn arg(name: &str) -> Option<String> {
+    std::env::args().skip_while(|a| a != name).nth(1)
+}
 
 fn cond() -> FontFamily {
     FontFamily::Name("cond".into())
@@ -55,7 +60,7 @@ fn style(ctx: &egui::Context) {
     v.faint_bg_color = INK_3;
     v.hyperlink_color = RED_HI;
     v.selection.bg_fill = RED;
-    v.selection.stroke = egui::Stroke::new(1.0, PAPER);
+    v.selection.stroke = egui::Stroke::new(2.0, RED_HI); // keyboard focus ring
     let sharp = egui::CornerRadius::ZERO; // the site is all angular cuts: no rounded corners
     v.window_corner_radius = sharp;
     v.menu_corner_radius = sharp;
@@ -73,7 +78,9 @@ fn style(ctx: &egui::Context) {
     w.active.bg_stroke = egui::Stroke::new(1.0, RED_HI);
     ctx.set_visuals(v);
     ctx.all_styles_mut(|s| {
-        s.spacing.item_spacing = egui::vec2(10.0, 9.0);
+        s.spacing.scroll = egui::style::ScrollStyle::solid(); // thin bar that is visible whenever the page scrolls
+        s.spacing.scroll.bar_width = 8.0;
+        s.spacing.item_spacing = egui::vec2(10.0, 7.0);
         s.spacing.button_padding = egui::vec2(12.0, 5.0);
         for (_, t) in s.text_styles.iter_mut() {
             t.size *= 1.06; // Barlow runs smaller than egui's default face
@@ -116,6 +123,13 @@ struct App {
     upd: Upd,
     tx: mpsc::Sender<Msg>,
     rx: mpsc::Receiver<Msg>,
+    /// Page transition: start time (egui clock) and direction (+1 deeper, -1 back).
+    t0: f64,
+    dir: f32,
+    /// Hidden `--shot <png>` (screenshots) and `--focus` (focus the first card).
+    shot: Option<String>,
+    frames: u32,
+    focus_first: bool,
 }
 
 impl App {
@@ -144,7 +158,7 @@ impl App {
         let doc = load_game_doc();
         let settings = GameSettings::from_value(&doc, &cfg.games[0].serials);
         // Hidden: `--page game|settings` opens that page (used for screenshots).
-        let page = match std::env::args().skip_while(|a| a != "--page").nth(1).as_deref() {
+        let page = match arg("--page").as_deref() {
             Some("game") => Page::Game,
             Some("settings") => Page::Settings,
             _ => Page::Library,
@@ -163,7 +177,7 @@ impl App {
                 }
             });
         }
-        Self { page, sel: 0, covers: HashMap::new(), cfg, settings, doc, dirty: false, error, logo, upd: Upd::None, tx, rx }
+        Self { page, sel: 0, covers: HashMap::new(), cfg, settings, doc, dirty: false, error, logo, upd: Upd::None, tx, rx, t0: -10.0, dir: 1.0, shot: arg("--shot"), frames: 0, focus_first: std::env::args().any(|a| a == "--focus") }
     }
 
     fn save(&mut self) {
@@ -181,12 +195,14 @@ impl App {
         let g = &self.cfg.games[self.sel];
         let Some(exe) = game_exe_for(&self.cfg, g) else {
             self.error = Some(format!("{} not found: pick it under Settings > Game executable.", exe_name()));
+            self.go(ctx, Page::Settings);
             return;
         };
         let lang = self.settings.language.clone();
         let Some(cue) = disc_for(g, &lang) else {
             let name = if lang == "ja" { "Japanese" } else { "English" };
             self.error = Some(format!("Set the {name} disc (.cue) first."));
+            self.go(ctx, Page::Game);
             return;
         };
         let mut args = build_args(&game_settings_json().to_string_lossy(), cue, &self.cfg, &self.settings);
@@ -202,6 +218,77 @@ impl App {
     }
 }
 
+/// Set from `reduce_motion`: every `anim` then jumps straight to its target.
+static REDUCE: AtomicBool = AtomicBool::new(false);
+
+fn id(x: impl std::hash::Hash + std::fmt::Debug) -> egui::Id {
+    #[allow(deprecated)]
+    egui::Id::new(x)
+}
+
+/// 0..1 ease-out tween toward `on`. egui repaints only while it is moving, so idle stays at 0 CPU.
+fn anim(ctx: &egui::Context, key: impl std::hash::Hash + std::fmt::Debug, on: bool, secs: f32) -> f32 {
+    let t = if REDUCE.load(Ordering::Relaxed) { 0.0 } else { secs };
+    ctx.animate_bool_with_time_and_easing(id(key), on, t, egui::emath::easing::cubic_out)
+}
+
+fn mix(a: Color32, b: Color32, t: f32) -> Color32 {
+    a.lerp_to_gamma(b, t)
+}
+
+fn ring(p: &egui::Painter, r: egui::Rect) {
+    p.rect_stroke(r.expand(2.0), 0.0, egui::Stroke::new(2.0, RED_HI), egui::StrokeKind::Outside);
+}
+
+#[derive(Clone, Copy)]
+enum Icon {
+    Check,
+    Cross,
+    Dash,
+    Ring,
+}
+
+/// Status glyphs are drawn (the embedded fonts have none), so state never depends on colour alone.
+fn icon(p: &egui::Painter, c: egui::Pos2, k: Icon, col: Color32) {
+    let s = egui::Stroke::new(2.0, col);
+    let v = |x: f32, y: f32| c + egui::vec2(x, y);
+    match k {
+        Icon::Check => {
+            p.add(egui::Shape::line(vec![v(-4.5, 0.0), v(-1.5, 3.5), v(4.5, -3.5)], s));
+        }
+        Icon::Cross => {
+            p.line_segment([v(-3.5, -3.5), v(3.5, 3.5)], s);
+            p.line_segment([v(-3.5, 3.5), v(3.5, -3.5)], s);
+        }
+        Icon::Dash => {
+            p.line_segment([v(-4.0, 0.0), v(4.0, 0.0)], s);
+        }
+        Icon::Ring => {
+            p.circle_stroke(c, 4.5, s);
+        }
+    }
+}
+
+/// Small muted line under a control.
+fn hint(ui: &mut egui::Ui, t: &str) {
+    ui.add(egui::Label::new(RichText::new(t).size(13.0).color(MUTED)));
+}
+
+/// Icon + words for a path's state; `unset` replaces the word when the field is empty.
+fn state_line(ui: &mut egui::Ui, s: PathState, empty: bool, unset: &str) {
+    let (k, col, txt) = match s {
+        PathState::Found => (Icon::Check, PAPER, "found"),
+        PathState::Missing => (Icon::Cross, RED_HI, "file missing"),
+        PathState::NotSet => (Icon::Dash, MUTED, "not set"),
+    };
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 5.0;
+        let (r, _) = ui.allocate_exact_size(egui::vec2(12.0, 14.0), egui::Sense::hover());
+        icon(ui.painter(), r.center(), k, col);
+        ui.label(RichText::new(if empty { unset } else { txt }).size(13.0).color(col));
+    });
+}
+
 fn combo(ui: &mut egui::Ui, id: &str, cur: &mut String, opts: &[(&str, &str)]) -> bool {
     let shown = opts.iter().find(|o| o.0 == cur).map_or(cur.as_str(), |o| o.1).to_string();
     let mut changed = false;
@@ -213,22 +300,34 @@ fn combo(ui: &mut egui::Ui, id: &str, cur: &mut String, opts: &[(&str, &str)]) -
     changed
 }
 
-fn path_row(ui: &mut egui::Ui, path: &mut String, pick: impl FnOnce() -> Option<PathBuf>) -> bool {
+/// Path field + Browse + a live found / missing / not set line, validated on every edit.
+/// `dir`: the path is a folder. `empty`: state to show when the field is empty (it can fall back to a
+/// default); `unset`: the words for that case.
+fn path_row(ui: &mut egui::Ui, path: &mut String, dir: bool, empty: PathState, unset: &str, pick: impl FnOnce() -> Option<PathBuf>) -> bool {
     let mut changed = false;
-    ui.horizontal(|ui| {
-        changed |= ui.add(egui::TextEdit::singleline(path).desired_width(250.0)).changed();
-        if ui.button("Browse").clicked() {
-            if let Some(p) = pick() {
-                *path = p.to_string_lossy().into_owned();
+    ui.vertical(|ui| {
+        ui.spacing_mut().item_spacing.y = 3.0;
+        ui.horizontal(|ui| {
+            let w = (ui.available_width() - 78.0).clamp(120.0, 270.0);
+            if ui.add(egui::TextEdit::singleline(path).desired_width(w)).changed() {
+                path.retain(|c| c != '"'); // "Copy as path" pastes quotes
                 changed = true;
             }
-        }
+            if ui.button("Browse").clicked() {
+                if let Some(p) = pick() {
+                    *path = p.to_string_lossy().into_owned();
+                    changed = true;
+                }
+            }
+        });
+        let st = path_state(path, dir);
+        state_line(ui, if st == PathState::NotSet { empty } else { st }, st == PathState::NotSet, unset);
     });
     changed
 }
 
 fn heading(ui: &mut egui::Ui, t: &str) {
-    ui.add_space(8.0);
+    ui.add_space(4.0);
     ui.label(RichText::new(t).family(cond()).color(RED_HI).size(15.0).extra_letter_spacing(3.5));
 }
 
@@ -237,6 +336,22 @@ fn caps(t: &str, size: f32) -> RichText {
     RichText::new(t.to_uppercase()).family(cond()).size(size).extra_letter_spacing(2.0)
 }
 
+/// Primary red button (the site's .btn-primary): hover darkens, press sinks 2 px; both tweened.
+fn red_button(ui: &mut egui::Ui, rect: egui::Rect, wid: egui::Id, label: &str, size: f32, focusable: bool) -> egui::Response {
+    let resp = ui.interact(rect, wid, if focusable { egui::Sense::click() } else { egui::Sense::CLICK });
+    let ctx = ui.ctx().clone();
+    let hot = anim(&ctx, (wid, "h"), ui.rect_contains_pointer(rect) || resp.has_focus(), 0.12);
+    let down = anim(&ctx, (wid, "d"), resp.is_pointer_button_down_on(), 0.07);
+    let r = rect.shrink(2.0 * down).translate(egui::vec2(0.0, 1.5 * down));
+    let p = ui.painter();
+    p.rect_filled(r, 0.0, mix(RED, Color32::from_rgb(0xa8, 0x0f, 0x1f), hot * (1.0 - 0.5 * down)));
+    let g = p.layout_no_wrap(label.to_uppercase(), egui::FontId::new(size, cond()), Color32::WHITE);
+    p.galley(r.center() - g.size() / 2.0, g, Color32::WHITE);
+    if resp.has_focus() {
+        ring(p, rect);
+    }
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
 
 /// Decode a PNG into a texture, shrunk (nearest) so its longest side is at most 512 px.
 fn load_cover(ctx: &egui::Context, path: &str) -> Option<egui::TextureHandle> {
@@ -270,119 +385,244 @@ fn load_cover(ctx: &egui::Context, path: &str) -> Option<egui::TextureHandle> {
     Some(ctx.load_texture(path, egui::ColorImage::from_rgba_unmultiplied([tw, th], &px), egui::TextureOptions::LINEAR))
 }
 
-const CARD: egui::Vec2 = egui::vec2(190.0, 270.0);
+const CARD: egui::Vec2 = egui::vec2(250.0, 330.0);
 
-/// One library card. Returns true when clicked.
-fn card(ui: &mut egui::Ui, g: &Game, st: Status, cover: Option<&egui::TextureHandle>) -> bool {
+#[derive(PartialEq)]
+enum Act {
+    None,
+    Open,
+    Play,
+}
+
+/// One library card: click opens the game page; PLAY / SET UP acts directly; Enter on a focused card plays.
+fn card(ui: &mut egui::Ui, i: usize, g: &Game, st: Status, cover: Option<&egui::TextureHandle>, grab_focus: bool) -> Act {
+    let ctx = ui.ctx().clone();
     let (rect, resp) = ui.allocate_exact_size(CARD, egui::Sense::click());
-    let p = ui.painter_at(rect);
-    let hot = resp.hovered();
-    p.rect_filled(rect, 0.0, INK_2);
-    let band = 54.0;
+    if grab_focus {
+        resp.request_focus();
+    }
+    let t = anim(&ctx, ("card", i), ui.rect_contains_pointer(rect) || resp.has_focus(), 0.14);
+    let rect = rect.translate(egui::vec2(0.0, -3.0 * t)); // slight lift
+    let p = ui.painter_at(rect.expand(6.0));
+    p.rect_filled(rect, 0.0, mix(INK_2, Color32::from_rgb(0x13, 0x13, 0x1c), t));
+    let band = 82.0;
     let art = egui::Rect::from_min_max(rect.min, egui::pos2(rect.max.x, rect.max.y - band));
     let title = |size: f32, wrap: f32| p.layout(g.name.clone(), egui::FontId::new(size, cond()), PAPER, wrap);
-    if let Some(t) = cover {
+    if let Some(tx) = cover {
         // Fill the art area, cropping the overflow (centred).
-        let ts = t.size_vec2();
+        let ts = tx.size_vec2();
         let s = (art.width() / ts.x).max(art.height() / ts.y);
         let uv = egui::vec2(art.width() / s / ts.x, art.height() / s / ts.y);
         let uv = egui::Rect::from_center_size(egui::pos2(0.5, 0.5), uv);
-        p.image(t.id(), art, uv, Color32::WHITE);
-        let gal = title(20.0, art.width() - 24.0);
+        p.image(tx.id(), art, uv, mix(Color32::from_gray(215), Color32::WHITE, t));
+        let gal = title(22.0, art.width() - 24.0);
         let h = gal.size().y + 16.0;
         p.rect_filled(egui::Rect::from_min_max(egui::pos2(art.min.x, art.max.y - h), art.max), 0.0, Color32::from_black_alpha(190));
         p.galley(egui::pos2(art.min.x + 12.0, art.max.y - h + 8.0), gal, PAPER);
     } else {
         p.rect_filled(art, 0.0, INK_3);
         p.rect_filled(egui::Rect::from_min_size(art.min, egui::vec2(5.0, art.height())), 0.0, RED);
-        let gal = title(30.0, art.width() - 36.0);
+        let gal = title(34.0, art.width() - 40.0);
         let y = art.center().y - gal.size().y / 2.0;
-        p.galley(egui::pos2(art.min.x + 20.0, y), gal, PAPER);
+        p.galley(egui::pos2(art.min.x + 22.0, y), gal, PAPER);
     }
-    // Footer: platform badge + status.
-    let foot_y = rect.max.y - band / 2.0;
+    // The red bar above the footer grows from a stub to the full width on hover / focus.
+    let by = rect.max.y - band;
+    p.rect_filled(egui::Rect::from_min_size(egui::pos2(rect.min.x, by), egui::vec2(28.0 + (rect.width() - 28.0) * t, 3.0)), 0.0, RED_HI);
+    // Footer row 1: platform badge + status (icon + words).
+    let y1 = by + 22.0;
     let badge = p.layout_no_wrap(g.platform.to_uppercase(), egui::FontId::new(14.0, cond()), Color32::WHITE);
-    let br = egui::Rect::from_min_size(egui::pos2(rect.min.x + 12.0, foot_y - 11.0), badge.size() + egui::vec2(12.0, 4.0));
+    let br = egui::Rect::from_min_size(egui::pos2(rect.min.x + 12.0, y1 - 11.0), badge.size() + egui::vec2(12.0, 4.0));
     p.rect_filled(br, 0.0, RED);
     p.galley(br.min + egui::vec2(6.0, 2.0), badge, Color32::WHITE);
-    let (txt, col) = match st {
-        Status::Ready => ("Ready", PAPER),
-        Status::NeedsDisc => ("Needs disc", RED_HI),
-        Status::NotPlayable => ("Not playable yet", MUTED),
+    let (txt, col, ic) = match st {
+        Status::Ready => ("Ready", PAPER, Icon::Check),
+        Status::NeedsDisc => ("Set up", RED_HI, Icon::Ring),
+        Status::NotPlayable => ("Game exe missing", MUTED, Icon::Cross),
     };
-    let sg = p.layout_no_wrap(txt.into(), egui::FontId::proportional(14.0), col);
-    p.galley(egui::pos2(rect.max.x - 12.0 - sg.size().x, foot_y - sg.size().y / 2.0), sg, col);
-    p.rect_stroke(rect, 0.0, egui::Stroke::new(1.0, if hot { RED_HI } else { LINE }), egui::StrokeKind::Inside);
-    resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
+    let sg = p.layout_no_wrap(txt.into(), egui::FontId::proportional(15.0), col);
+    let sw = sg.size().x;
+    p.galley(egui::pos2(rect.max.x - 12.0 - sw, y1 - sg.size().y / 2.0), sg, col);
+    icon(&p, egui::pos2(rect.max.x - 12.0 - sw - 11.0, y1), ic, col);
+    p.rect_stroke(rect, 0.0, egui::Stroke::new(1.0, mix(LINE, RED_HI, t)), egui::StrokeKind::Inside);
+    if resp.has_focus() {
+        ring(&p, rect);
+    }
+    // Footer row 2: PLAY (ready) or SET UP (needs a disc).
+    let mut act = Act::None;
+    if st != Status::NotPlayable {
+        let b = egui::Rect::from_min_size(egui::pos2(rect.min.x + 12.0, rect.max.y - 40.0), egui::vec2(rect.width() - 24.0, 28.0));
+        let label = if st == Status::Ready { "Play" } else { "Set up" };
+        if red_button(ui, b, id(("cardbtn", i)), label, 18.0, false).clicked() {
+            act = if st == Status::Ready { Act::Play } else { Act::Open };
+        }
+    }
+    let enter = resp.has_focus() && ctx.input(|i| i.key_pressed(egui::Key::Enter));
+    if act == Act::None && enter {
+        act = if st == Status::Ready { Act::Play } else { Act::Open };
+    } else if act == Act::None && resp.clicked() && !enter {
+        act = Act::Open;
+    }
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+    act
 }
 
-/// Gear icon button (drawn: the embedded fonts have no gear glyph).
+/// Gear + "Settings" button (the gear is drawn: the embedded fonts have no gear glyph).
 fn gear_button(ui: &mut egui::Ui) -> bool {
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(38.0, 38.0), egui::Sense::click());
-    let col = if resp.hovered() { RED_HI } else { PAPER };
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(124.0, 38.0), egui::Sense::click());
+    let t = anim(ui.ctx(), "gear", resp.hovered() || resp.has_focus(), 0.12);
+    let col = mix(PAPER, RED_HI, t);
     let p = ui.painter();
     p.rect_filled(rect, 0.0, INK_3);
-    p.rect_stroke(rect, 0.0, egui::Stroke::new(1.0, if resp.hovered() { RED_HI } else { LINE }), egui::StrokeKind::Inside);
-    let c = rect.center();
+    p.rect_stroke(rect, 0.0, egui::Stroke::new(1.0, mix(LINE, RED_HI, t)), egui::StrokeKind::Inside);
+    let c = rect.left_center() + egui::vec2(20.0, 0.0);
     for i in 0..8 {
         let a = i as f32 * std::f32::consts::FRAC_PI_4;
         let d = egui::vec2(a.cos(), a.sin());
-        p.line_segment([c + d * 8.0, c + d * 12.0], egui::Stroke::new(4.0, col));
+        p.line_segment([c + d * 7.0, c + d * 10.5], egui::Stroke::new(3.5, col));
     }
-    p.circle_stroke(c, 8.0, egui::Stroke::new(3.0, col));
-    resp.on_hover_text("Settings").on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
+    p.circle_stroke(c, 6.5, egui::Stroke::new(2.5, col));
+    let g = p.layout_no_wrap("SETTINGS".into(), egui::FontId::new(16.0, cond()), col);
+    p.galley(egui::pos2(rect.min.x + 40.0, rect.center().y - g.size().y / 2.0), g, col);
+    if resp.has_focus() {
+        ring(p, rect);
+    }
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
 }
 
 fn grid_row(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui)) {
     ui.label(label);
-    add(ui);
+    ui.vertical(|ui| {
+        ui.spacing_mut().item_spacing.y = 3.0;
+        add(ui)
+    });
     ui.end_row();
 }
 
-fn play_button(ui: &mut egui::Ui) -> bool {
-    // Primary button like .btn-primary on the site (hover: #a80f1f).
-    ui.scope(|ui| {
-        let w = &mut ui.visuals_mut().widgets;
-        w.inactive.weak_bg_fill = RED;
-        w.inactive.bg_stroke = egui::Stroke::new(1.0, RED);
-        w.hovered.weak_bg_fill = Color32::from_rgb(0xa8, 0x0f, 0x1f);
-        let btn = egui::Button::new(caps("Play", 24.0).color(Color32::WHITE)).min_size(egui::vec2(ui.available_width(), 46.0));
-        ui.add(btn).clicked()
-    })
-    .inner
+fn grid(id: &str) -> egui::Grid {
+    egui::Grid::new(id).num_columns(2).min_col_width(130.0).spacing([10.0, 7.0])
+}
+
+fn video(ui: &mut egui::Ui, s: &mut GameSettings, c: &mut LauncherConfig) -> bool {
+    let mut dirty = false;
+    heading(ui, "VIDEO");
+    grid("video").show(ui, |ui| {
+        grid_row(ui, "Renderer", |ui| {
+            if combo(ui, "rend", &mut c.renderer, &[("software", "Software"), ("gpu", "GPU")]) {
+                if c.renderer != "gpu" {
+                    c.resolution = c.resolution.clamp(1, 4);
+                }
+                dirty = true;
+            }
+            hint(ui, "GPU: sharper and faster at high resolution (Windows). Software: most compatible.");
+        });
+        grid_row(ui, "Internal resolution", |ui| {
+            let gpu = c.renderer == "gpu";
+            let label = if c.resolution == 0 { "Auto".to_string() } else { format!("{}x", c.resolution) };
+            egui::ComboBox::from_id_salt("res").selected_text(label).width(170.0).show_ui(ui, |ui| {
+                for n in (if gpu { 0 } else { 1 })..=(if gpu { 9 } else { 4 }) {
+                    let l = if n == 0 { "Auto".to_string() } else { format!("{n}x") };
+                    dirty |= ui.selectable_value(&mut c.resolution, n, l).changed();
+                }
+            });
+            hint(ui, if s.fps > 60 { "Not used above 60 FPS (frame interpolation)." } else if gpu { "Multiplies the PS1 resolution; higher is sharper and heavier." } else { "Multiplies the PS1 resolution. Software stops at 4x; GPU goes higher." });
+        });
+        grid_row(ui, "Frame rate", |ui| {
+            ui.horizontal(|ui| {
+                for f in [30, 60, 90, 120] {
+                    dirty |= ui.selectable_value(&mut s.fps, f, format!("{f}")).changed();
+                }
+            });
+            hint(ui, if matches!(s.fps, 30 | 90) { "30 and 90 currently run at 60. 90/120 interpolate between frames: experimental." } else { "90/120 interpolate between frames: experimental, may show glitches." });
+        });
+        ui.horizontal(|ui| {
+            ui.label("Widescreen");
+            ui.label(RichText::new("EXPERIMENTAL").family(cond()).size(12.0).extra_letter_spacing(1.5).color(RED_HI));
+        });
+        ui.vertical(|ui| {
+            ui.spacing_mut().item_spacing.y = 3.0;
+            dirty |= combo(ui, "ws", &mut s.widescreen, &[("off", "Off (4:3)"), ("16:9", "16:9"), ("21:9", "21:9")]);
+            hint(ui, "Wider 3D view; some sprites and fades may glitch. 4:3 recommended.");
+        });
+        ui.end_row();
+        grid_row(ui, "Window mode", |ui| dirty |= combo(ui, "wm", &mut s.window_mode, &[("windowed", "Windowed"), ("fullscreen", "Fullscreen"), ("borderless", "Borderless")]));
+    });
+    dirty
+}
+
+fn audio_general(ui: &mut egui::Ui, s: &mut GameSettings, c: &mut LauncherConfig) -> bool {
+    let mut dirty = false;
+    heading(ui, "AUDIO");
+    grid("audio").show(ui, |ui| {
+        grid_row(ui, "Volume", |ui| {
+            ui.horizontal(|ui| {
+                let mut v = s.volume as f32;
+                if ui.add(egui::Slider::new(&mut v, 0.0..=100.0).integer()).changed() {
+                    s.volume = v as u32;
+                    dirty = true;
+                }
+                dirty |= ui.checkbox(&mut s.mute, "Mute").changed();
+            });
+        });
+    });
+    heading(ui, "GENERAL");
+    grid("general").show(ui, |ui| {
+        grid_row(ui, "Save folder", |ui| {
+            dirty |= path_row(ui, &mut s.save_dir, true, PathState::NotSet, "default location", || rfd::FileDialog::new().pick_folder());
+        });
+        grid_row(ui, "Game executable", |ui| {
+            let auto = if find_game_exe(c).is_some() { PathState::Found } else { PathState::Missing };
+            dirty |= path_row(ui, &mut c.game_exe, false, auto, "auto: next to the launcher", || rfd::FileDialog::new().pick_file());
+        });
+        grid_row(ui, "", |ui| dirty |= ui.checkbox(&mut s.pause_on_focus_loss, "Pause when unfocused").changed());
+        grid_row(ui, "", |ui| dirty |= ui.checkbox(&mut c.check_updates, "Check for updates on start").changed());
+        grid_row(ui, "", |ui| dirty |= ui.checkbox(&mut c.reduce_motion, "Reduce motion").changed());
+    });
+    dirty
 }
 
 impl App {
-    fn library(&mut self, ui: &mut egui::Ui) {
-        heading(ui, "LIBRARY");
+    fn library(&mut self, ui: &mut egui::Ui) -> Option<(usize, Act)> {
+        let ready = self.cfg.games.iter().filter(|g| status(&self.cfg, g) == Status::Ready).count();
+        let n = self.cfg.games.len();
+        ui.horizontal(|ui| {
+            heading(ui, "LIBRARY");
+            ui.add_space(6.0);
+            ui.label(RichText::new(format!("{n} game{} \u{b7} {ready} ready", if n == 1 { "" } else { "s" })).color(MUTED));
+        });
         let gap = 14.0;
         let cols = (((ui.available_width() + gap) / (CARD.x + gap)) as usize).max(1);
         let ctx = ui.ctx().clone();
-        let mut open = None;
+        let mut out = None;
+        ui.add_space(3.0);
         egui::Grid::new("lib").spacing([gap, gap]).show(ui, |ui| {
             for (i, g) in self.cfg.games.iter().enumerate() {
                 if !g.cover.is_empty() {
                     self.covers.entry(g.cover.clone()).or_insert_with(|| load_cover(&ctx, &g.cover));
                 }
                 let tex = self.covers.get(&g.cover).and_then(Option::as_ref);
-                if card(ui, g, status(&self.cfg, g), tex) {
-                    open = Some(i);
+                let a = card(ui, i, g, status(&self.cfg, g), tex, i == 0 && std::mem::take(&mut self.focus_first));
+                if a != Act::None {
+                    out = Some((i, a));
                 }
                 if (i + 1) % cols == 0 {
                     ui.end_row();
                 }
             }
         });
-        if let Some(i) = open {
-            self.open_game(i);
-        }
+        out
     }
 
-    fn open_game(&mut self, i: usize) {
+    fn select(&mut self, i: usize) {
         self.sel = i;
         // text_speed is per game: re-read it for this game's serials.
         self.settings.text_speed = GameSettings::from_value(&self.doc, &self.cfg.games[i].serials).text_speed;
-        self.page = Page::Game;
+    }
+
+    fn go(&mut self, ctx: &egui::Context, page: Page) {
+        self.dir = if page == Page::Library { -1.0 } else { 1.0 };
+        self.t0 = ctx.input(|i| i.time);
+        self.page = page;
     }
 
     /// Returns (dirty, play).
@@ -390,16 +630,22 @@ impl App {
         let mut dirty = false;
         let s = &mut self.settings;
         let g = &mut self.cfg.games[self.sel];
-        ui.label(RichText::new(g.name.clone()).family(cond()).size(26.0).extra_letter_spacing(2.0));
-        ui.label(RichText::new(g.platform.to_uppercase()).color(RED_HI));
-        egui::ScrollArea::vertical().max_height(ui.available_height() - 74.0).show(ui, |ui| {
+        let name = g.name.clone();
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(name.clone()).family(cond()).size(26.0).extra_letter_spacing(2.0));
+            ui.add_space(6.0);
+            ui.label(RichText::new(g.platform.to_uppercase()).family(cond()).size(18.0).color(RED_HI));
+        });
+        egui::ScrollArea::vertical().max_height(ui.available_height() - 66.0).auto_shrink([false, false]).show(ui, |ui| {
             heading(ui, "DISCS");
-            egui::Grid::new("discs").num_columns(2).min_col_width(130.0).show(ui, |ui| {
+            hint(ui, &format!("Pick the .cue of your own {name} disc image (Japanese and/or US release). The Language option below chooses which disc boots."));
+            ui.add_space(2.0);
+            grid("discs").show(ui, |ui| {
                 for (code, label) in [("ja", "Japanese disc"), ("en", "English disc")] {
                     grid_row(ui, label, |ui| {
                         let mut p = g.discs.get(code).cloned().unwrap_or_default();
                         let pick = || rfd::FileDialog::new().add_filter("Disc image", &["cue"]).pick_file();
-                        if path_row(ui, &mut p, pick) {
+                        if path_row(ui, &mut p, false, PathState::NotSet, "not set", pick) {
                             g.discs.insert(code.into(), p);
                             dirty = true;
                         }
@@ -407,91 +653,66 @@ impl App {
                 }
             });
             heading(ui, "OPTIONS");
-            egui::Grid::new("opts").num_columns(2).min_col_width(130.0).show(ui, |ui| {
+            grid("opts").show(ui, |ui| {
                 grid_row(ui, "Language", |ui| dirty |= combo(ui, "lang", &mut s.language, &[("ja", "Japanese"), ("en", "English")]));
                 grid_row(ui, "Text speed", |ui| dirty |= combo(ui, "ts", &mut s.text_speed, &[("normal", "Normal"), ("fast", "Fast"), ("instant", "Instant")]));
                 grid_row(ui, "Cover image (PNG)", |ui| {
                     let pick = || rfd::FileDialog::new().add_filter("PNG image", &["png"]).pick_file();
-                    dirty |= path_row(ui, &mut g.cover, pick);
+                    dirty |= path_row(ui, &mut g.cover, false, PathState::NotSet, "not set (title card)", pick);
                 });
             });
         });
-        if let Some(e) = &self.error {
-            ui.label(RichText::new(e).color(RED_HI).small());
-        }
         ui.add_space(4.0);
-        (dirty, play_button(ui))
+        let r = ui.allocate_space(egui::vec2(ui.available_width(), 46.0)).1;
+        let play = red_button(ui, r, id("play"), "Play", 24.0, true).clicked();
+        (dirty, play)
     }
 
     fn settings_page(&mut self, ui: &mut egui::Ui) -> bool {
-        let mut dirty = false;
-        let s = &mut self.settings;
-        let c = &mut self.cfg;
+        let (s, c) = (&mut self.settings, &mut self.cfg);
         ui.label(RichText::new("SETTINGS").family(cond()).size(26.0).extra_letter_spacing(2.0));
         ui.label(RichText::new("Shared by all games").color(MUTED));
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            heading(ui, "VIDEO");
-            egui::Grid::new("video").num_columns(2).min_col_width(130.0).show(ui, |ui| {
-                grid_row(ui, "Renderer", |ui| {
-                    if combo(ui, "rend", &mut c.renderer, &[("software", "Software"), ("gpu", "GPU")]) {
-                        if c.renderer != "gpu" {
-                            c.resolution = c.resolution.clamp(1, 4);
-                        }
-                        dirty = true;
-                    }
+        let mut dirty = false;
+        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+            if ui.available_width() >= 800.0 {
+                ui.columns(2, |col| {
+                    dirty |= video(&mut col[0], s, c);
+                    dirty |= audio_general(&mut col[1], s, c);
                 });
-                grid_row(ui, "Internal resolution", |ui| {
-                    let gpu = c.renderer == "gpu";
-                    let label = if c.resolution == 0 { "Auto".to_string() } else { format!("{}x", c.resolution) };
-                    egui::ComboBox::from_id_salt("res").selected_text(label).width(170.0).show_ui(ui, |ui| {
-                        let max = if gpu { 9 } else { 4 };
-                        for n in (if gpu { 0 } else { 1 })..=max {
-                            let l = if n == 0 { "Auto".to_string() } else { format!("{n}x") };
-                            dirty |= ui.selectable_value(&mut c.resolution, n, l).changed();
-                        }
-                    });
-                });
-                grid_row(ui, "Frame rate", |ui| {
-                    ui.horizontal(|ui| {
-                        for f in [30, 60, 90, 120] {
-                            dirty |= ui.selectable_value(&mut s.fps, f, format!("{f}")).changed();
-                        }
-                    });
-                });
-                grid_row(ui, "Widescreen", |ui| dirty |= combo(ui, "ws", &mut s.widescreen, &[("off", "Off (4:3)"), ("16:9", "16:9"), ("21:9", "21:9")]));
-                grid_row(ui, "Window mode", |ui| dirty |= combo(ui, "wm", &mut s.window_mode, &[("windowed", "Windowed"), ("fullscreen", "Fullscreen"), ("borderless", "Borderless")]));
-            });
-            if matches!(s.fps, 30 | 90) {
-                ui.label(RichText::new("30 and 90 FPS currently run at 60.").small().color(Color32::GRAY));
+            } else {
+                dirty |= video(ui, s, c);
+                dirty |= audio_general(ui, s, c);
             }
-            heading(ui, "AUDIO");
-            egui::Grid::new("audio").num_columns(2).min_col_width(130.0).show(ui, |ui| {
-                grid_row(ui, "Volume", |ui| {
-                    ui.horizontal(|ui| {
-                        let mut v = s.volume as f32;
-                        if ui.add(egui::Slider::new(&mut v, 0.0..=100.0).integer()).changed() {
-                            s.volume = v as u32;
-                            dirty = true;
-                        }
-                        dirty |= ui.checkbox(&mut s.mute, "Mute").changed();
-                    });
-                });
-            });
-            heading(ui, "GENERAL");
-            egui::Grid::new("general").num_columns(2).min_col_width(130.0).show(ui, |ui| {
-                grid_row(ui, "Save folder", |ui| dirty |= path_row(ui, &mut s.save_dir, || rfd::FileDialog::new().pick_folder()));
-                grid_row(ui, "Game executable", |ui| dirty |= path_row(ui, &mut c.game_exe, || rfd::FileDialog::new().pick_file()));
-                grid_row(ui, "", |ui| dirty |= ui.checkbox(&mut s.pause_on_focus_loss, "Pause when unfocused").changed());
-                grid_row(ui, "", |ui| dirty |= ui.checkbox(&mut c.check_updates, "Check for updates on start").changed());
-            });
         });
         dirty
+    }
+
+    /// Hidden `--shot <file.png>`: save the window's own pixels after a few frames, then quit.
+    fn screenshot(&mut self, ctx: &egui::Context) {
+        let Some(path) = self.shot.clone() else { return };
+        self.frames += 1;
+        ctx.send_viewport_cmd(ViewportCommand::Focus); // focus rings only draw in a focused window
+        ctx.request_repaint();
+        if self.frames == 8 {
+            ctx.request_screenshot(move |img| {
+                let save = || -> Option<()> {
+                    let mut enc = png::Encoder::new(std::io::BufWriter::new(std::fs::File::create(&path).ok()?), img.width() as u32, img.height() as u32);
+                    enc.set_color(png::ColorType::Rgba);
+                    enc.set_depth(png::BitDepth::Eight);
+                    let px: Vec<u8> = img.pixels.iter().flat_map(|c| c.to_array()).collect();
+                    enc.write_header().ok()?.write_image_data(&px).ok()
+                };
+                let _ = save();
+                std::process::exit(0);
+            });
+        }
     }
 }
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        REDUCE.store(self.cfg.reduce_motion, Ordering::Relaxed);
         let mut dirty = false;
         let mut play = false;
         let mut start: Option<update::Release> = None;
@@ -507,29 +728,36 @@ impl eframe::App for App {
                 }
             }
         }
+        self.screenshot(&ctx);
+        if self.page != Page::Library && ctx.input(|i| i.key_pressed(egui::Key::Escape)) && !ctx.egui_wants_keyboard_input() && !egui::Popup::is_any_open(&ctx) {
+            { self.error = None; self.go(&ctx, Page::Library); }
+        }
         egui::CentralPanel::default().show(ui, |ui| {
-            egui::Frame::new().inner_margin(egui::Margin::symmetric(20, 14)).show(ui, |ui| {
+            egui::Frame::new().inner_margin(egui::Margin::symmetric(20, 12)).show(ui, |ui| {
                 ui.horizontal(|ui| {
                     if let Some(t) = &self.logo {
-                        ui.add(egui::Image::new(t).fit_to_exact_size(egui::vec2(52.0, 52.0)));
+                        ui.add(egui::Image::new(t).fit_to_exact_size(egui::vec2(48.0, 48.0)));
                     }
                     ui.vertical(|ui| {
                         ui.spacing_mut().item_spacing.y = 0.0;
                         ui.label(RichText::new("PersonaRM").family(cond()).size(30.0).extra_letter_spacing(4.0));
-                        ui.label(RichText::new(format!("launcher v{}", update::VERSION)).color(MUTED));
+                        ui.label(RichText::new(format!("Release v{}", update::VERSION.trim_start_matches('v'))).color(MUTED));
                     });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if self.page == Page::Library {
                             if gear_button(ui) {
-                                self.page = Page::Settings;
+                                { self.error = None; self.go(&ctx, Page::Settings); }
                             }
-                        } else if ui.add(egui::Button::new(caps("\u{2190} Back", 16.0))).clicked() {
-                            self.page = Page::Library;
-                            self.error = None;
+                        } else if ui.add(egui::Button::new(caps("Back", 16.0))).on_hover_text("Esc").clicked() {
+                            { self.error = None; self.go(&ctx, Page::Library); }
                         }
                     });
                 });
                 ui.separator();
+                if let Some(e) = &self.error {
+                    ui.label(RichText::new(e).color(RED_HI));
+                }
+                let bt = anim(&ctx, "banner", matches!(self.upd, Upd::Available(_)), 0.18);
                 match &self.upd {
                     Upd::None => {}
                     Upd::Working => {
@@ -539,24 +767,46 @@ impl eframe::App for App {
                         ui.label(RichText::new(format!("Update failed: {e}")).color(RED_HI).small());
                     }
                     Upd::Available(r) => {
-                        egui::Frame::new().fill(INK_3).stroke(egui::Stroke::new(1.0, RED_DEEP)).inner_margin(egui::Margin::symmetric(12, 8)).show(ui, |ui| {
-                            ui.horizontal(|ui| {
-                                ui.label(RichText::new(format!("Update available   v{}  to  {}", update::VERSION, r.tag)).family(cond()).size(17.0).extra_letter_spacing(1.0));
-                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    if ui.add(egui::Button::new(caps("Update", 15.0).color(Color32::WHITE)).fill(RED)).clicked() {
-                                        start = Some(r.clone());
-                                    }
-                                });
-                            });
-                        });
+                        // Slides down from under the header: a clipped child shifted up by (1 - t) * h.
+                        let h = 40.0;
+                        let (slot, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), (h + 6.0) * bt), egui::Sense::hover());
+                        let mut c = ui.new_child(egui::UiBuilder::new().max_rect(egui::Rect::from_min_size(slot.min - egui::vec2(0.0, h * (1.0 - bt)), egui::vec2(slot.width(), h))));
+                        c.set_clip_rect(slot);
+                        c.multiply_opacity(bt);
+                        let br = c.max_rect();
+                        c.painter().rect_filled(br, 0.0, INK_3);
+                        c.painter().rect_stroke(br, 0.0, egui::Stroke::new(1.0, RED_DEEP), egui::StrokeKind::Inside);
+                        c.painter().rect_filled(egui::Rect::from_min_size(br.min, egui::vec2(4.0, h)), 0.0, RED_HI);
+                        let txt = c.painter().layout_no_wrap(format!("Update available   v{}  to  {}", update::VERSION.trim_start_matches('v'), r.tag), egui::FontId::new(17.0, cond()), PAPER);
+                        c.painter().galley(egui::pos2(br.min.x + 16.0, br.center().y - txt.size().y / 2.0), txt, PAPER);
+                        let b = egui::Rect::from_center_size(egui::pos2(br.max.x - 52.0, br.center().y), egui::vec2(88.0, 28.0));
+                        if red_button(&mut c, b, id("upd"), "Update", 15.0, true).clicked() {
+                            start = Some(r.clone());
+                        }
                     }
                 }
-                match self.page {
-                    Page::Library => {
-                        egui::ScrollArea::vertical().show(ui, |ui| self.library(ui));
+                // Page change: the new page slides in 28 px (from the right going deeper, from the left going back) and fades up.
+                let e = if REDUCE.load(Ordering::Relaxed) { 1.0 } else { ((ctx.input(|i| i.time) - self.t0) as f32 / 0.18).clamp(0.0, 1.0) };
+                if e < 1.0 {
+                    ctx.request_repaint();
+                }
+                let off = (1.0 - egui::emath::easing::cubic_out(e)) * 28.0 * self.dir;
+                let area = ui.available_rect_before_wrap();
+                let mut open = None;
+                ui.scope_builder(egui::UiBuilder::new().max_rect(area.translate(egui::vec2(off, 0.0))), |ui| {
+                    ui.multiply_opacity(e);
+                    match self.page {
+                        Page::Library => egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| open = self.library(ui)).inner,
+                        Page::Game => (dirty, play) = self.game_page(ui),
+                        Page::Settings => dirty = self.settings_page(ui),
                     }
-                    Page::Game => (dirty, play) = self.game_page(ui),
-                    Page::Settings => dirty = self.settings_page(ui),
+                });
+                if let Some((i, a)) = open {
+                    self.select(i);
+                    match a {
+                        Act::Play => play = true,
+                        _ => { self.error = None; self.go(&ctx, Page::Game) }
+                    }
                 }
             });
         });
@@ -629,7 +879,7 @@ fn main() -> eframe::Result {
     });
     let mut vp = egui::ViewportBuilder::default()
         .with_title("PersonaRM")
-        .with_inner_size([940.0, 680.0])
+        .with_inner_size([960.0, 740.0])
         .with_min_inner_size([480.0, 520.0]);
     if let Some(i) = icon {
         vp = vp.with_icon(i);
