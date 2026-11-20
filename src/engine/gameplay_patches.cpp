@@ -229,4 +229,9 @@ std::vector<GamePatch> BuildGamePatches(const std::string& serial, const Gamepla
     return patches;
 }
 
+uint32_t SceneModeAddress(const std::string& serial) {
+    const std::string disc = Normalize(serial);
+    return disc == "SLPS02785" ? 0x8007E298u : disc == "SLUS01158" ? 0x8007F9B8u : 0u;
+}
+
 } // namespace personarm

@@ -46,9 +46,9 @@ int main() {
         "audio": {"master_volume": 55.5, "mute": true},
         "general": {"pause_on_focus_loss": false},
         "input": {"keyboard": {"cross": ["Space", "X"], "bogus": ["A"], "start": "Return", "up": ["Up", 3]}},
-        "game": {"SLPS-02192": {"memcard1": "a.mcd", "text_speed": "fast", "encounter_rate": "reduced", "skip_fmv": true, "recomp": true, "note": "x"},
-                 "SLPS-02193": {"text_speed": "warp", "encounter_rate": "rare", "skip_fmv": "yes"}, "SLPS-1": 5}})", &w);
-    CHECK(w.size() == 10);
+        "game": {"SLPS-02192": {"memcard1": "a.mcd", "text_speed": "fast", "encounter_rate": "reduced", "skip_fmv": true, "battle_speed": 3, "recomp": true, "note": "x"},
+                 "SLPS-02193": {"text_speed": "warp", "encounter_rate": "rare", "skip_fmv": "yes", "battle_speed": 5}, "SLPS-1": 5}})", &w);
+    CHECK(w.size() == 11);
     CHECK(s.video.window_mode == "borderless" && s.video.window_scale == 3 && !s.video.vsync);
     CHECK(s.video.aspect == "stretch" && InterpHz(s.video) == 120 && s.video.resolution_scale == 2);
     CHECK(s.audio.master_volume == 100 && s.audio.mute && !s.pause_on_focus_loss);
@@ -65,6 +65,7 @@ int main() {
     CHECK(GameFor(s, "SLPS-02192").text_speed == "fast" && GameFor(s, "SLPS-02193").text_speed.empty());
     CHECK(GameFor(s, "SLPS-02192").encounter_rate == "reduced" && GameFor(s, "SLPS-02193").encounter_rate.empty());
     CHECK(GameFor(s, "SLPS-02192").skip_fmv == true && !GameFor(s, "SLPS-02193").skip_fmv);
+    CHECK(GameFor(s, "SLPS-02192").battle_speed == 3 && GameFor(s, "SLPS-02193").battle_speed == 0);
     CHECK(GameFor(s, "SLPS-02194").Empty());
 
     // Garbage never crashes.
@@ -81,7 +82,7 @@ int main() {
     const std::string out = DumpSettings(s);
     w.clear();
     Settings r = ParseSettings(out, &w);
-    CHECK(w.size() == 5);  // the preserved bad entries: action "bogus", game "SLPS-1", text_speed "warp", encounter_rate "rare", skip_fmv "yes"
+    CHECK(w.size() == 6);  // the preserved bad entries: action "bogus", game "SLPS-1", text_speed "warp", encounter_rate "rare", skip_fmv "yes", battle_speed 5
     CHECK(r.raw.Find("launcher")->Find("theme")->AsString() == "dark");
     CHECK(r.raw.Find("video")->Has("future_key"));
     CHECK(r.raw.Find("game")->Find("SLPS-02192")->Has("note"));
@@ -101,13 +102,13 @@ int main() {
     CHECK(GameFor(none, "SLPS-02192").memcard[0] == "file.mcd");
     CHECK(none.video.window_mode == "windowed");  // default under the file
     Settings cli = ApplyCli(file, Args({"d.cue", "--window-scale", "4", "--interp", "0", "--volume", "0", "--mute",
-                                        "--memcard1", "cli.mcd", "--text-speed", "instant", "--encounters", "none", "--skip-fmv", "--window-mode", "fullscreen",
+                                        "--memcard1", "cli.mcd", "--text-speed", "instant", "--encounters", "none", "--skip-fmv", "--battle-speed", "2", "--window-mode", "fullscreen",
                                         "--recomp"}), "SLPS-02192");
     CHECK(cli.video.window_scale == 4 && cli.video.fps_target == 60 && InterpHz(cli.video) == 0 && cli.audio.master_volume == 0 && cli.audio.mute);
     CHECK(cli.video.window_mode == "fullscreen");
     const GameSettings g = GameFor(cli, "SLPS-02192");
     CHECK(g.memcard[0] == "cli.mcd" && g.text_speed == "instant" && g.mods == "m" && g.recomp == true);
-    CHECK(g.encounter_rate == "none" && g.skip_fmv == true);
+    CHECK(g.encounter_rate == "none" && g.skip_fmv == true && g.battle_speed == 2);
     CHECK(GameFor(cli, "OTHER").memcard[0].empty());  // CLI game options belong to this disc only
     // Empty CLI + unknown disc adds no empty game entry.
     CHECK(ApplyCli(file, Args({"d.cue"}), "NEW").games.count("NEW") == 0);

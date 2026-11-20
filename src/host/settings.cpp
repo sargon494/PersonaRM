@@ -143,6 +143,7 @@ Settings ParseSettings(const std::string& text, std::vector<std::string>* w) {
             GetString(&g, where, "mods", gs.mods, w);
             GetEnum(&g, where, "text_speed", {"normal", "fast", "instant"}, gs.text_speed, w);
             GetEnum(&g, where, "encounter_rate", {"normal", "reduced", "none"}, gs.encounter_rate, w);
+            GetInt(&g, where.c_str(), "battle_speed", 1, 3, gs.battle_speed, w);
             for (auto [key, out] : {std::pair<const char*, std::optional<bool>*>{"recomp", &gs.recomp}, {"skip_fmv", &gs.skip_fmv}}) {
                 if (Missing(&g, key)) continue;
                 if (g.Find(key)->IsBool()) *out = g.Find(key)->AsBool();
@@ -204,6 +205,7 @@ std::string DumpSettings(const Settings& s) {
         if (!gs.encounter_rate.empty()) o.Set("encounter_rate", gs.encounter_rate);
         if (gs.recomp) o.Set("recomp", *gs.recomp);
         if (gs.skip_fmv) o.Set("skip_fmv", *gs.skip_fmv);
+        if (gs.battle_speed) o.Set("battle_speed", gs.battle_speed);
         games.Set(serial, o);
     }
     doc.Set("game", games);
@@ -242,6 +244,7 @@ Settings ApplyCli(Settings s, const HostOptions& o, const std::string& serial) {
     if (!o.mods.empty()) g.mods = o.mods;
     if (o.recomp) g.recomp = true;
     if (o.skip_fmv) g.skip_fmv = true;
+    if (o.battle_speed) g.battle_speed = o.battle_speed;
     if (!g.Empty()) s.games[serial] = g;
     return s;
 }

@@ -109,6 +109,11 @@ int main() {
     CHECK(word(sj[0].expect[0].bytes, 7 * 4) == 0x08024F0Cu);                                   // was j 0x80093C30
     CHECK(su[0].write.address == 0x80097B64u && word(su[0].write.bytes, 0) == 0x08025EE2u);   // US: slot 0x80097000
 
+    // Battle flag: scene mode word per disc; mode 2 (field encounters store 0x1002) = battle overlay.
+    CHECK(SceneModeAddress("SLPS_027.85") == 0x8007E298u && SceneModeAddress("SLUS-01158") == 0x8007F9B8u);
+    CHECK(SceneModeAddress("SLPS-02786") == 0 && SceneModeAddress("") == 0);
+    CHECK(IsBattleScene(0x1002) && IsBattleScene(2) && !IsBattleScene(0) && !IsBattleScene(4) && !IsBattleScene(0xA));
+
     std::printf("test_gameplay_patches: %d failures\n", g_fail);
     return g_fail == 0 ? 0 : 1;
 }

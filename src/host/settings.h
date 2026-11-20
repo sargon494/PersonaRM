@@ -36,9 +36,10 @@ struct AudioSettings { int master_volume = 100; bool mute = false; };
 struct GameSettings {
     std::string memcard[2], text_speed, encounter_rate, mods;
     std::optional<bool> recomp, skip_fmv;
+    int battle_speed = 0;  // 1..3, 0 = not set
     bool Empty() const {
         return memcard[0].empty() && memcard[1].empty() && text_speed.empty() && encounter_rate.empty() && mods.empty() &&
-               !recomp && !skip_fmv;
+               !recomp && !skip_fmv && !battle_speed;
     }
 };
 

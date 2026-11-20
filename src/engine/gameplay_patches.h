@@ -42,4 +42,10 @@ GameplayOptions LoadGameplayMods(const std::string& mods_dir, const std::string&
 /// An option the disc has no patch for is logged and left out.
 std::vector<GamePatch> BuildGamePatches(const std::string& serial, const GameplayOptions& options);
 
+/// RAM word holding the scene mode of the disc (game state +0x10B0: 0x8007E298 JP disc 1, 0x8007F9B8 US), 0 when
+/// unknown. The scene loop loads the overlay of table entry (mode & 0xFF); 2 = F0789, the battle overlay (field
+/// encounters store 0x1002).
+uint32_t SceneModeAddress(const std::string& serial);
+inline bool IsBattleScene(uint32_t mode) { return (mode & 0xFFu) == 2u; }
+
 } // namespace personarm

@@ -165,6 +165,7 @@ bool ParseHostArgs(int argc, const char* const* argv, HostOptions& o) {
                 if (std::strcmp(v, "normal") && std::strcmp(v, "fast") && std::strcmp(v, "instant")) return false;
                 o.text_speed = v;
             }
+            else if (is("--battle-speed")) { o.battle_speed = std::atoi(v); if (o.battle_speed < 1 || o.battle_speed > 3) return false; }
             else if (is("--encounters")) {
                 if (std::strcmp(v, "normal") && std::strcmp(v, "reduced") && std::strcmp(v, "none")) return false;
                 o.encounters = v;
@@ -180,6 +181,11 @@ bool ParseHostArgs(int argc, const char* const* argv, HostOptions& o) {
     return !o.disc.empty() && (o.interp_hz == 0 || o.interp_hz == 30 || (o.interp_hz > 0 && o.interp_hz % 60 == 0) || o.interp_hz == 90) && o.recomp_quantum > 0 &&
            o.resolution_scale >= (o.renderer == "software" ? 1u : 0u) && o.resolution_scale <= (o.renderer == "software" ? 4u : 9u) &&
            !(o.renderer == "software" && o.interp_hz > 60 && o.resolution_scale != 1);
+}
+
+int FrameSpeed(bool fast_forward, int ff_max, bool in_battle, int battle_speed) {
+    if (fast_forward) return ff_max;
+    return in_battle ? std::clamp(battle_speed, 1, 3) : 1;
 }
 
 std::vector<double> PresentPhases(int hz, uint64_t frame) {

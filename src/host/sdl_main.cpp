@@ -58,6 +58,8 @@ static void Usage() {
                          "                       (scripted and boss battles stay). Disc 1 (JP, US) only\n"
                          "  --skip-fmv           Start ends any movie (the game's own skip; without this flag only\n"
                          "                       some movies can be skipped). Disc 1 (JP, US) only\n"
+                         "  --battle-speed N     1 (default), 2 or 3 emulated frames per 1/60 s while in battle (like\n"
+                         "                       fast-forward: one picture in N, battle sound dropped). Disc 1 (JP, US) only\n"
                          "  --stats             per second: game flips, distinct pictures, interpolable pairs\n"
                          "  --memcard1 F, --memcard2 F   memory card in slot 1/2: raw 128 KB .mcd, created and\n"
                          "                       formatted if missing, rewritten atomically when the game saves\n"
@@ -357,6 +359,13 @@ int main(int argc, char** argv) {
     // Fast-forward (held): up to fast_forward_max emulated frames per 1/60 s, one picture each, audio dropped.
     const int ff_max = std::clamp(cfg.video.fast_forward_max, 2, 16);
     uint64_t ff_frames = 0;
+    // battle_speed: the same, automatically, while the scene mode says battle (game.<serial>.battle_speed).
+    const int battle_speed = game.battle_speed > 1 ? game.battle_speed : 1;
+    const uint32_t scene_mode_addr = battle_speed > 1 ? SceneModeAddress(engine.DiscSerial()) : 0;
+    if (battle_speed > 1 && !scene_mode_addr)
+        std::fprintf(stderr, "[gameplay] battle_speed=%d: no battle flag known for disc %s, ignored\n", battle_speed,
+                     engine.DiscSerial().empty() ? "(unrecognized)" : engine.DiscSerial().c_str());
+    else if (battle_speed > 1) std::printf("[gameplay] battle_speed=%d\n", battle_speed);
 
     if (opt.load_slot >= 0) { state_slot = opt.load_slot; load_state(); }  // reproduce a reported moment
     while (!quit && engine.GetState() == EngineState::Running && (!max_frames || engine.GetFrameCount() < max_frames)) {
@@ -418,7 +427,9 @@ int main(int argc, char** argv) {
         bool ff = ks[SDL_SCANCODE_TAB];
         for (SDL_Gamepad* g : gamepads) ff |= SDL_GetGamepadButton(g, SDL_GAMEPAD_BUTTON_RIGHT_STICK);
         if (title_until && SDL_GetTicksNS() > title_until) { SDL_SetWindowTitle(window, "PersonaRM"); title_until = 0; }
-        const uint64_t slot_ns = frame_ns / uint64_t(ff ? ff_max : 1);  // wall time per emulated frame
+        const bool in_battle = scene_mode_addr && IsBattleScene(engine.Read(scene_mode_addr, 4));
+        const int speed = host::FrameSpeed(ff, ff_max, in_battle, battle_speed);
+        const uint64_t slot_ns = frame_ns / uint64_t(speed);  // wall time per emulated frame
         auto pace = [&](uint64_t ns) {
             if (unthrottled) return;
             const uint64_t now = SDL_GetTicksNS();  // wait for this slot's deadline, then book the next one
@@ -437,7 +448,7 @@ int main(int argc, char** argv) {
 
         engine.TakeAudio(pcm);
         audio_samples += pcm.size();
-        if (audio && !pcm.empty() && !ff) {  // fast-forward: dropped (no pitched or broken audio)
+        if (audio && !pcm.empty() && speed == 1) {  // fast-forward / battle speed: dropped (no pitched or broken audio)
             // Keep latency bounded if the emulator ran ahead of the device clock (> 0.25 s queued).
             if (SDL_GetAudioStreamQueued(audio) > 44100 * 4 / 4) SDL_ClearAudioStream(audio);
             SDL_PutAudioStreamData(audio, pcm.data(), int(pcm.size() * sizeof(int16_t)));
@@ -489,7 +500,7 @@ int main(int argc, char** argv) {
         }
 
         // Fast-forward presents one emulated frame out of ff_max (the display rate stays ~60 Hz, vsync or not).
-        if (ff && ++ff_frames % uint64_t(ff_max) != 0 && !(max_frames && frame >= max_frames)) {
+        if (speed > 1 && ++ff_frames % uint64_t(speed) != 0 && !(max_frames && frame >= max_frames)) {
             pace(slot_ns);
             continue;
         }
