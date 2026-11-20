@@ -26,8 +26,11 @@ struct Match {
 };
 Match MatchPrimitives(const std::vector<uint32_t>& prev, const std::vector<uint32_t>& cur, int32_t max_jump);
 
-/// `cur` with every matched primitive's vertices at prev + (cur - prev) * t (rounded), unless one of
-/// them moved more than `max_jump` pixels on an axis (teleport / wrong pair: drawn as in cur).
+/// `cur` with its vertices moved back towards prev by (cur - prev) * (1 - t), unless a pair moved more
+/// than `max_jump` pixels on an axis (teleport: drawn as in cur). Lines and rectangles are lerped on their
+/// own. Polygons move per vertex position, as meshes: one motion per shared vertex (wrong same-key
+/// partners outvoted), unpaired polygons carried by the vertices they share, each mesh sliding as one
+/// and switching its small shape changes once at t = 0.5 (no edge grows and shrinks between two frames).
 void LerpCommands(const std::vector<uint32_t>& prev, const std::vector<uint32_t>& cur, const Match& m, double t,
                   int32_t max_jump, std::vector<uint32_t>& out);
 

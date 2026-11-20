@@ -66,6 +66,9 @@ uint64_t Key(const uint32_t* w, uint32_t n) {
 }
 
 int32_t Sx(uint32_t v) { return static_cast<int32_t>((v & 0x7FF) << 21) >> 21; }
+// Offsets (not positions) are rounded, half away from zero: ties go the same way for every vertex moving
+// the same way, wherever it is on screen (positions straddling 0 would round apart).
+int32_t Round(double v) { return int32_t(std::lround(v)); }
 
 } // namespace
 
@@ -111,23 +114,142 @@ Match MatchPrimitives(const std::vector<uint32_t>& prev, const std::vector<uint3
 void LerpCommands(const std::vector<uint32_t>& prev, const std::vector<uint32_t>& cur, const Match& m, double t,
                   int32_t max_jump, std::vector<uint32_t>& out) {
     out = cur;
-    size_t pk = 0;
     int slot[4];
+    auto put = [&](size_t w, int32_t ox, int32_t oy) {  // vertex word w at cur - offset
+        out[w] = (uint32_t(Sx(cur[w]) - ox) & 0xFFFF) | uint32_t(Sx(cur[w] >> 16) - oy) << 16;
+    };
+    // Pass 1: the motion (cur - prev) of every vertex of a usable pair, keyed by its position in cur.
+    struct Vote { uint32_t xy; int32_t dx, dy, prim; };
+    std::vector<Vote> votes;
+    int32_t prims = 0;
+    size_t pk = 0;
     for (size_t i = 0; i < cur.size(); i += 1 + cur[i], ++pk) {
         const int32_t p = pk < m.prev_of.size() ? m.prev_of[pk] : -1;
         if (p < 0) continue;
         const int nv = Slots(&cur[i], slot);
+        Vote v[4];
         bool ok = true;
         for (int k = 0; k < nv && ok; ++k) {
             const uint32_t a = prev[p + 1 + slot[k]], b = cur[i + 1 + slot[k]];
-            ok = std::abs(Sx(b) - Sx(a)) <= max_jump && std::abs(Sx(b >> 16) - Sx(a >> 16)) <= max_jump;
+            v[k] = {b & 0x07FF07FF, Sx(b) - Sx(a), Sx(b >> 16) - Sx(a >> 16), prims};
+            ok = std::abs(v[k].dx) <= max_jump && std::abs(v[k].dy) <= max_jump;
         }
-        if (!ok) continue;
+        if (ok && nv >= 3) votes.insert(votes.end(), v, v + nv), ++prims;
+        else if (ok)  // lines and rectangles are no mesh: lerped on their own
+            for (int k = 0; k < nv; ++k) put(i + 1 + slot[k], Round(v[k].dx * (1 - t)), Round(v[k].dy * (1 - t)));
+    }
+    // One motion per vertex position: primitives of a mesh share their vertices, and same-key partners
+    // (repeated tiles, pillar strips, glass fans) can pair one primitive with a neighbour's previous
+    // place; lerped per primitive, the shared vertex would land in two places that change every picture
+    // (seams opening and closing). Where the votes of a shared vertex disagree, the odd ones out of an
+    // agreeing group, else the pair(s) disagreeing at the most shared vertices, are wrong partners: they
+    // cast no vote and are carried by their neighbours (pass 2). The (lower) median of the remaining
+    // votes moves each vertex once for all.
+    std::sort(votes.begin(), votes.end(), [](const Vote& x, const Vote& y) { return x.xy < y.xy; });
+    auto group = [&votes](size_t a) { size_t b = a; while (b < votes.size() && votes[b].xy == votes[a].xy) ++b; return b; };
+    std::vector<uint8_t> same(votes.size());               // the vote agrees (1 px) with another one at its vertex
+    std::vector<int32_t> odd(static_cast<size_t>(prims));  // per pair: shared vertices where it agrees with nobody
+    std::vector<uint8_t> wrong(static_cast<size_t>(prims));
+    for (size_t a = 0, b; a < votes.size(); a = b) {
+        b = group(a);
+        for (size_t i = a; i < b && b - a > 1; ++i) {
+            for (size_t j = a; j < b && !same[i]; ++j)
+                same[i] = j != i && std::abs(votes[j].dx - votes[i].dx) <= 1 && std::abs(votes[j].dy - votes[i].dy) <= 1;
+            odd[size_t(votes[i].prim)] += !same[i];
+        }
+    }
+    for (size_t a = 0, b; a < votes.size(); a = b) {
+        b = group(a);
+        bool cluster = false;
+        int32_t worst = 0;
+        for (size_t i = a; i < b && b - a > 1; ++i)
+            if (same[i]) cluster = true;
+            else worst = std::max(worst, odd[size_t(votes[i].prim)]);
+        for (size_t i = a; i < b && b - a > 1; ++i)
+            if (!same[i] && (cluster || odd[size_t(votes[i].prim)] == worst)) wrong[size_t(votes[i].prim)] = 1;
+    }
+    struct Field { int32_t dx, dy, root; };
+    std::vector<Field> field;
+    std::unordered_map<uint32_t, int32_t> at;  // vertex position in cur -> field entry
+    std::vector<int32_t> xs, ys;
+    for (size_t a = 0, b; a < votes.size(); a = b) {
+        xs.clear(), ys.clear();
+        for (b = a; b < votes.size() && votes[b].xy == votes[a].xy; ++b)
+            if (!wrong[size_t(votes[b].prim)]) xs.push_back(votes[b].dx), ys.push_back(votes[b].dy);
+        if (xs.empty()) continue;
+        std::nth_element(xs.begin(), xs.begin() + (xs.size() - 1) / 2, xs.end());
+        std::nth_element(ys.begin(), ys.begin() + (ys.size() - 1) / 2, ys.end());
+        at[votes[a].xy] = int32_t(field.size());
+        field.push_back({xs[(xs.size() - 1) / 2], ys[(ys.size() - 1) / 2], int32_t(field.size())});
+    }
+    // A polygon without a usable pair (entering the view, a silhouette strip turning visible, a wrong
+    // partner) follows the vertices it shares with moved ones, its others by their mean motion, instead
+    // of tearing away from them (repeated: it may share them with another such polygon); one sharing none
+    // is drawn as in cur.
+    std::vector<size_t> polys;
+    for (size_t i = 0; i < cur.size(); i += 1 + cur[i])
+        if (Slots(&cur[i], slot) >= 3) polys.push_back(i);
+    for (bool grew = true; grew;) {
+        grew = false;
+        for (size_t i : polys) {
+            const int nv = Slots(&cur[i], slot);
+            int32_t mx = 0, my = 0, found = 0;
+            for (int k = 0; k < nv; ++k)
+                if (auto it = at.find(cur[i + 1 + slot[k]] & 0x07FF07FF); it != at.end())
+                    mx += field[size_t(it->second)].dx, my += field[size_t(it->second)].dy, ++found;
+            if (!found || found == nv) continue;
+            for (int k = 0; k < nv; ++k)
+                if (at.try_emplace(cur[i + 1 + slot[k]] & 0x07FF07FF, int32_t(field.size())).second)
+                    field.push_back({Round(double(mx) / found), Round(double(my) / found), int32_t(field.size())});
+            grew = true;
+        }
+    }
+    // Meshes: the vertices of each polygon are joined (union-find over the field).
+    auto root = [&field](int32_t x) {
+        while (field[size_t(x)].root != x) x = field[size_t(x)].root = field[size_t(field[size_t(x)].root)].root;
+        return x;
+    };
+    for (size_t i : polys) {
+        const int nv = Slots(&cur[i], slot);
+        auto it = at.find(cur[i + 1 + slot[0]] & 0x07FF07FF);
+        for (int k = 1; k < nv && it != at.end(); ++k) field[size_t(root(at[cur[i + 1 + slot[k]] & 0x07FF07FF]))].root = root(it->second);
+    }
+    // Each mesh's median motion (its slide).
+    std::vector<int32_t> by_mesh(field.size()), base_x(field.size()), base_y(field.size());
+    for (size_t f = 0; f < field.size(); ++f) by_mesh[f] = int32_t(f);
+    std::sort(by_mesh.begin(), by_mesh.end(), [&](int32_t a, int32_t b) { return root(a) < root(b); });
+    for (size_t a = 0, b; a < by_mesh.size(); a = b) {
+        xs.clear(), ys.clear();
+        for (b = a; b < by_mesh.size() && root(by_mesh[b]) == root(by_mesh[a]); ++b)
+            xs.push_back(field[size_t(by_mesh[b])].dx), ys.push_back(field[size_t(by_mesh[b])].dy);
+        std::nth_element(xs.begin(), xs.begin() + xs.size() / 2, xs.end());
+        std::nth_element(ys.begin(), ys.begin() + ys.size() / 2, ys.end());
+        base_x[size_t(root(by_mesh[a]))] = xs[xs.size() / 2], base_y[size_t(root(by_mesh[a]))] = ys[ys.size() / 2];
+    }
+    // Pass 2. Rounding each vertex on its own makes two vertices whose motions differ by a pixel snap at
+    // different pictures: the edge between them grows, shrinks and grows again inside one game frame and
+    // the texture on it swims at the presentation rate. So a mesh slides as one by its median motion b
+    // (one rounding for all its vertices). A slower vertex (same way, 0 <= d < b) waits at its old place
+    // until the slide reaches it; a faster one (up to kStep px more: perspective, GTE rounding) switches
+    // its extra once, at t = 0.5, as a real game frame would. Every vertex then moves one way only and
+    // every edge between them changes one way only. Other motions (a limb swinging, the other way) are
+    // real and lerped per vertex.
+    constexpr int32_t kStep = 2;
+    auto offset = [&](int32_t d, int32_t b) {
+        const int32_t sign = b < 0 || (b == 0 && d < 0) ? -1 : 1;  // mirrored so the slide is >= 0
+        d *= sign, b *= sign;
+        const int32_t slide = Round(b * (1 - t));
+        const int32_t o = d < 0 || d > b + kStep ? Round(d * (1 - t)) : d <= b ? std::min(slide, d) : slide + (t < 0.5 ? d - b : 0);
+        return o * sign;
+    };
+    for (size_t i : polys) {
+        const int nv = Slots(&cur[i], slot);
         for (int k = 0; k < nv; ++k) {
-            const uint32_t a = prev[p + 1 + slot[k]], b = cur[i + 1 + slot[k]];
-            auto lerp = [t](int32_t x0, int32_t x1) { return int32_t(std::lround(x0 + (x1 - x0) * t)); };
-            const int32_t x = lerp(Sx(a), Sx(b)), y = lerp(Sx(a >> 16), Sx(b >> 16));
-            out[i + 1 + slot[k]] = (uint32_t(x) & 0xFFFF) | uint32_t(y) << 16;
+            auto it = at.find(cur[i + 1 + slot[k]] & 0x07FF07FF);
+            if (it == at.end()) break;  // no vertex moved (all or none are in the field)
+            const Field& f = field[size_t(it->second)];
+            const size_t r = size_t(root(it->second));
+            put(i + 1 + slot[k], offset(f.dx, base_x[r]), offset(f.dy, base_y[r]));
         }
     }
 }
