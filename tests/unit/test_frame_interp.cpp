@@ -23,8 +23,12 @@ static void Packet(std::vector<uint32_t>& cmds, std::initializer_list<uint32_t> 
     cmds.insert(cmds.end(), words);
 }
 
-// Textured flat quad (2Ch) at (x, y), 16x16, UV origin (u, 0); CLUT 0, texpage 0.
+// The GPU's 3D tag (GTE vertices) before a polygon packet: only tagged polygons are interpolated.
+static void Tag(std::vector<uint32_t>& c) { Packet(c, {Ps1Gpu::kLog3D}); }
+
+// Textured flat quad (2Ch) at (x, y), 16x16, UV origin (u, 0); CLUT 0, texpage 0; 3D-tagged.
 static void TexQuad(std::vector<uint32_t>& c, int x, int y, uint32_t u) {
+    Tag(c);
     Packet(c, {0x2C808080, XY(x, y), u, XY(x + 16, y), 0x00000000 | (u + 16), XY(x, y + 16), u | 16 << 8,
                XY(x + 16, y + 16), (u + 16) | 16 << 8});
 }
@@ -43,28 +47,28 @@ static void TestMatchAndLerp() {
     TexQuad(cur, 200, 50, 128); // C
     const Match m = MatchPrimitives(prev, cur, 48);
     assert(m.prims == 3 && m.matched == 2);
-    assert(m.prev_of.size() == 4 && m.prev_of[0] == -1 && m.prev_of[3] == -1);
+    assert(m.prev_of.size() == 7 && m.prev_of[0] == -1 && m.prev_of[6] == -1);
     LerpCommands(prev, cur, m, 0.5, 48, out);
     assert(out.size() == cur.size());
-    assert(X0(out, 2) == 80);   // B: 100 -> 60
-    assert(X0(out, 12) == 20);  // A: 10 -> 30
-    assert(X0(out, 22) == 200); // C: unmatched, as in cur
-    assert(out[22 + 1 + 1] == cur[22 + 1 + 1] && out[0] == cur[0]);
+    assert(X0(out, 4) == 80);   // B: 100 -> 60
+    assert(X0(out, 16) == 20);  // A: 10 -> 30
+    assert(X0(out, 28) == 200); // C: unmatched, as in cur
+    assert(out[28 + 1 + 1] == cur[28 + 1 + 1] && out[0] == cur[0]);
     // t = 1 is cur; t = 0 is prev's geometry with cur's draw order.
     LerpCommands(prev, cur, m, 1.0, 48, out);
     assert(out == cur);
     LerpCommands(prev, cur, m, 0.0, 48, out);
-    assert(X0(out, 2) == 100 && X0(out, 12) == 10);
+    assert(X0(out, 4) == 100 && X0(out, 16) == 10);
     // A jump beyond the limit (teleport) is not lerped.
     LerpCommands(prev, cur, m, 0.5, 30, out);
-    assert(X0(out, 2) == 60 && X0(out, 12) == 20);
+    assert(X0(out, 4) == 60 && X0(out, 16) == 20);
     // Negative coordinates survive the 11-bit round trip.
     std::vector<uint32_t> p2, c2;
     TexQuad(p2, -30, -10, 0);
     TexQuad(c2, -10, -10, 0);
     const Match m2 = MatchPrimitives(p2, c2, 48);
     LerpCommands(p2, c2, m2, 0.25, 48, out);
-    assert(X0(out, 0) == -25);
+    assert(X0(out, 2) == -25);
     // Same key (repeated tile) drawn in another order: the nearest one pairs, not the first.
     std::vector<uint32_t> p3, c3;
     TexQuad(p3, 10, 0, 32);
@@ -72,23 +76,28 @@ static void TestMatchAndLerp() {
     TexQuad(c3, 52, 0, 32);
     TexQuad(c3, 12, 0, 32);
     const Match m3 = MatchPrimitives(p3, c3, 48);
-    assert(m3.matched == 2 && m3.prev_of[0] == 10 && m3.prev_of[1] == 0);
+    assert(m3.matched == 2 && m3.prev_of[1] == 14 && m3.prev_of[3] == 2);
     std::printf("  match/lerp ok\n");
 }
 
+// Untextured 3D triangles pair by colour; 2D (rectangles, lines, untagged polygons) is drawn as in cur.
 static void TestUntexturedAndRects() {
     std::vector<uint32_t> prev, cur, out;
-    Packet(prev, {0x200000FF, XY(0, 0), XY(10, 0), XY(0, 10)});  // red flat triangle
-    Packet(prev, {0x2000FF00, XY(50, 0), XY(60, 0), XY(50, 10)}); // green
-    Packet(prev, {0x60FFFFFF, XY(5, 5), XY(8, 4)});               // 8x4 white rect
-    Packet(cur, {0x2000FF00, XY(54, 0), XY(64, 0), XY(54, 10)});
-    Packet(cur, {0x200000FF, XY(4, 0), XY(14, 0), XY(4, 10)});
+    Tag(prev), Packet(prev, {0x200000FF, XY(0, 0), XY(10, 0), XY(0, 10)});  // red flat triangle
+    Tag(prev), Packet(prev, {0x2000FF00, XY(50, 0), XY(60, 0), XY(50, 10)}); // green
+    Packet(prev, {0x60FFFFFF, XY(5, 5), XY(8, 4)});                          // 8x4 white rect
+    Packet(prev, {0x40FFFFFF, XY(0, 30), XY(20, 30)});                       // line
+    Packet(prev, {0x20FFFFFF, XY(0, 50), XY(10, 50), XY(0, 60)});            // 2D triangle
+    Tag(cur), Packet(cur, {0x2000FF00, XY(54, 0), XY(64, 0), XY(54, 10)});
+    Tag(cur), Packet(cur, {0x200000FF, XY(4, 0), XY(14, 0), XY(4, 10)});
     Packet(cur, {0x60FFFFFF, XY(9, 5), XY(8, 4)});
-    Packet(cur, {0x60FFFFFF, XY(9, 5), XY(9, 4)});  // different size: no partner
+    Packet(cur, {0x40FFFFFF, XY(4, 30), XY(24, 30)});
+    Packet(cur, {0x20FFFFFF, XY(4, 50), XY(14, 50), XY(4, 60)});
     const Match m = MatchPrimitives(prev, cur, 48);
-    assert(m.prims == 4 && m.matched == 3);
+    assert(m.prims == 2 && m.matched == 2);
     LerpCommands(prev, cur, m, 0.5, 48, out);
-    assert(X0(out, 0) == 52 && X0(out, 5) == 2 && X0(out, 10) == 7 && X0(out, 14) == 9);
+    assert(X0(out, 2) == 52 && X0(out, 9) == 2);
+    for (size_t i = 14; i < cur.size(); ++i) assert(out[i] == cur[i]);
     // A polyline continuation word that looks like a polygon opcode is not a primitive.
     std::vector<uint32_t> poly_tail;
     Packet(poly_tail, {0x3C00F00F});
@@ -106,16 +115,17 @@ static void TestInsertedAndRemovedTiles() {
     for (int x : {24, 44, 64}) TexQuad(cur, x, 0, 32);
     const Match m = MatchPrimitives(prev, cur, 48);
     assert(m.prims == 5 && m.matched == 4);
-    assert(m.prev_of[0] == 0 && m.prev_of[1] == -1 && m.prev_of[2] == 10 && m.prev_of[3] == 20 && m.prev_of[4] == 30);
+    assert(m.prev_of[1] == 2 && m.prev_of[3] == -1 && m.prev_of[5] == 14 && m.prev_of[7] == 26 && m.prev_of[9] == 38);
     LerpCommands(prev, cur, m, 0.5, 48, out);
     assert(out.size() == cur.size());
-    assert(X0(out, 0) == 2 && X0(out, 10) == 12 && X0(out, 20) == 22 && X0(out, 30) == 42 && X0(out, 40) == 62);
-    for (size_t i = 10; i < 20; ++i) assert(out[i] == cur[i]);  // the new tile is untouched, not dropped
+    assert(X0(out, 2) == 2 && X0(out, 14) == 12 && X0(out, 26) == 22 && X0(out, 38) == 42 && X0(out, 50) == 62);
+    for (size_t i = 12; i < 24; ++i) assert(out[i] == cur[i]);  // the new tile is untouched, not dropped
     std::printf("  inserted/removed tiles ok\n");
 }
 
 // Textured quad spanning xl..xr, y 0..16, own UV origin u (its own key).
 static void Strip(std::vector<uint32_t>& c, int xl, int xr, uint32_t u) {
+    Tag(c);
     Packet(c, {0x2C808080, XY(xl, 0), u, XY(xr, 0), u + 16, XY(xl, 16), u | 16 << 8, XY(xr, 16), (u + 16) | 16 << 8});
 }
 static int32_t Xv(const std::vector<uint32_t>& c, size_t packet_word, int k) {  // vertex k of a 2Ch quad
@@ -134,15 +144,15 @@ static void TestMeshMovesAsOne() {
     Strip(prev, 8, 23, 0), Strip(prev, 23, 39, 64), Strip(prev, 39, 55, 128);
     Strip(cur, 10, 26, 0), Strip(cur, 26, 42, 64), Strip(cur, 42, 58, 128), Strip(cur, 58, 74, 192);
     const Match m = MatchPrimitives(prev, cur, 48);
-    assert(m.matched == 3 && m.prev_of[3] == -1);
+    assert(m.matched == 3 && m.prev_of[7] == -1);
     const double ts[5] = {0, 0.25, 0.5, 0.75, 1};
     auto check = [&](const Match& mm) {
         for (int j = 0; j < 5; ++j) LerpCommands(prev, cur, mm, ts[j], 48, out[j]);
         assert(out[4] == cur);
-        for (size_t p : {size_t(0), size_t(10), size_t(20), size_t(30)})
+        for (size_t p : {size_t(2), size_t(14), size_t(26), size_t(38)})
             for (int j = 0; j < 5; ++j) {
-                if (p) assert(Xv(out[j], p, 0) == Xv(out[j], p - 10, 1));  // shared vertices land together
-                if (j == 0 && p < 30) assert(Xv(out[0], p, 0) == Xv(prev, p, 0) && Xv(out[0], p, 1) == Xv(prev, p, 1));
+                if (p > 2) assert(Xv(out[j], p, 0) == Xv(out[j], p - 12, 1));  // shared vertices land together
+                if (j == 0 && p < 38) assert(Xv(out[0], p, 0) == Xv(prev, p, 0) && Xv(out[0], p, 1) == Xv(prev, p, 1));
                 if (j == 4) continue;
                 for (int k = 0; k < 2; ++k) assert(Xv(out[j + 1], p, k) >= Xv(out[j], p, k));  // no vertex steps back
                 assert(Xv(out[j + 1], p, 1) - Xv(out[j + 1], p, 0) >= Xv(out[j], p, 1) - Xv(out[j], p, 0));  // width 15 -> 16 once
@@ -152,11 +162,11 @@ static void TestMeshMovesAsOne() {
     // Lerped and rounded one by one, x = 10 (2 px) and x = 26 (3 px) snapped at different pictures: the
     // left strip was 15, 15, 16, 15, 16 px wide.
     LerpCommands(prev, cur, m, 0.5, 48, out[2]);
-    assert(Xv(out[2], 0, 0) == 8 && Xv(out[2], 0, 1) == 24 && Xv(out[2], 30, 1) == 72);  // the new strip follows
+    assert(Xv(out[2], 2, 0) == 8 && Xv(out[2], 2, 1) == 24 && Xv(out[2], 38, 1) == 72);  // the new strip follows
     // The middle strip paired with the right one's old place (a wrong same-key partner in a real scene):
     // it is carried by its neighbours instead of tearing the mesh.
     Match wrong = m;
-    wrong.prev_of[1] = wrong.prev_of[2];
+    wrong.prev_of[3] = wrong.prev_of[5];
     check(wrong);
     std::printf("  mesh moves as one ok\n");
 }
@@ -213,6 +223,10 @@ static void TestCaptureIsInvisibleAndComplete() {
     Ps1Gpu g;
     std::vector<uint32_t> l2;
     g.SetCommandLog(&l2);
+    Widescreen2D gte(1, 1);  // the triangle is 3D: its vertices came from the GTE
+    for (int k = 1; k <= 3; ++k)
+        for (uint32_t xy : {XY(10 + 8 * k, 10), XY(40 + 8 * k, 10), XY(10 + 8 * k, 40)}) gte.NoteProjected(xy);
+    g.SetProjectionTracker(&gte);
     uint64_t frame = 0;
     for (int k = 1; k <= 3; ++k) {
         const uint32_t y = (k & 1) ? 240 : 0;
@@ -266,6 +280,44 @@ static void TestWidescreenSqueezeReplays() {
     std::printf("  widescreen squeeze replay ok\n");
 }
 
+// 2D (no GTE vertex: sprites, portraits, text) is never moved: with a static 2D quad, a 2D quad that moves
+// and changes colour between frames, and a static 3D triangle (so the pair is interpolated), every
+// in-between picture is byte-identical to the newer real frame.
+static void Test2DIsDrawnAsInCur() {
+    FrameInterpolator fi;
+    Ps1Gpu g;
+    std::vector<uint32_t> log;
+    g.SetCommandLog(&log);
+    Widescreen2D gte(1, 1);
+    for (uint32_t xy : {XY(200, 20), XY(260, 20), XY(200, 80)}) gte.NoteProjected(xy);
+    g.SetProjectionTracker(&gte);
+    uint64_t frame = 0;
+    for (int k = 1; k <= 3; ++k) {
+        const uint32_t y = (k & 1) ? 240 : 0;
+        for (uint32_t w : {0xE3000000u | y << 10, 0xE4000000u | 319 | (y + 239) << 10, 0xE5000000u | y << 11}) g.WriteGP0(w);
+        g.WriteGP0(0x02000000); g.WriteGP0(XY(0, y)); g.WriteGP0(XY(320, 240));
+        for (uint32_t w : {0x20808080u, XY(200, 20), XY(260, 20), XY(200, 80)}) g.WriteGP0(w);  // 3D, static
+        for (uint32_t w : {0x280000FFu, XY(10, 100), XY(40, 100), XY(10, 130), XY(40, 130)}) g.WriteGP0(w);  // 2D, static
+        const int32_t x = 60 + 10 * k;  // 2D, moves 10 px per frame (same key in the last two)
+        for (uint32_t w : {k == 1 ? 0x2800FF00u : 0x28FF0000u, XY(x, 150), XY(x + 20, 150), XY(x, 170), XY(x + 20, 170)})
+            g.WriteGP0(w);
+        g.WriteGP1(0x05000000 | y << 10);
+        frame += 2;
+        assert(fi.Consume(log, g, frame));
+    }
+    assert(fi.Active(frame) && fi.PairOk() && fi.LastMatch().prims == 1);
+    const std::vector<uint16_t> real = g.GetVram();
+    for (double t : {0.25, 0.5, 0.75}) {
+        const std::vector<uint16_t>* vram = nullptr;
+        GpuDisplayArea d;
+        fi.Render(t, vram, d);
+        assert(d.y == 240);
+        for (uint32_t row = 240; row < 480; ++row)
+            for (uint32_t col = 0; col < 320; ++col) assert((*vram)[row * 1024 + col] == real[row * 1024 + col]);
+    }
+    std::printf("  2D drawn as in cur ok\n");
+}
+
 int main() {
     std::printf("frame_interp tests\n");
     TestMatchAndLerp();
@@ -274,6 +326,7 @@ int main() {
     TestMeshMovesAsOne();
     TestCaptureIsInvisibleAndComplete();
     TestWidescreenSqueezeReplays();
+    Test2DIsDrawnAsInCur();
     std::printf("PASS\n");
     return 0;
 }

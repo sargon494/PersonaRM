@@ -546,8 +546,21 @@ bool Engine::BootExecutable(const uint8_t* exe_buffer, size_t exe_size) {
 void Engine::SetWidescreen(int32_t num, int32_t den) {
     m_ws2d = num != den ? std::make_unique<Widescreen2D>(num, den) : nullptr;
     m_cpu.GetGTE().SetWidescreen(num, den);
-    m_cpu.GetGTE().SetProjectionTracker(m_ws2d.get());
     m_gpu.SetWidescreen2D(m_ws2d.get());
+    WireProjections();
+}
+
+void Engine::TrackProjections(bool on) {
+    m_track_proj = on;
+    WireProjections();
+}
+
+void Engine::WireProjections() {
+    if (m_ws2d || !m_track_proj) m_proj.reset();
+    else if (!m_proj) m_proj = std::make_unique<Widescreen2D>(1, 1);
+    Widescreen2D* t = m_ws2d ? m_ws2d.get() : m_proj.get();
+    m_cpu.GetGTE().SetProjectionTracker(t);
+    m_gpu.SetProjectionTracker(m_track_proj ? t : nullptr);
 }
 
 void Engine::RunFrame() {
@@ -606,6 +619,7 @@ void Engine::RunFrame() {
     RaiseIrq(0);
     m_frame_counter++;
     if (m_ws2d) m_ws2d->NextFrame();
+    if (m_proj) m_proj->NextFrame();
     FlushMemoryCards();
 
     if (m_trace) {

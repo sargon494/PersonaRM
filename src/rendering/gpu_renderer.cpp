@@ -22,6 +22,7 @@ namespace {
 
 // Vertex attr[3] flags (shared with the pixel shader).
 constexpr uint32_t kTex = 1, kRaw = 2, kDither = 4, kPassOpaque = 8, kPassSemi = 16, kMaskSet = 32, kDstRead = 64;
+constexpr uint32_t kUvLimit = 128;  // texel limits (Ps1Gpu::UvLimits): u in attr[0] bits 16-31, v in attr[1] bits 16-31
 constexpr uint32_t kBlend = 1u << 14, kBlit = 1u << 15;
 
 const char* kShaderVs = R"(
@@ -58,7 +59,12 @@ float4 main(VOut i) : SV_Target {
     uint stp = 0;
     bool blend = (fl & 0x4000u) != 0;
     if (fl & 1u) {
-        uint u = (uint)((int)floor(i.uv.x)) & 255u, v = (uint)((int)floor(i.uv.y)) & 255u;
+        int iu = (int)floor(i.uv.x), iv = (int)floor(i.uv.y);
+        if (fl & 128u) {
+            iu = clamp(iu, (int)((tp >> 16) & 255u), (int)(tp >> 24));
+            iv = clamp(iv, (int)((clut >> 16) & 255u), (int)(clut >> 24));
+        }
+        uint u = (uint)iu & 255u, v = (uint)iv & 255u;
         uint mx = tw & 31u, my = (tw >> 5) & 31u, ox = (tw >> 10) & 31u, oy = (tw >> 15) & 31u;
         u = (u & ~(mx * 8u)) | ((ox & mx) * 8u);
         v = (v & ~(my * 8u)) | ((oy & my) * 8u);
@@ -407,7 +413,7 @@ void GpuRenderer::Polygon(const Ps1Gpu& gpu, uint8_t cmd, const uint32_t* w) {
     p = {};
     p.on = true, p.semi = cmd & 0x02, p.tex = tex, p.mask_check = gpu.GetMaskCheck(), p.n = quad ? 4 : 3;
     uint32_t tp = gpu.GetTexpage(), clut = 0, color = w[0];
-    int32_t u0 = 255, u1 = 0, v0 = 255, v1 = 0;
+    int32_t u0 = 255, u1 = 0, v0 = 255, v1 = 0, tu[4] = {}, tv[4] = {};
     size_t idx = 1;
     for (int i = 0; i < p.n; ++i) {
         if (gouraud && i > 0) color = w[idx++];
@@ -420,6 +426,7 @@ void GpuRenderer::Polygon(const Ps1Gpu& gpu, uint8_t cmd, const uint32_t* w) {
             const uint32_t uvw = w[idx++];
             const int32_t u = uvw & 0xFF, v = (uvw >> 8) & 0xFF;
             u0 = std::min(u0, u), u1 = std::max(u1, u), v0 = std::min(v0, v), v1 = std::max(v1, v);
+            tu[i] = u, tv[i] = v;
             p.u[i] = float(u) + 0.5f, p.v[i] = float(v) + 0.5f;  // the software's half-texel shift
             if (i == 0) clut = uvw >> 16;
             if (i == 1) tp = (tp & ~0x9FFu) | ((uvw >> 16) & 0x9FF);
@@ -430,6 +437,12 @@ void GpuRenderer::Polygon(const Ps1Gpu& gpu, uint8_t cmd, const uint32_t* w) {
     const bool dither = ((tp >> 9) & 1) && (gouraud || (tex && !raw));
     p.attr[0] = tp, p.attr[1] = clut, p.attr[2] = gpu.GetTexWindow();
     p.attr[3] = (tex ? kTex : 0) | (raw ? kRaw : 0) | (dither ? kDither : 0) | (gpu.GetMaskSet() ? kMaskSet : 0) | m_s << 8;
+    if (tex && m_s > 1) {  // as the CPU's scaled pass (1x: no clamp, as the 1x raster)
+        int32_t lim[4];
+        Ps1Gpu::UvLimits(p.x, p.y, tu, tv, p.n, lim);
+        p.attr[0] |= uint32_t(lim[0] | lim[1] << 8) << 16, p.attr[1] |= uint32_t(lim[2] | lim[3] << 8) << 16;
+        p.attr[3] |= kUvLimit;
+    }
     if (tex) SyncTexture(gpu, tp, clut, p.attr[2], u0, u1, v0, v1);  // now: the packet may draw into its texture
 }
 

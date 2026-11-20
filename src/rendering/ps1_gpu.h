@@ -115,6 +115,20 @@ public:
     /// (GP1 05h, a double-buffer flip) as [0, x | y << 16] followed by E1h-E6h packets for the current
     /// draw state, so every segment between two flips replays on its own.
     void SetCommandLog(std::vector<uint32_t>* log) { m_cmd_log = log; }
+    /// GTE projection tracker for the command log; null = off (default). A polygon with 2 or more GTE
+    /// vertices (3D, as Widescreen2D decides) gets a GP0 NOP entry [1, kLog3D] before its packet: the
+    /// frame interpolator moves 3D only and leaves 2D (sprites, portraits, text) as drawn.
+    void SetProjectionTracker(const Widescreen2D* t) { m_proj = t; }
+    static constexpr uint32_t kLog3D = 0x00D30000u;
+
+    /// Scaled polygons (CPU and host GPU renderer): the texels {u_lo, u_hi, v_lo, v_hi} the 1x raster can
+    /// sample, which fine samples are clamped to. The far UV of a sprite or glyph (its last texel + 1, on
+    /// the excluded right/bottom edge) is never sampled at 1x; a finer sample past the last pixel centre
+    /// reached it and drew the next sprite cell's row or column (a thin line under feet and letters, cell
+    /// outlines). Per axis: the vertex UV range, less one pixel's worth of texels (rounded) at the end the
+    /// UV grows toward (by its larger screen gradient). Like DuckStation's UV limits, with the direction
+    /// (mirrored sprites) and the 1x rounding (stretched textures reach their far texel).
+    static void UvLimits(const int32_t* x, const int32_t* y, const int32_t* u, const int32_t* v, int n, int32_t lim[4]);
 
     /// Texture dump / replacement (rendering/vram_texture_hook.h); null = off (default), no effect on VRAM.
     void SetTextureHook(VramTextureHook* hook);
@@ -157,6 +171,8 @@ private:
         bool semi = false;     // semi-transparency requested
         bool dither = false;   // E1.9 and (gouraud or modulated texture)
         uint16_t clut = 0;     // CLUT attribute (X/16 in bits 0-5, Y in bits 6-14)
+        bool uv_limit = false; // scaled polygon: fine samples clamped to the texels lim (UvLimits)
+        int32_t lim[4] = {0, 255, 0, 255};
     };
 
     void ExecuteGP0Command();
@@ -193,6 +209,7 @@ private:
     std::vector<uint32_t>* m_cmd_log = nullptr;
     VramTextureHook* m_hook = nullptr;
     Widescreen2D* m_ws2d = nullptr;
+    const Widescreen2D* m_proj = nullptr;
     GpuDrawListener* m_listener = nullptr;
     void LogWords(const uint32_t* w, size_t n) {
         m_cmd_log->push_back(static_cast<uint32_t>(n));

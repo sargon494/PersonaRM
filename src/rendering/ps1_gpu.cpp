@@ -583,6 +583,14 @@ void Ps1Gpu::DrawPolygon(uint8_t cmd) {
     // psx-spx "GPU Rendering Attributes" (E1h bit 9): dithering applies to gouraud-shaded
     // and texture-blended (modulated) primitives only.
     f.dither = ((m_texpage >> 9) & 1) && (gouraud || (f.textured && !f.raw));
+    if (m_cmd_log && m_proj && !m_cmd_log->empty()) {
+        int hits = 0;
+        for (int i = 0; i < n; ++i) hits += m_proj->Projected(xyw[i]);
+        if (hits >= 2) {  // the same 3D rule as Widescreen2D::Squeeze2D; before the packet, the log's last entry
+            const uint32_t rec[2] = {1, kLog3D};
+            m_cmd_log->insert(m_cmd_log->end() - std::ptrdiff_t(m_gp0_packet.size() + 1), rec, rec + 2);
+        }
+    }
     {
         int32_t x[4];
         for (int i = 0; i < n; ++i) x[i] = v[i].x;
@@ -597,6 +605,12 @@ void Ps1Gpu::DrawPolygon(uint8_t cmd) {
     if (m_scale > 1) {
         const int32_t s = int32_t(m_scale);
         Vertex hv[4];
+        if (f.textured) {
+            int32_t px[4], py[4], pu[4], pv[4];
+            for (int i = 0; i < n; ++i) px[i] = v[i].x, py[i] = v[i].y, pu[i] = v[i].u, pv[i] = v[i].v;
+            UvLimits(px, py, pu, pv, n, f.lim);
+            f.uv_limit = true;
+        }
         for (int i = 0; i < n; ++i) {
             hv[i] = v[i];
             // UV in 1/(256 s) texel units, shifted by half a texel: the 1x raster rounds the interpolated
@@ -611,6 +625,27 @@ void Ps1Gpu::DrawPolygon(uint8_t cmd) {
     }
     DrawTriangle(Vram1x(), v[0], v[1], v[2], gouraud, f);
     if (quad) DrawTriangle(Vram1x(), v[1], v[2], v[3], gouraud, f);
+}
+
+void Ps1Gpu::UvLimits(const int32_t* x, const int32_t* y, const int32_t* u, const int32_t* v, int n, int32_t lim[4]) {
+    const int64_t ax = x[1] - x[0], ay = y[1] - y[0], bx = x[2] - x[0], by = y[2] - y[0];
+    const int64_t det = ax * by - bx * ay;
+    for (int k = 0; k < 2; ++k) {
+        const int32_t* t = k ? v : u;
+        int32_t lo = t[0], hi = t[0];
+        for (int i = 1; i < n; ++i) lo = std::min(lo, t[i]), hi = std::max(hi, t[i]);
+        // d(t)/dx and d(t)/dy times det (Cramer); g: the larger one, as a gradient times |det|.
+        const int64_t gx = int64_t(t[1] - t[0]) * by - int64_t(t[2] - t[0]) * ay;
+        const int64_t gy = ax * int64_t(t[2] - t[0]) - bx * int64_t(t[1] - t[0]);
+        const int64_t g = det ? (std::abs(gx) >= std::abs(gy) ? gx : gy) * (det < 0 ? -1 : 1) : 0;
+        // The last pixel before the excluded edge is one pixel (|g| texels) short of the far UV, rounded
+        // to the nearest texel as the 1x raster does: a 1:1 sprite stops one texel short, a stretched
+        // texture (|g| < 1/2) reaches its far texel.
+        const int32_t shrink = det ? int32_t((2 * std::abs(g) + std::abs(det)) / (2 * std::abs(det))) : 0;
+        if (g > 0) hi = std::max(lo, hi - shrink);
+        else if (g < 0) lo = std::min(hi, lo + shrink);
+        lim[2 * k] = lo, lim[2 * k + 1] = hi;
+    }
 }
 
 int32_t Ps1Gpu::Squeeze(const uint32_t* xy, int32_t* x, int n, bool textured) {
@@ -872,6 +907,8 @@ void Ps1Gpu::PlotPixel(const Target& t, int32_t x, int32_t y, int32_t r, int32_t
         uint16_t texel;
         if (hi) {  // u, v in 1/(256 s) texel units: texel (wrapped like the 8-bit UV) and 1/s sub-texel
             const int32_t q = t.s * kSubUv, m = 256 * q;
+            if (f.uv_limit)
+                u = std::clamp(u, f.lim[0] * q, f.lim[1] * q + q - 1), v = std::clamp(v, f.lim[2] * q, f.lim[3] * q + q - 1);
             u = ((u % m) + m) % m, v = ((v % m) + m) % m;
             texel = FetchTexel(u / q, v / q, uint32_t(u % q / kSubUv), uint32_t(v % q / kSubUv), uint32_t(t.s), f.clut);
         } else {

@@ -65,6 +65,9 @@ uint64_t Key(const uint32_t* w, uint32_t n) {
     return h;
 }
 
+// The log entry at e is the 3D tag (Ps1Gpu::SetProjectionTracker) of the packet after it.
+bool Tag3D(const uint32_t* e) { return e[0] == 1 && e[1] == Ps1Gpu::kLog3D; }
+
 int32_t Sx(uint32_t v) { return static_cast<int32_t>((v & 0x7FF) << 21) >> 21; }
 // Offsets (not positions) are rounded, half away from zero: ties go the same way for every vertex moving
 // the same way, wherever it is on screen (positions straddling 0 would round apart).
@@ -75,18 +78,20 @@ int32_t Round(double v) { return int32_t(std::lround(v)); }
 Match MatchPrimitives(const std::vector<uint32_t>& prev, const std::vector<uint32_t>& cur, int32_t max_jump) {
     std::unordered_map<uint64_t, std::vector<int32_t>> by_key;
     int slot[4];
-    for (size_t i = 0; i < prev.size(); i += 1 + prev[i])
-        if (Slots(&prev[i], slot)) by_key[Key(&prev[i + 1], prev[i])].push_back(int32_t(i));
+    // Only 3D (GTE-projected) polygons move; 2D (sprites, portraits, text, windows, lines) is drawn as in
+    // cur: stable at the game's rate beats smooth with wrong partners and sub-frame jitter.
+    for (size_t i = 0, tag = 0; i < prev.size(); tag = Tag3D(&prev[i]), i += 1 + prev[i])
+        if (tag && Slots(&prev[i], slot)) by_key[Key(&prev[i + 1], prev[i])].push_back(int32_t(i));
     // Every same-key pair within max_jump on all vertices, cheapest (total vertex travel) first: the true
     // partners of a scrolled floor win before an inserted or removed tile can steal a neighbour's.
     struct Cand { int32_t cost, pk, p; };
     std::vector<Cand> cands;
     std::vector<size_t> at;  // word offset of each packet of cur
     Match m;
-    for (size_t i = 0; i < cur.size(); i += 1 + cur[i]) {
+    for (size_t i = 0, tag = 0; i < cur.size(); tag = Tag3D(&cur[i]), i += 1 + cur[i]) {
         const int32_t pk = int32_t(at.size());
         at.push_back(i);
-        const int nv = Slots(&cur[i], slot);
+        const int nv = tag ? Slots(&cur[i], slot) : 0;
         if (!nv) continue;
         ++m.prims;
         auto it = by_key.find(Key(&cur[i + 1], cur[i]));
@@ -187,8 +192,8 @@ void LerpCommands(const std::vector<uint32_t>& prev, const std::vector<uint32_t>
     // of tearing away from them (repeated: it may share them with another such polygon); one sharing none
     // is drawn as in cur.
     std::vector<size_t> polys;
-    for (size_t i = 0; i < cur.size(); i += 1 + cur[i])
-        if (Slots(&cur[i], slot) >= 3) polys.push_back(i);
+    for (size_t i = 0, tag = 0; i < cur.size(); tag = Tag3D(&cur[i]), i += 1 + cur[i])
+        if (tag && Slots(&cur[i], slot) >= 3) polys.push_back(i);
     for (bool grew = true; grew;) {
         grew = false;
         for (size_t i : polys) {
