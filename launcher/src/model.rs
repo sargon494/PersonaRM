@@ -114,6 +114,41 @@ impl Default for LauncherConfig {
     }
 }
 
+/// In-game hotkeys (`input.hotkeys` of settings.json): action, default key, label.
+pub const HOTKEYS: [(&str, &str, &str); 4] = [
+    ("encounter_rate", "F1", "Encounters"),
+    ("battle_speed", "F2", "Battle speed"),
+    ("skip_fmv", "F3", "Skip movies"),
+    ("text_speed", "F4", "Text speed"),
+];
+
+/// Keys the game itself uses (save states, fast-forward, quit): not offered for hotkeys.
+pub const RESERVED_KEYS: [&str; 6] = ["F5", "F6", "F7", "F8", "Tab", "Escape"];
+
+/// SDL scancode name for the name egui gives a key (`Key::name`), or None when SDL has no such key.
+pub fn sdl_key_name(egui_name: &str) -> Option<String> {
+    Some(match egui_name {
+        "Enter" => "Return".into(),
+        "ArrowUp" => "Up".into(),
+        "ArrowDown" => "Down".into(),
+        "ArrowLeft" => "Left".into(),
+        "ArrowRight" => "Right".into(),
+        "Minus" => "-".into(),
+        "Plus" | "Equals" => "=".into(),
+        "Period" => ".".into(),
+        "Comma" => ",".into(),
+        "Slash" => "/".into(),
+        "Semicolon" => ";".into(),
+        "Quote" => "'".into(),
+        "OpenBracket" => "[".into(),
+        "CloseBracket" => "]".into(),
+        n if n.len() == 1 && n.chars().all(|c| c.is_ascii_alphanumeric()) => n.to_ascii_uppercase(),
+        n if ["Space", "Backspace", "Delete", "Insert", "Home", "End", "PageUp", "PageDown"].contains(&n) => n.into(),
+        n if n.starts_with('F') && n[1..].parse::<u32>().is_ok_and(|k| (1..=12).contains(&k)) => n.into(),
+        _ => return None,
+    })
+}
+
 /// The subset of the game's settings.json the launcher edits.
 #[derive(Clone, Debug, PartialEq)]
 pub struct GameSettings {
@@ -124,6 +159,13 @@ pub struct GameSettings {
     pub volume: u32,
     pub mute: bool,
     pub text_speed: String,
+    /// Per game, like `text_speed`: normal | reduced | none.
+    pub encounter_rate: String,
+    /// 1..3.
+    pub battle_speed: u32,
+    pub skip_fmv: bool,
+    /// Action -> SDL key name, all of `HOTKEYS`.
+    pub hotkeys: BTreeMap<String, String>,
     pub save_dir: String,
     pub pause_on_focus_loss: bool,
     /// Native (recompiled) code: per-game `recomp` key, on unless set to false.
@@ -140,6 +182,10 @@ impl Default for GameSettings {
             volume: 100,
             mute: false,
             text_speed: "normal".into(),
+            encounter_rate: "normal".into(),
+            battle_speed: 1,
+            skip_fmv: false,
+            hotkeys: HOTKEYS.iter().map(|h| (h.0.to_string(), h.1.to_string())).collect(),
             save_dir: String::new(),
             pause_on_focus_loss: true,
             native: true,
@@ -179,7 +225,18 @@ impl GameSettings {
             .unwrap_or(&d.text_speed)
             .to_string();
         let native = serials.iter().find_map(|id| get(doc, &["game", id, "recomp"]).and_then(Value::as_bool)).unwrap_or(d.native);
+        let game = |k: &str| serials.iter().find_map(|id| get(doc, &["game", id, k]));
+        let mut hotkeys = d.hotkeys.clone();
+        for (action, key) in hotkeys.iter_mut() {
+            if let Some(k) = get(doc, &["input", "hotkeys", action]).and_then(Value::as_str).filter(|k| !k.is_empty()) {
+                *key = k.to_string();
+            }
+        }
         Self {
+            encounter_rate: game("encounter_rate").and_then(Value::as_str).unwrap_or(&d.encounter_rate).to_string(),
+            battle_speed: game("battle_speed").and_then(Value::as_u64).filter(|n| (1..=3).contains(n)).map_or(d.battle_speed, |n| n as u32),
+            skip_fmv: game("skip_fmv").and_then(Value::as_bool).unwrap_or(d.skip_fmv),
+            hotkeys,
             native,
             language: s(&["general", "language"], &d.language),
             fps: u(&["video", "fps_target"], d.fps),
@@ -216,6 +273,12 @@ impl GameSettings {
         for id in serials {
             set(doc, &["game", id, "text_speed"], json!(self.text_speed));
             set(doc, &["game", id, "recomp"], json!(self.native));
+            set(doc, &["game", id, "encounter_rate"], json!(self.encounter_rate));
+            set(doc, &["game", id, "battle_speed"], json!(self.battle_speed));
+            set(doc, &["game", id, "skip_fmv"], json!(self.skip_fmv));
+        }
+        for (action, key) in &self.hotkeys {
+            set(doc, &["input", "hotkeys", action], json!(key));
         }
     }
 }
@@ -389,6 +452,42 @@ mod tests {
         assert_eq!(doc["audio"]["mute"], true);
         assert_eq!(doc["game"]["SLPS-02785"]["text_speed"], "instant");
         assert_eq!(doc["game"]["SLUS-01158"]["text_speed"], "instant");
+    }
+
+    #[test]
+    fn gameplay_options_and_hotkeys_roundtrip() {
+        let mut doc = json!({
+            "input": {"hotkeys": {"skip_fmv": "F9", "future": "X"}},
+            "game": {"SLPS-02785": {"note": "keep", "encounter_rate": "reduced", "battle_speed": 3, "skip_fmv": true}}
+        });
+        let mut s = GameSettings::from_value(&doc, &serials());
+        assert_eq!((s.encounter_rate.as_str(), s.battle_speed, s.skip_fmv), ("reduced", 3, true));
+        assert_eq!(s.hotkeys["skip_fmv"], "F9");
+        assert_eq!(s.hotkeys["text_speed"], "F4");
+        s.encounter_rate = "none".into();
+        s.battle_speed = 2;
+        s.hotkeys.insert("battle_speed".into(), "G".into());
+        s.apply(&mut doc, &serials(), 0);
+        assert_eq!(doc["game"]["SLPS-02785"]["note"], "keep");
+        assert_eq!(doc["game"]["SLPS-02785"]["encounter_rate"], "none");
+        assert_eq!(doc["game"]["SLUS-01158"]["battle_speed"], 2);
+        assert_eq!(doc["game"]["SLUS-01158"]["skip_fmv"], true);
+        assert_eq!(doc["input"]["hotkeys"]["battle_speed"], "G");
+        assert_eq!(doc["input"]["hotkeys"]["future"], "X");
+        assert_eq!(GameSettings::from_value(&doc, &serials()), s);
+        // a bad value falls back to the default
+        let bad = json!({"game": {"SLPS-02785": {"battle_speed": 9, "encounter_rate": 4}}});
+        assert_eq!(GameSettings::from_value(&bad, &serials()).battle_speed, 1);
+        assert_eq!(GameSettings::from_value(&bad, &serials()).encounter_rate, "normal");
+    }
+
+    #[test]
+    fn egui_key_names_map_to_sdl() {
+        for (e, sdl) in [("F1", "F1"), ("Enter", "Return"), ("a", "A"), ("A", "A"), ("5", "5"), ("ArrowLeft", "Left"), ("Space", "Space")] {
+            assert_eq!(sdl_key_name(e).as_deref(), Some(sdl), "{e}");
+        }
+        assert_eq!(sdl_key_name("F13"), None);
+        assert_eq!(sdl_key_name("Copy"), None);
     }
 
     #[test]

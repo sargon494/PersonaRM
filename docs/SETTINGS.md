@@ -38,7 +38,8 @@ can read and write the same file. Implementation: `src/host/settings.{h,cpp}`.
   "general": { "pause_on_focus_loss": true, "language": "ja", "save_dir": "" },
   "input": {
     "keyboard": { "cross": ["X"], "start": ["Return"], "select": ["Backspace", "Right Shift"] },
-    "gamepad":  { "cross": ["a"], "l2": ["lefttrigger"] }
+    "gamepad":  { "cross": ["a"], "l2": ["lefttrigger"] },
+    "hotkeys":  { "encounter_rate": "F1", "battle_speed": "F2", "skip_fmv": "F3", "text_speed": "F4" }
   },
   "game": {
     "SLPS-02192": {
@@ -90,6 +91,10 @@ An action present in the file replaces that action's defaults; absent actions ke
 and unknown key names log a warning and are ignored. Defaults: see `KeyboardMap()` / `GamepadMap()` in
 `src/host/host_logic.cpp`.
 
+`hotkeys` maps an in-game **action** to one key (SDL scancode name, as in `keyboard`): see
+[Gameplay hotkeys](#gameplay-hotkeys). Defaults F1 `encounter_rate`, F2 `battle_speed`, F3 `skip_fmv`,
+F4 `text_speed`. Unknown actions and unknown key names log a warning and are ignored.
+
 ### game
 
 One object per game, keyed by the disc serial the engine recognises (e.g. `SLPS-02192`). Unset keys
@@ -110,6 +115,25 @@ Gameplay options (`text_speed`, `encounter_rate`, `skip_fmv`, `battle_speed`) ex
 is skipped with a line on stderr (`[GAMEPLAY] ... no patch for disc ...` or `[PATCH] ... skipped`) and
 the game runs untouched. Left at their defaults they change nothing. `encounter_rate` and `skip_fmv` rewrite a few
 instructions of the field / movie code each time it is loaded: with `recomp` that code then runs interpreted.
+
+## Gameplay hotkeys
+
+In game, one key per gameplay option cycles it and writes it to this file under `game.<serial>`
+(only that key, onto the file as it is then, so launcher edits and unknown keys survive):
+
+| action (`input.hotkeys`) | default | cycle |
+|---|---|---|
+| `encounter_rate` | F1 | normal, reduced, none |
+| `battle_speed` | F2 | 1, 2, 3 |
+| `skip_fmv` | F3 | off, on |
+| `text_speed` | F4 | normal, fast, instant |
+
+A notice shows in the window title for 3 s and on stderr. The patches are rebuilt on the spot: if the code
+they rewrite is already loaded they take effect at once, otherwise the notice says
+`(applies from the next area)` (encounters) or `(applies from the next movie)` (skip movies). Going back to
+the original encounter / movie code restores it at once. Text speed back to `normal` restores the game's own
+delay when it was seen this session, else `(applies after restart)`. A disc with no patch for the option logs
+`[GAMEPLAY] ... no patch for disc` and the notice says it is not supported. F5-F8 and Tab are not used.
 
 ## Save states and fast-forward
 

@@ -114,6 +114,14 @@ int main() {
     CHECK(SceneModeAddress("SLPS-02786") == 0 && SceneModeAddress("") == 0);
     CHECK(IsBattleScene(0x1002) && IsBattleScene(2) && !IsBattleScene(0) && !IsBattleScene(4) && !IsBattleScene(0xA));
 
+    // Live toggles: a revert puts the guarded original words back and guards on the patched ones; text speed has none.
+    const auto rv = BuildRevertPatches(er), rn = BuildRevertPatches(sj);
+    CHECK(rv.size() == 1 && rv[0].trigger == er[0].trigger && rv[0].write.address == er[0].write.address);
+    CHECK(rv[0].write.bytes == std::vector<uint8_t>(orig.begin() + 0x20, orig.begin() + 0x3C) && rv[0].expect[0].bytes == eb);
+    CHECK(rn.size() == 1 && word(rn[0].write.bytes, 0) == 0x08024F0Cu && word(rn[0].expect[0].bytes, 0) == 0x08024EE2u);
+    CHECK(BuildRevertPatches(pf).empty() && BuildRevertPatches({}).empty());
+    CHECK(TextSpeedGlobal("SLPS-02785") == 0x8007CF14u && TextSpeedGlobal("SLUS_011.58") == 0x8007E634u && TextSpeedGlobal("") == 0);
+
     std::printf("test_gameplay_patches: %d failures\n", g_fail);
     return g_fail == 0 ? 0 : 1;
 }

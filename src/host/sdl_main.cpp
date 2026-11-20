@@ -73,7 +73,8 @@ static void Usage() {
                          "  --window-mode M      windowed, fullscreen or borderless (Alt+Enter toggles)\n"
                          "  --window-scale N     windowed size = 320x240 * N (1..8)\n"
                          "  --volume N, --mute   master volume 0..100 / silence\n"
-                         "Keys: F5 save state, F8 load state, F6/F7 previous/next slot (0-9; files\n"
+                         "Keys: F1 encounters, F2 battle speed, F3 skip movies, F4 text speed (cycle, saved to the\n"
+                         "  settings file; rebind in input.hotkeys), F5 save state, F8 load state, F6/F7 previous/next slot (0-9; files\n"
                          "  <save_dir>/<serial>.state<N>), Tab or gamepad right-stick click held = fast-forward\n"
                          "  (up to video.fast_forward_max x, audio muted), Alt+Enter fullscreen, Esc quit\n");
 }
@@ -183,7 +184,7 @@ int main(int argc, char** argv) {
     }
     // Per-game options (file section "game"/<serial>, then the command line), known once the disc is.
     const host::Settings eff = host::ApplyCli(file, opt, engine.DiscSerial());
-    const host::GameSettings game = host::GameFor(eff, engine.DiscSerial());
+    host::GameSettings game = host::GameFor(eff, engine.DiscSerial());
     if (opt.save_settings && !settings_path.empty()) {
         std::string err;
         if (host::SaveSettings(settings_path, eff, &err)) std::printf("[settings] saved %s\n", settings_path.c_str());
@@ -228,17 +229,20 @@ int main(int argc, char** argv) {
     }
     // Gameplay options (mod manifests, then the command line) and file mods: none = no patch = untouched engine.
     FileRedirect file_redirect;
+    GameplayOptions gameplay;
+    std::vector<GamePatch> option_patches, file_patches;  // the options' patches (live toggles rebuild them), file mods
     {
-        GameplayOptions gameplay;
         if (!game.mods.empty()) gameplay = LoadGameplayMods(game.mods, engine.DiscSerial());
         if (!game.text_speed.empty()) ParseTextSpeed(game.text_speed, gameplay.text_speed);
         if (!game.encounter_rate.empty()) ParseEncounterRate(game.encounter_rate, gameplay.encounter_rate);
         gameplay.skip_fmv = game.skip_fmv.value_or(false);
-        std::vector<GamePatch> patches = BuildGamePatches(engine.DiscSerial(), gameplay);  // logs what the disc lacks
+        option_patches = BuildGamePatches(engine.DiscSerial(), gameplay);  // logs what the disc lacks
+        std::vector<GamePatch> patches = option_patches;
         for (const GamePatch& g : patches) std::printf("[gameplay] %s\n", g.name.c_str());
         if (!game.mods.empty()) {
             std::vector<GamePatch> files = InstallFileMods(engine, file_redirect, game.mods);
             if (!files.empty()) std::printf("[files] %zu replacement files from %s\n", files.size(), game.mods.c_str());
+            file_patches = files;
             patches.insert(patches.end(), files.begin(), files.end());
         }
         engine.SetGamePatches(std::move(patches));
@@ -366,12 +370,71 @@ int main(int argc, char** argv) {
     const int ff_max = std::clamp(cfg.video.fast_forward_max, 2, 16);
     uint64_t ff_frames = 0;
     // battle_speed: the same, automatically, while the scene mode says battle (game.<serial>.battle_speed).
-    const int battle_speed = game.battle_speed > 1 ? game.battle_speed : 1;
-    const uint32_t scene_mode_addr = battle_speed > 1 ? SceneModeAddress(engine.DiscSerial()) : 0;
+    int battle_speed = game.battle_speed > 1 ? game.battle_speed : 1;  // F2 changes it live
+    const uint32_t scene_mode_addr = SceneModeAddress(engine.DiscSerial());
     if (battle_speed > 1 && !scene_mode_addr)
         std::fprintf(stderr, "[gameplay] battle_speed=%d: no battle flag known for disc %s, ignored\n", battle_speed,
                      engine.DiscSerial().empty() ? "(unrecognized)" : engine.DiscSerial().c_str());
     else if (battle_speed > 1) std::printf("[gameplay] battle_speed=%d\n", battle_speed);
+
+    // Hotkeys (input.hotkeys, F1-F4 by default): cycle a gameplay option live and write it to settings.json.
+    struct HotkeyBind { SDL_Scancode code; host::Hotkey action; };
+    std::vector<HotkeyBind> hotkeys;
+    for (host::Hotkey h : host::kHotkeys) {
+        const std::string& name = cfg.hotkeys.at(host::HotkeyAction(h));
+        if (SDL_Scancode sc = SDL_GetScancodeFromName(name.c_str()); sc != SDL_SCANCODE_UNKNOWN) hotkeys.push_back({sc, h});
+        else std::fprintf(stderr, "[settings] input.hotkeys.%s: unknown key \"%s\"\n", host::HotkeyAction(h), name.c_str());
+    }
+    uint32_t text_default = 0;  // the game's own text delay, seen while text_speed was normal
+    auto toggle_option = [&](host::Hotkey h) {
+        const std::string serial = engine.DiscSerial();
+        if (serial.empty()) { notify("hotkeys: disc not recognised"); return; }
+        const uint32_t text_addr = TextSpeedGlobal(serial);
+        if (text_addr && (game.text_speed.empty() || game.text_speed == "normal")) {
+            if (const uint32_t v = engine.Read(text_addr, 4)) text_default = v;
+        }
+        for (const GamePatch& r : BuildRevertPatches(option_patches)) engine.ApplyPatchNow(r);  // undo rewritten code
+        const std::string value = host::CycleGameOption(game, h);
+        ParseTextSpeed(game.text_speed.empty() ? "normal" : game.text_speed, gameplay.text_speed);
+        ParseEncounterRate(game.encounter_rate.empty() ? "normal" : game.encounter_rate, gameplay.encounter_rate);
+        gameplay.skip_fmv = game.skip_fmv.value_or(false);
+        option_patches = BuildGamePatches(serial, gameplay);
+        std::vector<GamePatch> all = option_patches;
+        all.insert(all.end(), file_patches.begin(), file_patches.end());
+        engine.SetGamePatches(std::move(all));
+        bool live = false, built = false;
+        for (const GamePatch& g : option_patches)
+            if (g.name.rfind(host::HotkeyAction(h), 0) == 0) built = true, live |= engine.ApplyPatchNow(g);
+        std::string note;
+        switch (h) {
+            case host::Hotkey::EncounterRate:
+                note = "encounters: " + value + (value == "normal" || live ? "" : built ? " (applies from the next area)" : " (not supported on this disc)");
+                break;
+            case host::Hotkey::SkipFmv:
+                note = std::string("skip movies: ") + value +
+                       (value == "off" || live ? "" : built ? " (applies from the next movie)" : " (not supported on this disc)");
+                break;
+            case host::Hotkey::TextSpeed:
+                note = "text speed: " + value;
+                if (value == "normal" && text_default) engine.Write(text_addr, text_default, 4);
+                else if (value == "normal" && text_addr) note += " (applies after restart)";
+                else if (!built) note += " (not supported on this disc)";
+                break;
+            case host::Hotkey::BattleSpeed:
+                battle_speed = game.battle_speed;
+                note = "battle speed: x" + value + (scene_mode_addr ? "" : " (not supported on this disc)");
+                break;
+        }
+        std::string err;  // persist only this game's key, onto the file as it is now (the launcher may have edited it)
+        host::Settings disk = settings_path.empty() ? host::DefaultSettings() : host::LoadSettings(settings_path, nullptr);
+        host::GameSettings& dg = disk.games[serial];
+        if (h == host::Hotkey::EncounterRate) dg.encounter_rate = game.encounter_rate;
+        else if (h == host::Hotkey::TextSpeed) dg.text_speed = game.text_speed;
+        else if (h == host::Hotkey::SkipFmv) dg.skip_fmv = game.skip_fmv;
+        else dg.battle_speed = game.battle_speed;
+        if (settings_path.empty() || !host::SaveSettings(settings_path, disk, &err)) note += " [not saved]";
+        notify(note);
+    };
 
     if (opt.load_slot >= 0) { state_slot = opt.load_slot; load_state(); }  // reproduce a reported moment
     while (!quit && engine.GetState() == EngineState::Running && (!max_frames || engine.GetFrameCount() < max_frames)) {
@@ -396,6 +459,10 @@ int main(int argc, char** argv) {
                 if (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) window_mode = "windowed";
                 else window_mode = cfg.video.window_mode == "windowed" ? "borderless" : cfg.video.window_mode;
                 apply_mode(window_mode);
+            } else if (ev.type == SDL_EVENT_KEY_DOWN && !ev.key.repeat &&
+                       std::any_of(hotkeys.begin(), hotkeys.end(), [&](const HotkeyBind& b) { return b.code == ev.key.scancode; })) {
+                for (const HotkeyBind& b : hotkeys)
+                    if (b.code == ev.key.scancode) toggle_option(b.action);
             } else if (ev.type == SDL_EVENT_KEY_DOWN && !ev.key.repeat && ev.key.scancode == SDL_SCANCODE_F5) {
                 save_state();
             } else if (ev.type == SDL_EVENT_KEY_DOWN && !ev.key.repeat && ev.key.scancode == SDL_SCANCODE_F8) {
