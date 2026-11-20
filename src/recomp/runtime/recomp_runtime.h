@@ -20,11 +20,18 @@
 #include <vector>
 
 #include "cpu/gte.h"
+#include "recomp/runtime/prm_abi.h"
 
 namespace personarm::recomp {
 
 struct CpuState;
 using RecompFn = void (*)(CpuState&);
+
+/// Continue at `target`: run its compiled function if there is one (`map`, else `dispatcher`),
+/// otherwise offer it to `external`, else leave `s.pc` there for the interpreter and count a fallback.
+void Dispatch(CpuState& s, uint32_t target);
+/// COP2 for generated C code (CpuState::cop2): `word` is the COP2 instruction, through `s.gte`.
+uint32_t Cop2(CpuState& s, uint32_t word, uint32_t value);
 
 struct FunctionEntry {
     uint32_t address;
@@ -112,7 +119,13 @@ struct CpuState {
     uint32_t next_pc = 0;     // nonzero: stopped in a delay slot at `pc`, the branch continues here
     uint32_t load_reg = 0, load_val = 0;  // stopped right after a delayed load: still in flight
     uint32_t pair_prev = 0;   // register value before a chain of loads into it (LWL/LWR pairs)
+    // Used by generated C code (prm_abi.h), which cannot call into Gte or Dispatcher itself.
+    uint32_t (*cop2)(CpuState& s, uint32_t word, uint32_t value) = Cop2;
+    void (*dispatch)(CpuState& s, uint32_t target) = Dispatch;
 };
+
+/// A module of generated C code (prm_abi.h) seen as a Module: same layout, checked in recomp_runtime.cpp.
+inline const Module* FromAbi(const prm_module* m) { return reinterpret_cast<const Module*>(m); }
 
 inline uint32_t LoadLe(const uint8_t* p, uint32_t size) {
     uint32_t v = p[0];
@@ -185,10 +198,6 @@ inline bool StopLoad(CpuState& s, uint32_t pc, uint32_t reg, uint32_t prev) {
 /// Same as CpuContext::RaiseException: EPC/BD, ExcCode, KU/IE push, pc = vector (BEV).
 /// `pc` is the address of the faulting instruction; `delay_slot` when it sits in a delay slot.
 void RaiseException(CpuState& s, uint32_t exc_code, uint32_t pc, bool delay_slot);
-
-/// Continue at `target`: run its compiled function if there is one (`map`, else `dispatcher`),
-/// otherwise offer it to `external`, else leave `s.pc` there for the interpreter and count a fallback.
-void Dispatch(CpuState& s, uint32_t target);
 
 /// DIV/DIVU with the R3000A results for the edge cases (no trap), as the interpreter computes them.
 inline void Div(CpuState& s, uint32_t a, uint32_t b) {

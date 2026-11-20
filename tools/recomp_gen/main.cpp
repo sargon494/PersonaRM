@@ -1,6 +1,7 @@
-// recomp_gen: raw MIPS image -> C++ (static recompiler v0). Offline developer tool.
+// recomp_gen: raw MIPS image -> C (static recompiler). Offline developer tool; a whole disc goes
+// through personarm_native (--emit-c for the link-time build, or a DLL on the player's PC).
 //
-//   recomp_gen <image> <base> <out.cpp> [--skip N] [--size N] [--entries a,b,...] [--entries-file f]
+//   recomp_gen <image> <base> <out.c> [--skip N] [--size N] [--entries a,b,...] [--entries-file f]
 //              [--cfg-entry a,b,...] [--cfg-entries-file f] [--module name] [--exclude a,b,...]
 //
 // <image> is read from byte offset --skip (0x800 for a PS-X EXE payload) and loaded at <base>.
@@ -8,7 +9,7 @@
 // analysis started at each --cfg-entry (repeatable, or a comma list). The output path is required: nothing is written by default.
 // --exclude keeps addresses as function boundaries but leaves them to the interpreter (PC hooks of
 // the boot harness: load_file_by_id, cd_read_start). The module name must be a C identifier; the
-// engine build (-DPRM_RECOMP_GENERATED_DIR) expects it to equal the .cpp file name.
+// engine build (-DPRM_RECOMP_GENERATED_DIR) expects it to equal the .c file name.
 
 #include <cstdio>
 #include <cstdlib>
@@ -48,7 +49,7 @@ bool ParseList(const std::string& s, char sep, std::vector<uint32_t>& out) {
 }
 
 int Usage() {
-    std::cerr << "usage: recomp_gen <image> <base> <out.cpp> [--skip N] [--size N] [--entries a,b,...] "
+    std::cerr << "usage: recomp_gen <image> <base> <out.c> [--skip N] [--size N] [--entries a,b,...] "
                  "[--entries-file f] [--cfg-entry a,b,...] [--cfg-entries-file f] [--module name] [--exclude a,b,...]\n";
     return 2;
 }
@@ -100,7 +101,7 @@ int main(int argc, char** argv) {
     if (entries.empty()) { std::cerr << "no entries\n"; return 2; }
     entries.insert(entries.end(), exclude.begin(), exclude.end());  // boundaries even if not found
 
-    const CodegenResult res = GenerateCpp(data.data(), data.size(), base, entries, module, exclude);
+    const CodegenResult res = GenerateC(data.data(), data.size(), base, entries, module, exclude);
     std::ofstream out(out_path, std::ios::binary);
     if (!out || !(out << res.source)) { std::cerr << "cannot write " << out_path << "\n"; return 1; }
 

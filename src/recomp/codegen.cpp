@@ -15,9 +15,9 @@ namespace {
 
 std::string Hex(uint32_t v) { char b[16]; std::snprintf(b, sizeof b, "0x%08Xu", v); return b; }
 std::string Addr(uint32_t v) { char b[16]; std::snprintf(b, sizeof b, "%08X", v); return b; }
-std::string R(uint32_t r) { return "s.gpr[" + std::to_string(r) + "]"; }
+std::string R(uint32_t r) { return "s->gpr[" + std::to_string(r) + "]"; }
 // A write to $zero still evaluates the value (a load from MMIO has side effects).
-std::string Set(uint32_t r, const std::string& e) { return r ? R(r) + " = " + e + ";" : "static_cast<void>(" + e + ");"; }
+std::string Set(uint32_t r, const std::string& e) { return r ? R(r) + " = " + e + ";" : "(void)(" + e + ");"; }
 
 struct Image {
     const uint8_t* p;
@@ -191,8 +191,8 @@ Func Analyze(const Image& img, uint32_t entry, const std::set<uint32_t>& entries
 
 class Emitter {
 public:
-    Emitter(const Image& img, const std::set<uint32_t>& generated, Func& f)
-        : m_img(img), m_gen(generated), m_f(f), m_labels(f.labels) {}
+    Emitter(const Image& img, const std::set<uint32_t>& generated, Func& f, bool comments)
+        : m_img(img), m_gen(generated), m_f(f), m_labels(f.labels), m_comments(comments) {}
 
     std::string Body() {
         std::ostringstream os;
@@ -211,7 +211,7 @@ public:
                 ft = a + 8;
                 falls = Transfer(os, a);
             } else {
-                os << "    // " << Addr(a) << ": " << DescribeInsn(w) << "\n";
+                if (m_comments) os << "    // " << Addr(a) << ": " << DescribeInsn(w) << "\n";
                 const uint32_t fn = FunctOf(w);
                 if (OpOf(w) == 0 && (fn == 0x0C || fn == 0x0D)) {
                     os << "    " << Stmt(a, false) << "\n";   // the exception counts its cycle
@@ -235,12 +235,12 @@ public:
 
 private:
     std::string Exc(uint32_t code, uint32_t a, bool bd) const {
-        return "{ RaiseException(s, " + Hex(code) + ", " + Hex(a) + ", " + (bd ? "true" : "false") + "); s.cycles += 1; return; }";
+        return "{ RaiseException(s, " + Hex(code) + ", " + Hex(a) + ", " + (bd ? "1" : "0") + "); s->cycles += 1; return; }";
     }
     // After an instruction: its cycle, then the host's service point. `next` resumes there;
     // `slot_next` nonzero when `next` is a delay slot (the branch then continues at slot_next).
     static std::string Tick(const std::string& next, const std::string& slot_next = "") {
-        return "s.cycles += 1; if (s.cycles >= s.deadline && Stop(s, " + next + (slot_next.empty() ? "" : ", " + slot_next) + ")) return;";
+        return "s->cycles += 1; if (s->cycles >= s->deadline && Stop(s, " + next + ", " + (slot_next.empty() ? "0" : slot_next) + ")) return;";
     }
     // A non-transfer instruction and its Tick. After a delayed load (or MFC0/MFC2/CFC2) a stop hands
     // the interpreter the state it would hold: old register value, the new one still in flight.
@@ -250,10 +250,10 @@ private:
         const uint32_t w = m_img.Word(a);
         if (!RegUse(w).delayed) return Stmt(a, bd) + " " + Tick(next);
         const std::string rt = std::to_string(RtOf(w));
-        const std::string stop = " s.cycles += 1; if (s.cycles >= s.deadline && StopLoad(s, " + next + ", " + rt + ", ";
-        if (Chained(a)) return "{ " + Stmt(a, bd) + stop + "s.pair_prev)) return; }";
-        const std::string save = Chained(a + 4) ? "s.pair_prev = s.gpr[" + rt + "]; " : "";
-        return "{ const uint32_t prev = s.gpr[" + rt + "]; " + save + Stmt(a, bd) + stop + "prev)) return; }";
+        const std::string stop = " s->cycles += 1; if (s->cycles >= s->deadline && StopLoad(s, " + next + ", " + rt + ", ";
+        if (Chained(a)) return "{ " + Stmt(a, bd) + stop + "s->pair_prev)) return; }";
+        const std::string save = Chained(a + 4) ? "s->pair_prev = s->gpr[" + rt + "]; " : "";
+        return "{ const u32 prev = s->gpr[" + rt + "]; " + save + Stmt(a, bd) + stop + "prev)) return; }";
     }
     // True when `x` is only ever reached right after `x - 4` and both are delayed loads into the
     // same register (x - 4 a plain instruction, or the delay slot of a conditional branch).
@@ -280,9 +280,11 @@ private:
         const uint32_t op = OpOf(w), rs = RsOf(w), rt = RtOf(w), rd = RdOf(w), ret = a + 8;
         const Insn in = Decode(w, a);
         const std::string after = "(taken ? " + Hex(in.target) + " : " + Hex(ret) + ")";
-        const std::string done = "if (s.pc != " + Hex(ret) + " || s.stopped) return;";
-        os << "    // " << Addr(a) << ": " << DescribeInsn(w) << "\n";
-        os << "    // " << Addr(a + 4) << ": " << DescribeInsn(ds) << "  (delay slot)\n";
+        const std::string done = "if (s->pc != " + Hex(ret) + " || s->stopped) return;";
+        if (m_comments) {
+            os << "    // " << Addr(a) << ": " << DescribeInsn(w) << "\n";
+            os << "    // " << Addr(a + 4) << ": " << DescribeInsn(ds) << "  (delay slot)\n";
+        }
         os << "    {\n";
         bool falls = true;
         auto slot = [&](const std::string& next) {   // branch cycle, delay slot, its cycle
@@ -290,14 +292,14 @@ private:
             os << "        " << Timed(a + 4, true, next) << "\n";
         };
         auto cond = [&](const std::string& c) {
-            os << "        const bool taken = " << c << ";\n";
+            os << "        const int taken = " << c << ";\n";
             slot(after);
             os << "        if (taken) " << JumpTo(in.target) << "\n";
         };
-        const std::string S = "static_cast<int32_t>(" + R(rs) + ")";
+        const std::string S = "((s32)" + R(rs) + ")";
         switch (op) {
             case 0x00:
-                os << "        const uint32_t target = " << R(rs) << ";\n";
+                os << "        const u32 target = " << R(rs) << ";\n";
                 if (FunctOf(w) == 0x09) {                      // jalr
                     os << "        " << Set(rd ? rd : 31, Hex(ret)) << "\n";
                     slot("target");
@@ -312,13 +314,13 @@ private:
                     for (uint32_t t : m_f.tables[a]) os << "            case " << Hex(t) << ": " << JumpTo(t) << "\n";
                     os << "            default: break;\n        }\n";
                 }
-                if (rs == 31 && !m_f.tables.count(a)) os << "        s.pc = target;\n        return;\n";
+                if (rs == 31 && !m_f.tables.count(a)) os << "        s->pc = target;\n        return;\n";
                 else os << "        Dispatch(s, target);\n        return;\n";
                 break;
             case 0x01:
                 if (rt == 0x00 || rt == 0x01) { cond(S + (rt ? " >= 0" : " < 0")); break; }
-                os << "        const bool taken = " << S << (rt == 0x11 ? " >= 0" : " < 0") << ";\n";
-                os << "        s.gpr[31] = " << Hex(ret) << ";\n";
+                os << "        const int taken = " << S << (rt == 0x11 ? " >= 0" : " < 0") << ";\n";
+                os << "        s->gpr[31] = " << Hex(ret) << ";\n";
                 slot(after);
                 os << "        if (taken) {\n            " << Call(in.target) << "\n";
                 os << "            " << done << "\n        }\n";
@@ -329,7 +331,7 @@ private:
                 falls = false;
                 break;
             case 0x03:
-                os << "        s.gpr[31] = " << Hex(ret) << ";\n";
+                os << "        s->gpr[31] = " << Hex(ret) << ";\n";
                 slot(Hex(in.target));
                 os << "        " << Call(in.target) << "\n";
                 os << "        " << done << "\n";
@@ -343,42 +345,42 @@ private:
         return falls;
     }
 
-    // One non-transfer instruction as a single line of C++. `bd`: it sits in a delay slot.
+    // One non-transfer instruction as a single line of C. `bd`: it sits in a delay slot.
     std::string Stmt(uint32_t a, bool bd) const {
         const uint32_t w = m_img.Word(a);
         const uint32_t op = OpOf(w), rs = RsOf(w), rt = RtOf(w), rd = RdOf(w), sh = ShamtOf(w), fn = FunctOf(w);
         const uint32_t imm = ImmOf(w), simm = static_cast<uint32_t>(SImmOf(w));
         const std::string RS = R(rs), RT = R(rt), SH = std::to_string(sh);
         const std::string ea = RS + " + " + Hex(simm);
-        auto i32 = [](const std::string& e) { return "static_cast<int32_t>(" + e + ")"; };
+        auto i32 = [](const std::string& e) { return "((s32)" + e + ")"; };
         auto addr_check = [&](uint32_t mask, uint32_t code) {
-            return "if (a & " + std::to_string(mask) + "u) { s.badvaddr = a; " + Exc(code, a, bd).substr(2);
+            return "if (a & " + std::to_string(mask) + "u) { s->badvaddr = a; " + Exc(code, a, bd).substr(2);
         };
         switch (op) {
             case 0x00:
                 switch (fn) {
                     case 0x00: return w == 0 ? "/* nop */" : Set(rd, RT + " << " + SH);
                     case 0x02: return Set(rd, RT + " >> " + SH);
-                    case 0x03: return Set(rd, "static_cast<uint32_t>(" + i32(RT) + " >> " + SH + ")");
+                    case 0x03: return Set(rd, "(u32)(" + i32(RT) + " >> " + SH + ")");
                     case 0x04: return Set(rd, RT + " << (" + RS + " & 31u)");
                     case 0x06: return Set(rd, RT + " >> (" + RS + " & 31u)");
-                    case 0x07: return Set(rd, "static_cast<uint32_t>(" + i32(RT) + " >> (" + RS + " & 31u))");
+                    case 0x07: return Set(rd, "(u32)(" + i32(RT) + " >> (" + RS + " & 31u))");
                     case 0x0C: return Exc(0x08, a, bd);
                     case 0x0D: return Exc(0x09, a, bd);
-                    case 0x10: return Set(rd, "s.hi");
-                    case 0x11: return "s.hi = " + RS + ";";
-                    case 0x12: return Set(rd, "s.lo");
-                    case 0x13: return "s.lo = " + RS + ";";
-                    case 0x18: return "{ const int64_t p = static_cast<int64_t>(" + i32(RS) + ") * " + i32(RT) +
-                                      "; s.lo = static_cast<uint32_t>(p); s.hi = static_cast<uint32_t>(static_cast<uint64_t>(p) >> 32); }";
-                    case 0x19: return "{ const uint64_t p = static_cast<uint64_t>(" + RS + ") * " + RT +
-                                      "; s.lo = static_cast<uint32_t>(p); s.hi = static_cast<uint32_t>(p >> 32); }";
+                    case 0x10: return Set(rd, "s->hi");
+                    case 0x11: return "s->hi = " + RS + ";";
+                    case 0x12: return Set(rd, "s->lo");
+                    case 0x13: return "s->lo = " + RS + ";";
+                    case 0x18: return "{ const s64 p = (s64)" + i32(RS) + " * " + i32(RT) +
+                                      "; s->lo = (u32)p; s->hi = (u32)((u64)p >> 32); }";
+                    case 0x19: return "{ const u64 p = (u64)" + RS + " * " + RT +
+                                      "; s->lo = (u32)p; s->hi = (u32)(p >> 32); }";
                     case 0x1A: return "Div(s, " + RS + ", " + RT + ");";
                     case 0x1B: return "Divu(s, " + RS + ", " + RT + ");";
-                    case 0x20: return "{ const uint32_t x = " + RS + ", y = " + RT + ", r = x + y; if (~(x ^ y) & (x ^ r) & 0x80000000u) " +
+                    case 0x20: return "{ const u32 x = " + RS + ", y = " + RT + ", r = x + y; if (~(x ^ y) & (x ^ r) & 0x80000000u) " +
                                       Exc(0x0C, a, bd) + " " + Set(rd, "r") + " }";
                     case 0x21: return Set(rd, RS + " + " + RT);
-                    case 0x22: return "{ const uint32_t x = " + RS + ", y = " + RT + ", r = x - y; if ((x ^ y) & (x ^ r) & 0x80000000u) " +
+                    case 0x22: return "{ const u32 x = " + RS + ", y = " + RT + ", r = x - y; if ((x ^ y) & (x ^ r) & 0x80000000u) " +
                                       Exc(0x0C, a, bd) + " " + Set(rd, "r") + " }";
                     case 0x23: return Set(rd, RS + " - " + RT);
                     case 0x24: return Set(rd, RS + " & " + RT);
@@ -388,7 +390,7 @@ private:
                     case 0x2A: return Set(rd, "(" + i32(RS) + " < " + i32(RT) + ") ? 1u : 0u");
                     default:   return Set(rd, "(" + RS + " < " + RT + ") ? 1u : 0u");   // 0x2B sltu
                 }
-            case 0x08: return "{ const uint32_t x = " + RS + ", r = x + " + Hex(simm) + "; if (~(x ^ " + Hex(simm) +
+            case 0x08: return "{ const u32 x = " + RS + ", r = x + " + Hex(simm) + "; if (~(x ^ " + Hex(simm) +
                               ") & (x ^ r) & 0x80000000u) " + Exc(0x0C, a, bd) + " " + Set(rt, "r") + " }";
             case 0x09: return Set(rt, RS + " + " + Hex(simm));
             case 0x0A: return Set(rt, "(" + i32(RS) + " < " + std::to_string(SImmOf(w)) + ") ? 1u : 0u");
@@ -399,48 +401,47 @@ private:
             case 0x0F: return Set(rt, Hex(imm << 16));
             case 0x10:                                                     // COP0
                 if (rs == 0x00) {
-                    if (rd == 8) return Set(rt, "s.badvaddr");
-                    if (rd == 12) return Set(rt, "s.sr");
-                    if (rd == 13) return Set(rt, "s.cause");
-                    if (rd == 14) return Set(rt, "s.epc");
+                    if (rd == 8) return Set(rt, "s->badvaddr");
+                    if (rd == 12) return Set(rt, "s->sr");
+                    if (rd == 13) return Set(rt, "s->cause");
+                    if (rd == 14) return Set(rt, "s->epc");
                     return "/* mfc0 of an unmodelled register: rt keeps its value */";
                 }
                 if (rs == 0x04) {
                     // SR/CAUSE writes can unmask a pending IRQ: deadline 0 forces the service point.
-                    if (rd == 12) return "s.sr = " + RT + "; s.deadline = 0;";
-                    if (rd == 13) return "s.cause = (s.cause & ~0x300u) | (" + RT + " & 0x300u); s.deadline = 0;";
-                    if (rd == 14) return "s.epc = " + RT + ";";
+                    if (rd == 12) return "s->sr = " + RT + "; s->deadline = 0;";
+                    if (rd == 13) return "s->cause = (s->cause & ~0x300u) | (" + RT + " & 0x300u); s->deadline = 0;";
+                    if (rd == 14) return "s->epc = " + RT + ";";
                     return "/* mtc0 to an unmodelled register */";
                 }
-                if (fn == 0x10 && (w & 0x02000000u)) return "s.sr = (s.sr & ~0x0Fu) | ((s.sr >> 2) & 0x0Fu); s.deadline = 0; /* rfe */";
+                if (fn == 0x10 && (w & 0x02000000u)) return "s->sr = (s->sr & ~0x0Fu) | ((s->sr >> 2) & 0x0Fu); s->deadline = 0; /* rfe */";
                 return "/* cop0: no-op in the interpreter */";
-            case 0x12:                                                     // COP2 (GTE)
-                if (w & 0x02000000u) return "s.gte->ExecuteCommand(" + Hex(w) + ");";
-                if (rs == 0x00) return Set(rt, "s.gte->ReadDataRegister(" + std::to_string(rd) + ")");
-                if (rs == 0x02) return Set(rt, "s.gte->ReadControlRegister(" + std::to_string(rd) + ")");
-                if (rs == 0x04) return "s.gte->WriteDataRegister(" + std::to_string(rd) + ", " + RT + ");";
-                if (rs == 0x06) return "s.gte->WriteControlRegister(" + std::to_string(rd) + ", " + RT + ");";
+            case 0x12:                                                     // COP2 (GTE), through the host
+                if (w & 0x02000000u) return "s->cop2(s, " + Hex(w) + ", 0);";
+                if (rs == 0x00 || rs == 0x02) return Set(rt, "s->cop2(s, " + Hex(w) + ", 0)");
+                if (rs == 0x04 || rs == 0x06) return "s->cop2(s, " + Hex(w) + ", " + RT + ");";
                 return "/* cop2: no-op in the interpreter */";
-            case 0x20: return Set(rt, "static_cast<uint32_t>(static_cast<int8_t>(Read(s, " + ea + ", 1)))");
-            case 0x24: return Set(rt, "static_cast<uint32_t>(static_cast<uint8_t>(Read(s, " + ea + ", 1)))");
-            case 0x21: return "{ const uint32_t a = " + ea + "; " + addr_check(1, 0x04) + " " +
-                              Set(rt, "static_cast<uint32_t>(static_cast<int16_t>(Read(s, a, 2)))") + " }";
-            case 0x25: return "{ const uint32_t a = " + ea + "; " + addr_check(1, 0x04) + " " +
-                              Set(rt, "static_cast<uint32_t>(static_cast<uint16_t>(Read(s, a, 2)))") + " }";
-            case 0x23: return "{ const uint32_t a = " + ea + "; " + addr_check(3, 0x04) + " " + Set(rt, "Read(s, a, 4)") + " }";
-            case 0x22: return "{ const uint32_t a = " + ea + ", sh = (a & 3u) * 8, m = Read(s, a & ~3u, 4); " +
+            case 0x20: return Set(rt, "(u32)(s8)Read(s, " + ea + ", 1)");
+            case 0x24: return Set(rt, "(u32)(u8)Read(s, " + ea + ", 1)");
+            case 0x21: return "{ const u32 a = " + ea + "; " + addr_check(1, 0x04) + " " +
+                              Set(rt, "(u32)(s16)Read(s, a, 2)") + " }";
+            case 0x25: return "{ const u32 a = " + ea + "; " + addr_check(1, 0x04) + " " +
+                              Set(rt, "(u32)(u16)Read(s, a, 2)") + " }";
+            case 0x23: return "{ const u32 a = " + ea + "; " + addr_check(3, 0x04) + " " + Set(rt, "Read(s, a, 4)") + " }";
+            case 0x22: return "{ const u32 a = " + ea + ", sh = (a & 3u) * 8, m = Read(s, a & ~3u, 4); " +
                               Set(rt, "(" + RT + " & (0x00FFFFFFu >> sh)) | (m << (24 - sh))") + " }";
-            case 0x26: return "{ const uint32_t a = " + ea + ", sh = (a & 3u) * 8, m = Read(s, a & ~3u, 4); " +
+            case 0x26: return "{ const u32 a = " + ea + ", sh = (a & 3u) * 8, m = Read(s, a & ~3u, 4); " +
                               Set(rt, "(" + RT + " & (sh == 0 ? 0u : (0xFFFFFF00u << (24 - sh)))) | (m >> sh)") + " }";
             case 0x28: return "Write(s, " + ea + ", " + RT + " & 0xFFu, 1);";
-            case 0x29: return "{ const uint32_t a = " + ea + "; " + addr_check(1, 0x05) + " Write(s, a, " + RT + " & 0xFFFFu, 2); }";
-            case 0x2B: return "{ const uint32_t a = " + ea + "; " + addr_check(3, 0x05) + " Write(s, a, " + RT + ", 4); }";
-            case 0x2A: return "{ const uint32_t a = " + ea + ", sh = (a & 3u) * 8, m = Read(s, a & ~3u, 4); " +
+            case 0x29: return "{ const u32 a = " + ea + "; " + addr_check(1, 0x05) + " Write(s, a, " + RT + " & 0xFFFFu, 2); }";
+            case 0x2B: return "{ const u32 a = " + ea + "; " + addr_check(3, 0x05) + " Write(s, a, " + RT + ", 4); }";
+            case 0x2A: return "{ const u32 a = " + ea + ", sh = (a & 3u) * 8, m = Read(s, a & ~3u, 4); " +
                               "Write(s, a & ~3u, (m & (0xFFFFFF00u << sh)) | (" + RT + " >> (24 - sh)), 4); }";
-            case 0x2E: return "{ const uint32_t a = " + ea + ", sh = (a & 3u) * 8, m = Read(s, a & ~3u, 4); " +
+            case 0x2E: return "{ const u32 a = " + ea + ", sh = (a & 3u) * 8, m = Read(s, a & ~3u, 4); " +
                               "Write(s, a & ~3u, (m & (sh == 0 ? 0u : (0x00FFFFFFu >> (24 - sh)))) | (" + RT + " << sh), 4); }";
-            case 0x32: return "s.gte->WriteDataRegister(" + std::to_string(rt) + ", Read(s, " + ea + ", 4));";
-            default:   return "Write(s, " + ea + ", s.gte->ReadDataRegister(" + std::to_string(rt) + "), 4);";  // 0x3A swc2
+            // LWC2/SWC2: MTC2/MFC2 of rt
+            case 0x32: return "s->cop2(s, " + Hex(0x48800000u | (rt << 11)) + ", Read(s, " + ea + ", 4));";
+            default:   return "Write(s, " + ea + ", s->cop2(s, " + Hex(0x48000000u | (rt << 11)) + ", 0), 4);";  // 0x3A swc2
         }
     }
 
@@ -448,13 +449,14 @@ private:
     const std::set<uint32_t>& m_gen;
     Func& m_f;
     const std::set<uint32_t> m_labels;   // branch targets and resume points, before Body() adds gotos
+    const bool m_comments;
 };
 
 } // namespace
 
-CodegenResult GenerateCpp(const uint8_t* image, size_t size, uint32_t base,
-                          const std::vector<uint32_t>& entries, const std::string& module,
-                          const std::vector<uint32_t>& exclude) {
+CodegenResult GenerateC(const uint8_t* image, size_t size, uint32_t base,
+                        const std::vector<uint32_t>& entries, const std::string& module,
+                        const std::vector<uint32_t>& exclude, bool comments) {
     const Image img{image, size, base};
     const std::set<uint32_t> excluded(exclude.begin(), exclude.end());
     const std::set<uint32_t> entry_set(entries.begin(), entries.end());
@@ -469,14 +471,14 @@ CodegenResult GenerateCpp(const uint8_t* image, size_t size, uint32_t base,
 
     CodegenResult res;
     std::ostringstream os;
-    os << "// Generated by tools/recomp_gen (PersonaRM static recompiler v0). Do not edit.\n"
+    os << "// Generated by the PersonaRM static recompiler (generator v" << kGeneratorVersion << "). Do not edit.\n"
        << "// Image base " << Hex(base) << ", " << size << " bytes, " << entry_set.size() << " entries, "
        << generated.size() << " generated.\n";
     for (const Func& f : funcs) {
         if (!f.ok) os << "// not generated: " << Addr(f.entry) << " (" << f.reason << ")\n";
     }
-    os << "\n#include \"recomp/runtime/recomp_runtime.h\"\n\nnamespace {\n\nusing namespace personarm::recomp;\n\n";
-    for (uint32_t e : generated) os << "void f_" << Addr(e) << "(CpuState& s);\n";
+    os << "\n#include \"prm_abi.h\"\n\n";
+    for (uint32_t e : generated) os << "static void f_" << Addr(e) << "(prm_cpu* s);\n";
     std::vector<std::pair<uint32_t, uint32_t>> resume_table;   // (address, function entry)
     for (Func& f : funcs) {
         GeneratedFunction g;
@@ -502,27 +504,26 @@ CodegenResult GenerateCpp(const uint8_t* image, size_t size, uint32_t base,
         g.resume_points = static_cast<uint32_t>(resume.size());
         res.functions.push_back(g);
         const std::string F = Addr(f.entry);
-        const std::string body = Emitter(img, generated, f).Body();
+        const std::string body = Emitter(img, generated, f, comments).Body();
         if (resume.empty()) {
-            os << "\nvoid f_" << F << "(CpuState& s) {\n" << body << "}\n";
+            os << "\nstatic void f_" << F << "(prm_cpu* s) {\n" << body << "}\n";
             continue;
         }
-        os << "\nstatic void b_" << F << "(CpuState& s, uint32_t at) {\n    switch (at) {\n";
+        os << "\nstatic void b_" << F << "(prm_cpu* s, u32 at) {\n    switch (at) {\n";
         for (uint32_t r : resume) {
             os << "        case " << Hex(r) << ": goto L_" << Addr(r) << ";\n";
             resume_table.push_back({r, f.entry});
         }
         os << "        default: break;\n    }\n" << body << "}\n";
-        os << "void f_" << F << "(CpuState& s) { b_" << F << "(s, 0); }\n";
-        os << "void r_" << F << "(CpuState& s) { b_" << F << "(s, s.pc); }\n";
+        os << "static void f_" << F << "(prm_cpu* s) { b_" << F << "(s, 0); }\n";
+        os << "static void r_" << F << "(prm_cpu* s) { b_" << F << "(s, s->pc); }\n";
     }
-    os << "\n} // namespace\n\nextern const personarm::recomp::FunctionEntry kRecomp_" << module << "[] = {\n";
+    os << "\nstatic const prm_entry kEntries[] = {\n";
     for (uint32_t e : generated) os << "    {" << Hex(e) << ", f_" << Addr(e) << "},\n";
-    if (generated.empty()) os << "    {0u, nullptr},\n";
-    os << "};\nextern const size_t kRecomp_" << module << "_count = " << generated.size() << ";\n";
-    os << "extern const personarm::recomp::FunctionEntry kRecomp_" << module << "_resume[] = {\n";
+    if (generated.empty()) os << "    {0u, 0},\n";
+    os << "};\nstatic const prm_entry kResume[] = {\n";
     for (const auto& r : resume_table) os << "    {" << Hex(r.first) << ", r_" << Addr(r.second) << "},\n";
-    if (resume_table.empty()) os << "    {0u, nullptr},\n";
+    if (resume_table.empty()) os << "    {0u, 0},\n";
     os << "};\n";
     // Translated words (instructions and their delay slots) as ranges, with their values: the host
     // keys the module by these alone (the image's data may change while the code stays valid).
@@ -539,10 +540,10 @@ CodegenResult GenerateCpp(const uint8_t* image, size_t size, uint32_t base,
         if (!ranges.empty() && ranges.back() == a) ranges.back() = a + 4;
         else { ranges.push_back(a); ranges.push_back(a + 4); }
     }
-    os << "static const uint32_t kCode[] = {";
+    os << "static const u32 kCode[] = {";
     for (size_t i = 0; i < ranges.size(); ++i) os << (i % 8 ? " " : "\n    ") << Hex(ranges[i]) << ",";
     if (ranges.empty()) os << "0u";
-    os << "\n};\nstatic const uint32_t kWords[] = {";
+    os << "\n};\nstatic const u32 kWords[] = {";
     size_t n = 0;
     for (uint32_t a : code) os << (n++ % 8 ? " " : "\n    ") << Hex(img.Word(a)) << ",";
     if (code.empty()) os << "0u";
@@ -554,9 +555,9 @@ CodegenResult GenerateCpp(const uint8_t* image, size_t size, uint32_t base,
     char hash[24], code_hash[24];
     std::snprintf(hash, sizeof hash, "0x%016llXull", static_cast<unsigned long long>(Fnv1a64(image, size)));
     std::snprintf(code_hash, sizeof code_hash, "0x%016llXull", static_cast<unsigned long long>(CodeHash(m, image)));
-    os << "extern const personarm::recomp::Module kRecompModule_" << module << " = {\"" << module << "\", " << Hex(base)
-       << ", " << size << "u, " << hash << ", kRecomp_" << module << ", " << generated.size() << ", kRecomp_" << module
-       << "_resume, " << resume_table.size() << ", kCode, " << m.code_count << ", kWords, " << code_hash << "};\n";
+    os << "const prm_module kRecompModule_" << module << " = {\"" << module << "\", " << Hex(base) << ", " << size << "u, "
+       << hash << ", kEntries, " << generated.size() << ", kResume, " << resume_table.size() << ", kCode, "
+       << m.code_count << ", kWords, " << code_hash << "};\n";
     res.source = os.str();
     return res;
 }
