@@ -114,6 +114,53 @@ static void TestInsertedAndRemovedTiles() {
     std::printf("  inserted/removed tiles ok\n");
 }
 
+// Textured quad spanning xl..xr, y 0..16, own UV origin u (its own key).
+static void Strip(std::vector<uint32_t>& c, int xl, int xr, uint32_t u) {
+    Packet(c, {0x2C808080, XY(xl, 0), u, XY(xr, 0), u + 16, XY(xl, 16), u | 16 << 8, XY(xr, 16), (u + 16) | 16 << 8});
+}
+static int32_t Xv(const std::vector<uint32_t>& c, size_t packet_word, int k) {  // vertex k of a 2Ch quad
+    return int16_t(c[packet_word + 2 + 2 * k] & 0xFFFF);
+}
+
+// Root cause of the 120 fps jitter: vertices lerped and rounded one by one, per primitive. A mesh whose
+// vertices move 2 and 3 px (perspective) had edges growing and shrinking inside one game frame (texture
+// swimming), and a shared vertex of a wrong same-key partner or of an unpaired neighbour landed in two
+// places (seams opening and closing). Every vertex position of cur must now land in one place, move
+// monotonically, and every edge must change monotonically from its old length to its new one.
+static void TestMeshMovesAsOne() {
+    // Four strips sharing their edges at x = 26, 42, 58; the left column moves 2 px, the others 3 px; the
+    // last strip is new (no partner, as entering the view).
+    std::vector<uint32_t> prev, cur, out[5];
+    Strip(prev, 8, 23, 0), Strip(prev, 23, 39, 64), Strip(prev, 39, 55, 128);
+    Strip(cur, 10, 26, 0), Strip(cur, 26, 42, 64), Strip(cur, 42, 58, 128), Strip(cur, 58, 74, 192);
+    const Match m = MatchPrimitives(prev, cur, 48);
+    assert(m.matched == 3 && m.prev_of[3] == -1);
+    const double ts[5] = {0, 0.25, 0.5, 0.75, 1};
+    auto check = [&](const Match& mm) {
+        for (int j = 0; j < 5; ++j) LerpCommands(prev, cur, mm, ts[j], 48, out[j]);
+        assert(out[4] == cur);
+        for (size_t p : {size_t(0), size_t(10), size_t(20), size_t(30)})
+            for (int j = 0; j < 5; ++j) {
+                if (p) assert(Xv(out[j], p, 0) == Xv(out[j], p - 10, 1));  // shared vertices land together
+                if (j == 0 && p < 30) assert(Xv(out[0], p, 0) == Xv(prev, p, 0) && Xv(out[0], p, 1) == Xv(prev, p, 1));
+                if (j == 4) continue;
+                for (int k = 0; k < 2; ++k) assert(Xv(out[j + 1], p, k) >= Xv(out[j], p, k));  // no vertex steps back
+                assert(Xv(out[j + 1], p, 1) - Xv(out[j + 1], p, 0) >= Xv(out[j], p, 1) - Xv(out[j], p, 0));  // width 15 -> 16 once
+            }
+    };
+    check(m);
+    // Lerped and rounded one by one, x = 10 (2 px) and x = 26 (3 px) snapped at different pictures: the
+    // left strip was 15, 15, 16, 15, 16 px wide.
+    LerpCommands(prev, cur, m, 0.5, 48, out[2]);
+    assert(Xv(out[2], 0, 0) == 8 && Xv(out[2], 0, 1) == 24 && Xv(out[2], 30, 1) == 72);  // the new strip follows
+    // The middle strip paired with the right one's old place (a wrong same-key partner in a real scene):
+    // it is carried by its neighbours instead of tearing the mesh.
+    Match wrong = m;
+    wrong.prev_of[1] = wrong.prev_of[2];
+    check(wrong);
+    std::printf("  mesh moves as one ok\n");
+}
+
 // A frame's worth of GP0 traffic including an upload, a polyline, fills and a flip.
 static void DrawScene(Ps1Gpu& g, int shift) {
     for (uint32_t w : {0xE3000000u, 0xE4000000u | 319 | 239 << 10, 0xE5000000u, 0xE1000200u | 0x2})
@@ -224,6 +271,7 @@ int main() {
     TestMatchAndLerp();
     TestUntexturedAndRects();
     TestInsertedAndRemovedTiles();
+    TestMeshMovesAsOne();
     TestCaptureIsInvisibleAndComplete();
     TestWidescreenSqueezeReplays();
     std::printf("PASS\n");
