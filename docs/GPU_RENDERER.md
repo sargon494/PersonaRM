@@ -80,6 +80,11 @@ primitives with the same pipeline, scissor and HD image become one draw call.
 - **UV**: interpolated as float texel coordinates (+0.5, the software's half-texel shift) and floored in
   the shader, then texture window, page, 4/8/15-bit decode and CLUT lookup on `vram1x`, as `FetchTexel`.
   Texel 0000h discards. Modulation `(t5 * c8) >> 4`, raw `t5 << 3`.
+- **UV limits** (scale > 1, polygons, both renderers): the floored texel is clamped to the range the 1x
+  raster can sample (`Ps1Gpu::UvLimits`: the vertex UV range less one pixel's worth of texels at the end
+  the UV grows toward). Without it the fine samples of a sprite's or glyph's last 1x row reached its far UV
+  and drew the next sprite cell's row: a thin line under feet and letters (the compass `N`), cell outlines,
+  dark seams between floor tiles. 1x is unchanged.
 - **Dithering**: the 4×4 table indexed by (pixel / s) & 3, applied in the 8-bit domain before `>> 3`.
 - **Semi-transparency**: fixed-function blending on c5/31 values: B/2+F/2 = `ONE, CONSTANT(0.5)` with
   the shader halving F; B+F = `ONE, ONE`; B−F = reverse subtract; B+F/4 = `ONE, ONE` with the shader
@@ -164,6 +169,12 @@ Two things the replay needs from the command log (`Ps1Gpu::SetCommandLog`), for 
   (flicker). The live decision (centre relative to the first vertex, factor) is logged as a GP0 NOP entry
   `[3, 00AB0000h, centre - x0, num | den << 12]` before the primitive and applied to its lerped vertices on
   replay (`Ps1Gpu::Squeeze`). Live rendering is unchanged.
+- **Only 3D moves.** A polygon with 2 or more GTE vertices (the `Widescreen2D` rule; the engine tracks
+  projections whenever `--interp` is on) is tagged `[1, 00D30000h]` before its packet. Only tagged
+  polygons are matched and lerped; sprites, portraits, text, windows, rectangles and lines are replayed
+  exactly as in the latest frame. Lerping them paired wrong same-key partners and moved 2D by sub-frame
+  amounts: portraits (often their lower half) and sprite limbs jittered at 120 fps, also in menus where
+  nothing moves. Characters now move at the game's rate while the camera and scenery interpolate.
 
 Measured at 9x, 16:9, `--interp 120`, shrine dialogue: 13.5 ms per emulated frame for 2 presents
 (unthrottled), presents every 6.8 ms on average.

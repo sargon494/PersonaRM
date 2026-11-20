@@ -108,6 +108,9 @@ public:
     void SetWidescreen(int32_t num, int32_t den);
     /// Null when widescreen is off.
     const Widescreen2D* GetWidescreen2D() const { return m_ws2d.get(); }
+    /// Frame interpolation: track GTE projections (the widescreen tracker, else a separate one) and tag 3D
+    /// polygons in the GPU command log (Ps1Gpu::SetProjectionTracker). Display-only.
+    void TrackProjections(bool on);
     const Ps1Gpu& GetGpu() const { return m_gpu; }
     SpuEmulator& GetSpu() { return m_spu; }
     const SpuEmulator& GetSpu() const { return m_spu; }
@@ -329,6 +332,9 @@ private:
     CpuContext m_cpu;
     Ps1Gpu m_gpu;
     std::unique_ptr<Widescreen2D> m_ws2d;
+    std::unique_ptr<Widescreen2D> m_proj;  // TrackProjections without widescreen
+    bool m_track_proj = false;
+    void WireProjections();
     SpuEmulator m_spu;
     Ps1BiosHle& m_bios;
     DiscReader m_disc_reader;

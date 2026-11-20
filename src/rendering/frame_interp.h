@@ -12,7 +12,8 @@
 namespace personarm::interp {
 
 /// Per packet of `cur` (in order), the word offset of its packet in `prev`, or -1 (drawn as in cur).
-/// Only primitives with fixed vertex slots take part (polygons, single lines, rectangles). Key: opcode
+/// Only 3D polygons take part (tagged [1, Ps1Gpu::kLog3D] in the log); everything else is drawn as in
+/// cur. Key: opcode
 /// plus the texture words (UV / CLUT / texpage, rectangle size) for textured primitives, plus the first
 /// colour for untextured ones. Among same-key packets whose every vertex moved at most `max_jump` px
 /// per axis, pairs are taken cheapest total vertex travel first (a global greedy assignment), so

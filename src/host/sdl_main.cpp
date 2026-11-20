@@ -312,7 +312,7 @@ int main(int argc, char** argv) {
     // --interp: the GPU logs its packets (display-only capture, emulation unchanged) for the interpolator.
     interp::FrameInterpolator interp;
     std::vector<uint32_t> cmd_log;
-    if (interp_hz) engine.GetGpu().SetCommandLog(&cmd_log);
+    if (interp_hz) engine.GetGpu().SetCommandLog(&cmd_log), engine.TrackProjections(true);
     uint64_t run_ns = 0, interp_ns = 0, interp_frames = 0, last_hash = 0, gpu_ns = 0, wall_t0 = SDL_GetTicksNS();
     uint32_t gpu_draws = 0;  // most draw calls in one picture this second
     uint64_t last_present_ns = 0;

@@ -132,11 +132,48 @@ static void TestHostDisplay() {
     assert(!personarm::host::ParseHostArgs(8, interp, o));
 }
 
+// A sprite quad's far UV (its last texel + 1) lies on the excluded right/bottom edge: the 1x raster never
+// samples it, so no fine pixel may either (it drew the next sprite cell's row as a thin line under feet
+// and letters). 17x17 15bpp texture at (640, 0): red, column 0 green, column and row 16 white.
+static void TestScaledSpriteStaysInItsCell() {
+    const uint16_t kRed = 0x001F, kGreen = 0x03E0, kWhite = 0x7FFF;
+    std::vector<uint16_t> tex;
+    for (int y = 0; y < 17; ++y)
+        for (int x = 0; x < 17; ++x) tex.push_back(x == 16 || y == 16 ? kWhite : x == 0 ? kGreen : kRed);
+    tex.push_back(0);
+    std::vector<uint32_t> up = {0xA0000000, XY(640, 0), XY(17, 17)};
+    for (size_t i = 0; i < tex.size(); i += 2) up.push_back(tex[i] | uint32_t(tex[i + 1]) << 16);
+    for (uint32_t s : {2u, 4u, 5u}) {
+        for (bool mirrored : {false, true}) {
+            Ps1Gpu g;
+            g.SetResolutionScale(s);
+            Send(g, kSetup), Send(g, up);
+            const uint32_t l = mirrored ? 16 : 0, r = mirrored ? 0 : 16, tp = 0x10Au << 16;  // texpage x 640, 15bpp
+            Send(g, {0x2D808080, XY(100, 100), l, XY(116, 100), r | tp, XY(100, 116), l | 16 << 8, XY(116, 116), r | 16 << 8});
+            for (uint32_t y = 100 * s; y < 116 * s; ++y)
+                for (uint32_t x = 100 * s; x < 116 * s; ++x) {
+                    const uint16_t c = Hi(g, x, y);
+                    assert(c != kWhite || (mirrored && x < 101 * s));  // mirrored: 1x samples u 16 .. 1
+                    assert(c != kGreen || !mirrored);
+                }
+            assert(g.ReadVram(100, 115) == (mirrored ? kWhite : kGreen) && g.ReadVram(115, 115) == kRed);
+        }
+    }
+    int32_t lim[4];
+    const int32_t x[4] = {0, 16, 0, 16}, y[4] = {0, 0, 16, 16}, u[4] = {16, 0, 16, 0}, v[4] = {0, 0, 16, 16};
+    Ps1Gpu::UvLimits(x, y, u, v, 4, lim);
+    assert(lim[0] == 1 && lim[1] == 16 && lim[2] == 0 && lim[3] == 15);
+    const int32_t wide[4] = {0, 60, 0, 60}, tall[4] = {0, 0, 60, 60}, su[4] = {0, 3, 0, 3}, sv[4] = {5, 5, 9, 9};
+    Ps1Gpu::UvLimits(wide, tall, su, sv, 4, lim);  // stretched: the 1x raster rounds up to the far texel
+    assert(lim[0] == 0 && lim[1] == 3 && lim[2] == 5 && lim[3] == 9);
+}
+
 int main() {
     TestFlatTriangleEdges();
     TestAxisAlignedShapesUpscaleExactly();
     TestGameSeesTheSame();
     TestHostDisplay();
+    TestScaledSpriteStaysInItsCell();
     std::printf("resolution scale: all tests passed\n");
     return 0;
 }
