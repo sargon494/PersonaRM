@@ -11,6 +11,7 @@
 #include "engine/engine.h"
 #include "loader/disc_reader.h"
 #include "recomp/codegen.h"
+#include "recomp/runtime/module_loader.h"
 #include "recomp/runtime/recomp_runtime.h"
 
 namespace personarm::recomp {
@@ -85,6 +86,18 @@ bool NativeCacheReady(const std::string& dir, const NativeDisc& disc, std::strin
     if (m->StringOr("exe_hash", "") != Hex64(disc.exe_hash)) return stale("built from another executable");
     if (manifest.empty() && !fs::exists(fs::path(dir) / NativeLibraryName())) return stale("library missing");
     return true;
+}
+
+std::vector<const Module*> NativeModulesFor(const std::string& disc_path, std::vector<const Module*> linked, std::string& note) {
+    std::vector<const Module*> mods = std::move(linked);
+    if (!mods.empty()) { note = "linked into this build"; return mods; }
+    NativeDisc d;
+    if (!ReadNativeDisc(disc_path, d, &note)) return {};
+    const std::string dir = NativeCacheDir(NativeCacheRoot(), d);
+    if (!NativeCacheReady(dir, d, &note)) return {};
+    if (!LoadModuleLibrary((fs::path(dir) / NativeLibraryName()).string(), mods, &note)) return {};
+    note = dir;
+    return mods;
 }
 
 } // namespace personarm::recomp

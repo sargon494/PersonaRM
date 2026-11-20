@@ -125,6 +125,7 @@ bool ParseHostArgs(int argc, const char* const* argv, HostOptions& o) {
         else if (is("--unthrottled")) o.unthrottled = true;
         else if (is("--hidden")) o.hidden = true;
         else if (is("--recomp")) o.recomp = true;
+        else if (is("--no-recomp")) o.no_recomp = true;
         else if (is("--mute")) o.mute = true;
         else if (is("--skip-fmv")) o.skip_fmv = true;
         else if (is("--save-settings")) o.save_settings = true;

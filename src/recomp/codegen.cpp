@@ -574,8 +574,8 @@ std::string GenerateRegistryC(const std::vector<std::string>& modules) {
        << "    if (abi != PRM_ABI_VERSION) { *count = 0; return 0; }\n"
        << "    *count = " << modules.size() << ";\n    return kModules;\n}\n\n"
        << "#if defined(__TINYC__) && defined(_WIN32)\n"
-       << "/* Built with -nostdlib: no C runtime, so the DLL entry point is this one. */\n"
-       << "int __stdcall _dllstart(void* dll, unsigned long reason, void* reserved) { (void)dll; (void)reason; (void)reserved; return 1; }\n"
+       << "/* Built with -nostdlib: no C runtime, so the DLL entry point is this one (x64: no stdcall). */\n"
+       << "int _dllstart(void* dll, unsigned long reason, void* reserved) { (void)dll; (void)reason; (void)reserved; return 1; }\n"
        << "#endif\n";
     return os.str();
 }

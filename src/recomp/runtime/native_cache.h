@@ -38,4 +38,10 @@ std::string NativeManifest(const NativeDisc& disc, const std::string& compiler);
 /// the text of manifest.json; empty = read it from `dir`). `why` says what is missing or stale.
 bool NativeCacheReady(const std::string& dir, const NativeDisc& disc, std::string* why, const std::string& manifest = "");
 
+struct Module;
+/// The modules to run for `disc_path`: `linked` (GeneratedModules(), developers) if any, else the
+/// ready on-device cache under NativeCacheRoot(). Empty = interpreter only; `note` then says why
+/// (no cache yet, stale, cannot load), otherwise where the modules come from.
+std::vector<const Module*> NativeModulesFor(const std::string& disc_path, std::vector<const Module*> linked, std::string& note);
+
 } // namespace personarm::recomp

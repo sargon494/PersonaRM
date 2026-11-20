@@ -243,6 +243,7 @@ Settings ApplyCli(Settings s, const HostOptions& o, const std::string& serial) {
     if (!o.encounters.empty()) g.encounter_rate = o.encounters;
     if (!o.mods.empty()) g.mods = o.mods;
     if (o.recomp) g.recomp = true;
+    if (o.no_recomp) g.recomp = false;
     if (o.skip_fmv) g.skip_fmv = true;
     if (o.battle_speed) g.battle_speed = o.battle_speed;
     if (!g.Empty()) s.games[serial] = g;

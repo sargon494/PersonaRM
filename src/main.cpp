@@ -42,6 +42,7 @@
 #include "engine/file_mods.h"
 #include "engine/gameplay_patches.h"
 #include "recomp/runtime/generated_modules.h"
+#include "recomp/runtime/native_cache.h"
 #include "rendering/window_context.h"
 #include "rendering/gl_renderer.h"
 #include "rendering/mdec_decoder.h"
@@ -887,12 +888,14 @@ static int RunBootHarness(const std::string& disc_path, const BootOptions& opt) 
     config.enable_bios_hle = true;
     engine.Initialize(config);
     if (opt.recomp) {
-        const auto modules = personarm::recomp::GeneratedModules();
+        std::string note;
+        const auto modules = personarm::recomp::NativeModulesFor(disc_path, personarm::recomp::GeneratedModules(), note);
         if (modules.empty()) {
-            std::cerr << "[BOOT] --recomp: this build has no recompiled code (configure with "
-                         "-DPRM_RECOMP_GENERATED_DIR=<dir outside the repo>)\n";
+            std::cerr << "[BOOT] --recomp: no recompiled code for this disc (" << note
+                      << "): run personarm_native <disc> or configure with -DPRM_RECOMP_GENERATED_DIR\n";
             return EXIT_FAILURE;
         }
+        std::cout << "[BOOT] --recomp: " << modules.size() << " modules (" << note << ")\n";
         engine.SetRecompModules(modules, opt.recomp_quantum);
     }
     engine.SetEagerDevices(opt.eager_devices);
