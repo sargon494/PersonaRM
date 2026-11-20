@@ -193,6 +193,11 @@ target_compile_features(unit_test_recomp_engine PRIVATE cxx_std_17)
 add_test(NAME unit_test_recomp_engine COMMAND unit_test_recomp_engine)
 set_tests_properties(unit_test_recomp_engine PROPERTIES LABELS "unit" TIMEOUT 300)
 
+add_executable(unit_test_native_prep test_native_prep.cpp)
+target_link_libraries(unit_test_native_prep PRIVATE native_prep)
+add_test(NAME unit_test_native_prep COMMAND unit_test_native_prep)
+set_tests_properties(unit_test_native_prep PROPERTIES LABELS "unit" TIMEOUT 60)
+
 add_executable(unit_test_native_cache test_native_cache.cpp)
 target_link_libraries(unit_test_native_cache PRIVATE personarm_core)
 target_compile_features(unit_test_native_cache PRIVATE cxx_std_17)

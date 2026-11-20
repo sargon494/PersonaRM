@@ -126,6 +126,8 @@ pub struct GameSettings {
     pub text_speed: String,
     pub save_dir: String,
     pub pause_on_focus_loss: bool,
+    /// Native (recompiled) code: per-game `recomp` key, on unless set to false.
+    pub native: bool,
 }
 
 impl Default for GameSettings {
@@ -140,6 +142,7 @@ impl Default for GameSettings {
             text_speed: "normal".into(),
             save_dir: String::new(),
             pause_on_focus_loss: true,
+            native: true,
         }
     }
 }
@@ -175,7 +178,9 @@ impl GameSettings {
             .find_map(|id| get(doc, &["game", id, "text_speed"]).and_then(Value::as_str))
             .unwrap_or(&d.text_speed)
             .to_string();
+        let native = serials.iter().find_map(|id| get(doc, &["game", id, "recomp"]).and_then(Value::as_bool)).unwrap_or(d.native);
         Self {
+            native,
             language: s(&["general", "language"], &d.language),
             fps: u(&["video", "fps_target"], d.fps),
             window_mode: s(&["video", "window_mode"], &d.window_mode),
@@ -210,6 +215,7 @@ impl GameSettings {
         set(doc, &["audio", "mute"], json!(self.mute));
         for id in serials {
             set(doc, &["game", id, "text_speed"], json!(self.text_speed));
+            set(doc, &["game", id, "recomp"], json!(self.native));
         }
     }
 }
@@ -268,6 +274,32 @@ pub fn find_game_exe(cfg: &LauncherConfig) -> Option<PathBuf> {
     next.is_file().then_some(next)
 }
 
+/// `personarm_native` next to the game executable: prepares the native code for a disc.
+pub fn native_tool_for(game_exe: &std::path::Path) -> PathBuf {
+    game_exe.with_file_name(if cfg!(windows) { "personarm_native.exe" } else { "personarm_native" })
+}
+
+/// One `personarm_native --json` progress line.
+#[derive(Debug, PartialEq)]
+pub struct NativeLine {
+    pub stage: String,
+    pub progress: f32,
+    pub message: String,
+    /// Final line only: whether the native code is ready.
+    pub ok: Option<bool>,
+}
+
+pub fn parse_native_line(line: &str) -> Option<NativeLine> {
+    let v: Value = serde_json::from_str(line.trim()).ok()?;
+    let stage = v.get("stage")?.as_str()?.to_string();
+    Some(NativeLine {
+        progress: v.get("progress").and_then(Value::as_f64).unwrap_or(if stage == "done" { 1.0 } else { 0.0 }) as f32,
+        message: v.get("message").and_then(Value::as_str).unwrap_or("").to_string(),
+        ok: v.get("ok").and_then(Value::as_bool),
+        stage,
+    })
+}
+
 // ── io ──
 
 /// Hand-edited files (Windows PowerShell, Notepad) often start with a UTF-8 BOM.
@@ -308,6 +340,30 @@ mod tests {
     use super::*;
 
     fn serials() -> Vec<String> { vec!["SLPS-02785".into(), "SLUS-01158".into()] }
+
+    #[test]
+    fn native_setting_defaults_on_and_roundtrips() {
+        assert!(GameSettings::from_value(&json!({}), &serials()).native);
+        let mut s = GameSettings::default();
+        s.native = false;
+        let mut doc = json!({"game": {"SLPS-02785": {"mods": "x"}}});
+        s.apply(&mut doc, &serials(), 0);
+        assert_eq!(doc["game"]["SLPS-02785"]["recomp"], json!(false));
+        assert_eq!(doc["game"]["SLPS-02785"]["mods"], json!("x"));
+        assert!(!GameSettings::from_value(&doc, &serials()).native);
+    }
+
+    #[test]
+    fn native_progress_lines() {
+        let l = parse_native_line(r#"{"stage":"compile","progress":0.5,"message":"Compiling resident"}"#).unwrap();
+        assert_eq!((l.stage.as_str(), l.progress, l.message.as_str(), l.ok), ("compile", 0.5, "Compiling resident", None));
+        let d = parse_native_line(r#"{"stage":"done","ok":true,"cached":true,"dir":"x"}"#).unwrap();
+        assert_eq!((d.progress, d.ok), (1.0, Some(true)));
+        let e = parse_native_line(r#"{"stage":"error","ok":false,"message":"no FILEPOS.DAT"}"#).unwrap();
+        assert_eq!((e.ok, e.message.as_str()), (Some(false), "no FILEPOS.DAT"));
+        assert!(parse_native_line("garbage").is_none());
+        assert_eq!(native_tool_for(std::path::Path::new("a/personarm_sdl.exe")).parent(), Some(std::path::Path::new("a")));
+    }
 
     #[test]
     fn apply_preserves_unknown_keys() {
