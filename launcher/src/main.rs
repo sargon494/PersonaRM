@@ -689,6 +689,7 @@ fn audio_general(ui: &mut egui::Ui, s: &mut GameSettings, c: &mut LauncherConfig
             dirty |= path_row(ui, &mut c.game_exe, false, auto, "auto: next to the launcher", || rfd::FileDialog::new().pick_file());
         });
         grid_row(ui, "", |ui| dirty |= ui.checkbox(&mut s.pause_on_focus_loss, "Pause when unfocused").changed());
+        grid_row(ui, "", |ui| dirty |= ui.checkbox(&mut s.show_status_icons, "Show status icons (F1-F4, fast-forward)").changed());
         grid_row(ui, "", |ui| {
             dirty |= ui.checkbox(&mut s.native, "Native code (recompiled)").on_hover_text(
                 "Built from your own disc on this PC the first time you play (about a minute at most), then cached. Off = interpreter.").changed()
