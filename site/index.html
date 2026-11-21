@@ -72,7 +72,7 @@
                 </p>
                 <div class="actions">
                     <div class="dl">
-                        <a class="btn btn-primary" href="https://github.com/sargon494/PersonaRM/releases/latest">Download v0.2.0</a>
+                        <a class="btn btn-primary" href="https://github.com/sargon494/PersonaRM/releases/latest">Download v0.2.3</a>
                         <small>Windows · bring your own disc · experimental</small>
                     </div>
                     <a class="btn" href="https://github.com/sargon494/PersonaRM">View source</a>
@@ -104,7 +104,7 @@
                 <article class="card reveal">
                     <h3>The launcher is the product</h3>
                     <p>A game library with auto-update. Later, PersonaRM plans to bring more Atlus games from other
-                        consoles into the same launcher. No dates promised.</p>
+                        consoles into the same launcher. Future games (planned, nothing playable yet): Digital Devil Saga 1 &amp; 2 (PlayStation 2) and Shin Megami Tensei IV and Shin Megami Tensei IV: Apocalypse (Nintendo 3DS). No dates promised.</p>
                 </article>
             </div>
         </section>
@@ -134,16 +134,16 @@
                     <p><strong>Saves</strong> Memory cards, plus save states.</p>
                 </li>
                 <li><span class="chip works">Works</span>
-                    <p><strong>Frame rate and resolution</strong> 30/60/90/120 fps (at 90 and 120 only 3D scenery is interpolated, so no texture jitter); up to 4K with the GPU renderer. Stray lines and tile seams at high resolution are fixed.</p>
+                    <p><strong>Frame rate and resolution</strong> 30/60/90/120 fps (at 90 and 120 only 3D scenery is interpolated, so no texture jitter); up to 4K with the GPU renderer. Stray lines and tile seams at high resolution are fixed. Portraits and text no longer jitter in menus on the GPU renderer.</p>
                 </li>
                 <li><span class="chip works">Works</span>
-                    <p><strong>Launcher</strong> Game library with auto-update. The first PLAY prepares native code from your disc (about 10-15 s, then cached).</p>
+                    <p><strong>Launcher</strong> Game library with auto-update. The first PLAY prepares native code from your disc (about 10-15 s, then cached). "Find my discs" finds and identifies your Persona 2 discs (JP, US, the disc 2 promo) and fills the fields. On-screen badges show active F1-F4 options and fast-forward; "Show status icons" turns them off. Older <code>launcher.exe</code> installs update and move to <code>PersonaRM.exe</code> automatically.</p>
                 </li>
                 <li><span class="chip works">Works</span>
                     <p><strong>Discs</strong> JP disc 1 (primary), US English release; JP disc 2 (promo) boots.</p>
                 </li>
                 <li><span class="chip experimental">Experimental</span>
-                    <p><strong>Widescreen</strong> Available, but rough. 4:3 is the recommended mode.</p>
+                    <p><strong>Widescreen</strong> Available, but rough: characters no longer split apart, full-screen fades, tints and shadows cover the whole wide picture, and scenes it can't handle safely fall back to 4:3 automatically. 4:3 is the recommended mode.</p>
                 </li>
                 <li><span class="chip experimental">Experimental</span>
                     <p><strong>Linux</strong> It builds, but it is untested.</p>
@@ -167,7 +167,7 @@
                 <li class="reveal">
                     <h3>Download PersonaRM</h3>
                     <p>Get the Windows zip from the <a href="https://github.com/sargon494/PersonaRM/releases/latest">latest
-                            release</a> (v0.2.0), unzip it and run <code>launcher.exe</code>.</p>
+                            release</a> (v0.2.3), unzip it and run <code>PersonaRM.exe</code>.</p>
                 </li>
                 <li class="reveal">
                     <h3>Set your disc and press PLAY</h3>
@@ -226,7 +226,7 @@ personarm_sdl "/path/to/disc1.cue" --recomp --memcard1 "/path/to/card1.mcd"</cod
                 <article class="feature reveal">
                     <h3>Disc handling</h3>
                     <p>ISO 9660 and raw CD-ROM XA images with <code>.cue</code> resolution, plus tools that map the
-                        game's data files.</p>
+                        game's data files. A developer map tour loads every field area automatically to find visual problems (all 300 JP disc 1 areas load).</p>
                 </article>
                 <article class="feature reveal">
                     <h3>Display modes</h3>
@@ -281,7 +281,7 @@ personarm_sdl "/path/to/disc1.cue" --recomp --memcard1 "/path/to/card1.mcd"</cod
             <h2>Ready to <em>descend</em>?</h2>
             <p>Download the launcher, point it at your own disc and press PLAY.</p>
             <div class="dl">
-                <a class="btn btn-primary" href="https://github.com/sargon494/PersonaRM/releases/latest">Download v0.2.0</a>
+                <a class="btn btn-primary" href="https://github.com/sargon494/PersonaRM/releases/latest">Download v0.2.3</a>
                 <small>Windows · bring your own disc · experimental</small>
             </div>
             <p class="dev-note">Developer? <a href="https://github.com/sargon494/PersonaRM">Clone and build from source</a>.</p>
