@@ -270,7 +270,7 @@ if(PRM_WITH_SDL3)
         add_custom_target(launcher
             COMMAND ${CARGO_EXECUTABLE} build --release --manifest-path ${CMAKE_SOURCE_DIR}/launcher/Cargo.toml
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                ${CMAKE_SOURCE_DIR}/launcher/target/release/launcher${CMAKE_EXECUTABLE_SUFFIX} $<TARGET_FILE_DIR:personarm_sdl>
+                ${CMAKE_SOURCE_DIR}/launcher/target/release/PersonaRM${CMAKE_EXECUTABLE_SUFFIX} $<TARGET_FILE_DIR:personarm_sdl>
             COMMENT "Building the launcher with cargo")
         add_dependencies(launcher personarm_sdl)
     endif()

@@ -54,7 +54,7 @@ jobs:
         shell: pwsh
         run: |
           $bin = Split-Path (Get-ChildItem build -Recurse -Filter personarm_sdl.exe | Select-Object -First 1).FullName
-          ./scripts/package-release.ps1 -Tag $env:TAG -BinDir $bin -Launcher launcher/target/release/launcher.exe -Out dist
+          ./scripts/package-release.ps1 -Tag $env:TAG -BinDir $bin -Launcher launcher/target/release/PersonaRM.exe -Out dist
 
       - name: Check the zip holds no generated game code
         shell: pwsh

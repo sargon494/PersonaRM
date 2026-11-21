@@ -276,7 +276,7 @@ impl App {
     fn launch(&mut self, ctx: &egui::Context, exe: PathBuf, args: Vec<String>) {
         // The UI process exits while the game runs (an OpenGL window costs ~100 MB even hidden); a
         // windowless watcher (`--run`, a few MB) waits for the game and reopens the launcher.
-        let me = std::env::current_exe().unwrap_or_default();
+        let me = update::relaunch_exe().unwrap_or_default();
         if let Err(e) = std::process::Command::new(me).arg("--run").arg(&exe).args(&args).spawn() {
             self.error = Some(format!("Could not start the game: {e}"));
             return;
@@ -970,7 +970,7 @@ impl eframe::App for App {
                 }
                 Msg::Done => {
                     // Files are swapped: start the new launcher and let this one go.
-                    let _ = std::env::current_exe().map(|me| std::process::Command::new(me).spawn());
+                    let _ = update::relaunch_exe().map(|me| std::process::Command::new(me).spawn());
                     ctx.send_viewport_cmd(ViewportCommand::Close);
                 }
             }
@@ -1100,13 +1100,19 @@ fn run_watcher(exe: &str, args: &[String]) {
 "));
         let _ = std::fs::write(log_dir().join("last_error.txt"), msg);
     }
-    if let Ok(me) = std::env::current_exe() {
+    if let Some(me) = update::relaunch_exe() {
         let _ = std::process::Command::new(me).spawn();
     }
 }
 
 fn main() -> eframe::Result {
     let argv: Vec<String> = std::env::args().collect();
+    // Old installs start `launcher.exe` (same binary as PersonaRM.exe): hand over so they land on the new name.
+    if let Some(new) = std::env::current_exe().ok().and_then(|me| update::shim_target(&me)) {
+        if std::process::Command::new(new).args(&argv[1..]).spawn().is_ok() {
+            return Ok(());
+        }
+    }
     if argv.len() >= 3 && argv[1] == "--run" {
         run_watcher(&argv[2], &argv[3..]);
         return Ok(());

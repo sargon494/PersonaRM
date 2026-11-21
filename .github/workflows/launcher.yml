@@ -28,8 +28,8 @@ jobs:
       - name: Upload launcher
         uses: actions/upload-artifact@v4
         with:
-          name: launcher-windows
-          path: launcher/target/release/launcher.exe
+          name: PersonaRM-windows
+          path: launcher/target/release/PersonaRM.exe
           retention-days: 7
 
   launcher-linux:
@@ -54,6 +54,6 @@ jobs:
       - name: Upload launcher
         uses: actions/upload-artifact@v4
         with:
-          name: launcher-linux
-          path: launcher/target/release/launcher
+          name: PersonaRM-linux
+          path: launcher/target/release/PersonaRM
           retention-days: 7
