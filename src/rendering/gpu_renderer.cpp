@@ -45,6 +45,10 @@ Texture2D<float4> hd : register(t2, space2);
 SamplerState smp : register(s0, space2);
 SamplerState smp1 : register(s1, space2);
 SamplerState smp2 : register(s2, space2);
+// Fine samples land exactly on texel / colour-step boundaries (s even: UV u + 0.5 + j/s); the fp32
+// interpolation rounds such ties either way depending on where the primitive sits (each display buffer),
+// so pictures alternated. kTie breaks them upward, as the CPU's fixed-point scaled pass does.
+static const float kTie = 1.0 / 512.0;
 static const int kD[16] = {-4, 0, -3, 1, 2, -2, 3, -1, -3, 1, -4, 0, 3, -1, 2, -2};
 uint rd(uint x, uint y) { return (uint)(vram.Load(int3(x & 1023u, y & 511u, 0)) * 65535.0 + 0.5); }
 float4 main(VOut i) : SV_Target {
@@ -55,11 +59,11 @@ float4 main(VOut i) : SV_Target {
         uint t = rd(p.x, p.y);
         return float4(float3(t & 31u, (t >> 5) & 31u, (t >> 10) & 31u) / 31.0, (float)(t >> 15));
     }
-    int3 c8 = int3(floor(i.col + 0.5));
+    int3 c8 = int3(floor(i.col + (0.5 + kTie)));
     uint stp = 0;
     bool blend = (fl & 0x4000u) != 0;
     if (fl & 1u) {
-        int iu = (int)floor(i.uv.x), iv = (int)floor(i.uv.y);
+        int iu = (int)floor(i.uv.x + kTie), iv = (int)floor(i.uv.y + kTie);
         if (fl & 128u) {
             iu = clamp(iu, (int)((tp >> 16) & 255u), (int)(tp >> 24));
             iv = clamp(iv, (int)((clut >> 16) & 255u), (int)(clut >> 24));
