@@ -59,15 +59,26 @@ The GPU only sees final screen coordinates, so 2D drawn on a W:H frame would be 
 The emulator tells 2D from 3D the way PGXP / DuckStation do: every screen XY that RTPS/RTPT produce is
 noted (`Gte::SetProjectionTracker`, a 2048x2048 table of the frame each position was last projected in,
 kept 2 frames), and the software rasterizer looks up the GP0 vertex words of each primitive. Then
-(`src/rendering/widescreen_2d.h`, only while `Wide()`):
+(`src/rendering/widescreen_2d.h`, only while `Scene()`: the GTE projected in the last 30 frames):
 
 | primitive | how it is recognised | what happens |
 |---|---|---|
 | 3D polygon / line | 2 or more vertices are recent GTE output (one match is treated as chance: a glyph on a stale projected point) | drawn as sent (already widened by the GTE) |
 | background | 2D drawn before the frame's first 3D primitive (a frame starts at E3h-E5h, the game's PutDrawEnv); e.g. the battle panorama wall, built by the CPU | drawn as sent: stays full width |
-| full-width 2D | spans the whole drawing area (fades, screen flashes) | drawn as sent |
-| scene sprite | textured 2D right after a 3D primitive in the stream (the ordering table interleaves it with the 3D): field and battle characters are flat quads placed at a projected point | X squeezed by 4H/3W (3/4 at 16:9, the GTE factor) around its own centre: the first primitive of a run of touching ones, so a character made of several quads stays whole and stays where the GTE put it |
+| screen-anchored overlay | 2D that is not a scene sprite and reaches to within 4 px of the left or right edge of the drawing area, or covers 15/16 of its width (fades, flashes, tints, the school corridor's darkening vignette, a wipe's black rows, letterbox bars); then every untextured 2D primitive right after it, until a textured one, a 3D one or another GP0 command (the vignette's inner ring, a wipe's soft edge lines). A line starts one only if it spans the whole width | drawn as sent: the 4:3-wide layer is shown stretched over the whole wide picture |
+| scene sprite | textured 2D after a 3D primitive in the stream (the ordering table interleaves it with the 3D): field and battle characters are flat quads placed at a projected point | X squeezed by 4H/3W (3/4 at 16:9, the GTE factor) around one anchor per character: consecutive pieces within 16 px of each other are one character; the anchor is the centre of the character's shadow (a GTE triangle fan drawn shortly before, under the pieces) or else the first piece's centre. Every piece keeps its offset from the anchor scaled by num/den, so arms and heads stay on the body |
 | HUD | any other 2D: after a non-drawing GP0 command (texpage, upload, fill, copy), after a line or an untextured 2D primitive | X squeezed toward the centre of the drawing area: the 4:3 layout sits in the middle of the wide picture |
+
+Textured 2D keeps its scene-sprite / HUD decision per texture (texpage + CLUT): it flips only after the
+stream has disagreed for 8 frames in a row, so a portrait or a font never alternates between two places.
+
+**4:3 safety net.** A semi-transparent 2D primitive at least 3/4 of the width wide that is neither
+screen-anchored nor centred (its middle more than 1/16 of the width off the screen centre) cannot be
+placed. The scene then falls back to 4:3: the GTE stops widening, nothing is squeezed and the host shows
+4:3 with pillarbox bars, as for menus. It stays 4:3 until no such primitive has been drawn for 120
+frames (2 s), so it cannot flicker. Each fallback is logged once:
+`[WIDESCREEN] frame N: 2D layer x A..B y C is neither centred nor screen-anchored; showing 4:3`. The
+frame that triggers it is still shown wide (the GTE had already projected it).
 
 Rectangles (sprites) are never 3D; a squeezed textured rectangle samples its texture by nearest
 neighbour. Lines and polylines use the same rules. Per primitive kind on disc 1:
@@ -91,7 +102,8 @@ Runs: `personarm --boot ... --input-script docs/examples/disc1_new_game_to_field
 `personarm_sdl --hidden --unthrottled --screenshot` at frames 1500, 18950 and 19450. The `--boot`
 frames stay 320x240 (anamorphic); for viewing they were resized to 853x480. Frames are not committed.
 
-**Off = unchanged.** All 394 dumped frames (f50..f19700) of the new build without the flag are
+**Off = unchanged** (re-checked for fix/widescreen-2: the 394 frames f50..f19700 of
+`disc1_new_game_to_field.txt` and 400 consecutive corridor frames are byte-identical to main). All 394 dumped frames (f50..f19700) of the new build without the flag are
 byte-identical (SHA-256) to the build before this change. Re-checked after the 2D/3D split: the same
 394 frames, plus 280 frames (f50..f14000) of `docs/examples/disc1_to_first_battle.txt` (on a copy of a
 school 3F save), are byte-identical to the build before it.
@@ -132,11 +144,29 @@ on stills every 50 frames, not frame by frame while walking.
 ## Known issues
 
 1. **2D classification is a heuristic.** It relies on the game's stream order (backgrounds first, 3D
-   with sprites interleaved, then the HUD after a state or upload command). A HUD element drawn as a
-   textured quad right after a 3D primitive would be squeezed around its own centre (right shape, wrong
-   place); a scene sprite drawn after a texpage command would be pulled toward the centre; a drawing
-   environment (E3h-E5h) sent mid-frame would make the HUD after it count as background (stretched).
-   None was seen on the tested scenes. The squeezed text loses a pixel column in four at 1x.
+   with sprites interleaved, then the HUD after a state or upload command). A HUD texture first seen
+   right after a 3D primitive is a scene sprite (right shape, wrong place) until the stream disagrees
+   for 8 frames; a scene sprite drawn after a texpage command would be pulled toward the centre; a
+   drawing environment (E3h-E5h) sent mid-frame would make the HUD after it count as background
+   (stretched). Characters without a shadow fan (or whose fan is more than 16 px to the side) are
+   anchored on their first piece: right shape, but a few px off their place if that piece is not
+   central. Two characters closer than 16 px are squeezed as one. The squeezed text loses a pixel
+   column in four at 1x.
+   **Overlay rule (fix/widescreen-2).** Untextured 2D drawn right after a screen-anchored layer, with
+   no state command in between, is stretched with it: a HUD box drawn directly after a fade would be
+   stretched too (not seen). A HUD element that slides in from the screen edge is stretched while it
+   touches the edge and squeezed once it leaves it (a jump of up to 40 px; not seen).
+   **Checked (16:9, JP disc 1):** school 3F corridor walking and running (arms stay on the body, the
+   darkening vignette now covers the sides), Kismet office NPCs and Maya's portrait (f13150-13400),
+   Mizuno / Maya dialogue (f17350-17550, classification identical in every frame), the Kismet floor
+   wipe (f12370-12420), the first battles, and with the map tour (docs/MAP_TOUR.md, branch
+   feat/map-tour) the areas it flagged for the "square of shadows": 154 (white flash), 58 (blue tint),
+   142 and 148 (fades), 66 and 125 (dark rooms) now have no seam at the 4:3 edges; 19, 22, 55, 84 and
+   103 (dark side bands) are room geometry ending at the set's edge (item 2), unchanged. No 4:3
+   fallback was logged on these runs. The classroom event animation (bug report "rooms break during
+   animations") was not reached by any script and is not verified.
+   **GPU renderer:** with `--renderer gpu` scattered pixels change every other frame, at 4:3 too (same
+   on main); this is not a widescreen issue and is not fixed here.
 2. **Room edges.** Rooms are built for a 4:3 camera; at the sides the black void outside the set
    shows (office, f18950). Correct emulation of the wider view, but it looks unfinished on a TV.
 3. **Aspect switch delay.** The 4:3 / W:H choice uses "any projection in the last 30 frames": opening
