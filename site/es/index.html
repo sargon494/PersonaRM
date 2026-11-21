@@ -74,7 +74,7 @@
                 </p>
                 <div class="actions">
                     <div class="dl">
-                        <a class="btn btn-primary" href="https://github.com/sargon494/PersonaRM/releases/latest">Descargar v0.1.4</a>
+                        <a class="btn btn-primary" href="https://github.com/sargon494/PersonaRM/releases/latest">Descargar v0.2.0</a>
                         <small>Windows · trae tu propio disco · experimental</small>
                     </div>
                     <a class="btn" href="https://github.com/sargon494/PersonaRM">Ver código</a>
@@ -122,8 +122,9 @@
                 <li>Intro, pantalla de título, nueva partida, escenas de la historia, movimiento libre y los primeros
                     combates.</li>
                 <li>Guardar y cargar tarjetas de memoria, y estados guardados.</li>
+                <li>Código nativo (recompilado, Windows): unas 2 veces más rápido que el intérprete, con resultados idénticos en el disco 1 japonés.</li>
                 <li>30, 60, 90 y 120 fps, y resolución interna de hasta 4K con el renderizador GPU.</li>
-                <li>Un lanzador con biblioteca de juegos que se actualiza solo.</li>
+                <li>Un lanzador con biblioteca de juegos que se actualiza solo, con opciones de juego por juego (tasa de encuentros, saltar películas, velocidad de combate, velocidad del texto).</li>
             </ul>
             <ul class="status-list reveal" aria-label="Estado por área">
                 <li><span class="chip works">Funciona</span>
@@ -137,10 +138,10 @@
                     <p><strong>Guardado</strong> Tarjetas de memoria y estados guardados.</p>
                 </li>
                 <li><span class="chip works">Funciona</span>
-                    <p><strong>Fotogramas y resolución</strong> 30/60/90/120 fps; hasta 4K con el renderizador GPU.</p>
+                    <p><strong>Fotogramas y resolución</strong> 30/60/90/120 fps (a 90 y 120 solo se interpolan los escenarios 3D, así que no hay parpadeo de texturas); hasta 4K con el renderizador GPU. Las líneas sueltas y las costuras de los mosaicos a alta resolución están corregidas.</p>
                 </li>
                 <li><span class="chip works">Funciona</span>
-                    <p><strong>Lanzador</strong> Biblioteca de juegos con actualización automática.</p>
+                    <p><strong>Lanzador</strong> Biblioteca de juegos con actualización automática. El primer PLAY prepara el código nativo a partir de tu disco (unos 10-15 s, luego se guarda en caché).</p>
                 </li>
                 <li><span class="chip works">Funciona</span>
                     <p><strong>Discos</strong> Disco 1 japonés (principal), versión inglesa de EE. UU.; el disco 2
@@ -171,12 +172,12 @@
                 <li class="reveal">
                     <h3>Descarga PersonaRM</h3>
                     <p>Descarga el zip para Windows de la <a href="https://github.com/sargon494/PersonaRM/releases/latest">última
-                            versión</a> (v0.1.4), descomprímelo y ejecuta <code>launcher.exe</code>.</p>
+                            versión</a> (v0.2.0), descomprímelo y ejecuta <code>launcher.exe</code>.</p>
                 </li>
                 <li class="reveal">
                     <h3>Elige tu disco y pulsa PLAY</h3>
                     <p>En el lanzador, indica tu <code>.cue</code> (la versión japonesa o la inglesa de EE. UU.) y
-                        pulsa <strong>PLAY</strong>.</p>
+                        pulsa <strong>PLAY</strong>. La primera vez, PLAY tarda unos 10-15 s más mientras el lanzador prepara el código nativo a partir de tu disco en tu PC.</p>
                 </li>
             </ol>
             <div class="devblock reveal">
@@ -288,7 +289,7 @@ personarm_sdl "/ruta/a/disco1.cue" --recomp --memcard1 "/ruta/a/tarjeta1.mcd"</c
             <h2>¿Listo para <em>descender</em>?</h2>
             <p>Descarga el lanzador, indícale tu propio disco y pulsa PLAY.</p>
             <div class="dl">
-                <a class="btn btn-primary" href="https://github.com/sargon494/PersonaRM/releases/latest">Descargar v0.1.4</a>
+                <a class="btn btn-primary" href="https://github.com/sargon494/PersonaRM/releases/latest">Descargar v0.2.0</a>
                 <small>Windows · trae tu propio disco · experimental</small>
             </div>
             <p class="dev-note">¿Desarrollas? <a href="https://github.com/sargon494/PersonaRM">Clona y compila desde el código</a>.</p>
