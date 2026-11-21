@@ -4,7 +4,7 @@
 param([string]$Dir, [string]$Zip)
 $ErrorActionPreference = 'Stop'
 $expected = @(
-    'launcher.exe', 'personarm.exe', 'personarm_sdl.exe', 'SDL3.dll', 'personarm_native.exe', 'libtcc.dll',
+    'PersonaRM.exe', 'launcher.exe', 'personarm.exe', 'personarm_sdl.exe', 'SDL3.dll', 'personarm_native.exe', 'libtcc.dll',
     'README.md', 'LICENSE', 'docs/LAUNCHER.md', 'docs/SETTINGS.md', 'docs/NATIVE_CODE.md',
     'licenses/TinyCC-LICENSE.txt', 'licenses/TinyCC-SOURCE.txt') | Sort-Object
 if ($Zip) {

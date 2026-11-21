@@ -6,13 +6,15 @@ param(
     [Parameter(Mandatory)][string]$Tag,        # e.g. v0.2.0
     [Parameter(Mandatory)][string]$BinDir,     # folder with personarm.exe, personarm_sdl.exe, SDL3.dll,
                                                # personarm_native.exe, libtcc.dll, TinyCC-*.txt
-    [Parameter(Mandatory)][string]$Launcher,   # launcher.exe
+    [Parameter(Mandatory)][string]$Launcher,   # PersonaRM.exe (also shipped as launcher.exe, see docs/LAUNCHER.md)
     [string]$Out = "dist"
 )
 $ErrorActionPreference = 'Stop'
 $stage = Join-Path $Out "stage"
 Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force "$stage/docs", "$stage/licenses" | Out-Null
+# launcher.exe: same binary under the old name, so installs from before the rename can still update.
+Copy-Item $Launcher "$stage/PersonaRM.exe"
 Copy-Item $Launcher "$stage/launcher.exe"
 foreach ($f in 'personarm.exe', 'personarm_sdl.exe', 'SDL3.dll', 'personarm_native.exe', 'libtcc.dll') { Copy-Item (Join-Path $BinDir $f) $stage }
 foreach ($f in 'TinyCC-LICENSE.txt', 'TinyCC-SOURCE.txt') { Copy-Item (Join-Path $BinDir $f) "$stage/licenses" }

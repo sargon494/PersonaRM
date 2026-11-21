@@ -18,6 +18,10 @@ pub const VERSION: &str = match option_env!("PRM_VERSION") {
 
 const API: &str = "https://api.github.com/repos/sargon494/PersonaRM/releases/latest";
 const MAX_ZIP: u64 = 256 << 20;
+/// Executable name since the rename. Old installs run `launcher.exe`, which the zip still ships (same
+/// binary) so their updater keeps accepting it; see docs/LAUNCHER.md for when it can go.
+pub const NEW_EXE: &str = if cfg!(windows) { "PersonaRM.exe" } else { "PersonaRM" };
+const OLD_EXE: &str = "launcher.exe";
 const STAGE: &str = ".prm-update";
 const MANIFEST: &str = ".prm-update-old.txt";
 
@@ -134,7 +138,22 @@ pub fn download_and_apply(r: &Release) -> Result<(), String> {
     }
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let dir = exe.parent().ok_or("no install folder")?;
-    apply_zip(&zip, dir, exe.file_name().and_then(|n| n.to_str()).unwrap_or("launcher.exe"))
+    apply_zip(&zip, dir, exe.file_name().and_then(|n| n.to_str()).unwrap_or(NEW_EXE))
+}
+
+/// Started as the old `launcher.exe` with `PersonaRM.exe` beside it: the exe to start instead.
+pub fn shim_target(me: &Path) -> Option<PathBuf> {
+    if !me.file_name()?.to_str()?.eq_ignore_ascii_case(OLD_EXE) {
+        return None;
+    }
+    let new = me.with_file_name(NEW_EXE);
+    new.is_file().then_some(new)
+}
+
+/// What to start to reopen the launcher: the new exe if it is installed, else this one.
+pub fn relaunch_exe() -> Option<PathBuf> {
+    let me = std::env::current_exe().ok()?;
+    Some(me.with_file_name(NEW_EXE)).filter(|p| p.is_file()).or(Some(me))
 }
 
 fn walk(dir: &Path, base: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
@@ -342,6 +361,31 @@ mod tests {
         assert!(!d.join("launcher.exe.old").exists() && !d.join(MANIFEST).exists());
         assert_eq!(std::fs::read(d.join("notes.old")).unwrap(), b"user-file");
         assert_eq!(std::fs::read(d.join("launcher.exe")).unwrap(), b"new-launcher");
+    }
+
+    #[test]
+    fn old_install_updates_and_shims_to_new_name() {
+        // An old install runs launcher.exe: its updater demands "launcher.exe" in the zip.
+        let d = tmp("rename");
+        write_file(&d.join("launcher.exe"), b"v0.2.2");
+        write_file(&d.join("launcher.json"), b"cfg");
+        let z = make_zip(&[("PersonaRM.exe", b"v0.3.0"), ("launcher.exe", b"v0.3.0"), ("SDL3.dll", b"s")]);
+        apply_zip(&z, &d, "launcher.exe").unwrap();
+        assert_eq!(std::fs::read(d.join("launcher.exe")).unwrap(), b"v0.3.0");
+        assert_eq!(std::fs::read(d.join("PersonaRM.exe")).unwrap(), b"v0.3.0");
+        assert_eq!(std::fs::read(d.join("launcher.json")).unwrap(), b"cfg");
+        // The new binary started as launcher.exe hands over to PersonaRM.exe; under its own name it stays.
+        assert_eq!(shim_target(&d.join("launcher.exe")), Some(d.join(NEW_EXE)));
+        assert_eq!(shim_target(&d.join("Launcher.EXE")), Some(d.join(NEW_EXE)));
+        assert_eq!(shim_target(&d.join(NEW_EXE)), None);
+        // No PersonaRM.exe yet: keep running as launcher.exe.
+        std::fs::remove_file(d.join("PersonaRM.exe")).unwrap();
+        assert_eq!(shim_target(&d.join("launcher.exe")), None);
+        // An install already on the new name updates with a zip that no longer ships launcher.exe.
+        write_file(&d.join("PersonaRM.exe"), b"v0.3.0");
+        apply_zip(&make_zip(&[("PersonaRM.exe", b"v0.4.0")]), &d, "PersonaRM.exe").unwrap();
+        assert_eq!(std::fs::read(d.join("PersonaRM.exe")).unwrap(), b"v0.4.0");
+        assert!(apply_zip(&make_zip(&[("launcher.exe", b"x")]), &d, "PersonaRM.exe").is_err());
     }
 
     #[test]

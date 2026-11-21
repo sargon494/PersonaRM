@@ -60,7 +60,7 @@ Persona 2: Eternal Punishment ships in the default list.
 
 ```
 cd launcher
-cargo build --release        # launcher/target/release/launcher(.exe)
+cargo build --release        # launcher/target/release/PersonaRM(.exe)
 cargo test                   # settings merge and command-line tests
 ```
 
@@ -133,9 +133,22 @@ Test it without GitHub (debug builds only; release builds ignore these variables
    creates the GitHub Release with the zip and its `.sha256`. A manual run (Actions, Release, Run workflow, with a
    tag name) creates a **draft** release instead: review it and publish it by hand.
 
-The zip `PersonaRM-vX.Y.Z-windows-x64.zip` contains `launcher.exe`, `personarm_sdl.exe`, `SDL3.dll`,
+The zip `PersonaRM-vX.Y.Z-windows-x64.zip` contains `PersonaRM.exe` (and `launcher.exe`, see below), `personarm_sdl.exe`, `SDL3.dll`,
 `personarm.exe`, `personarm_native.exe`, `libtcc.dll` (TinyCC, LGPL; licence and source offer in `licenses/`),
 `README.md`, `LICENSE`, `docs/LAUNCHER.md`, `docs/SETTINGS.md` and `docs/NATIVE_CODE.md`. It never contains game data,
 BIOS files or recompiled game code (the release build does not set `PRM_RECOMP_GENERATED_DIR`; `scripts/check-release-files.ps1`
 fails the release on any file outside that list). Only a
 published (non-draft, non-pre-release) release counts as "latest" for the updater.
+
+### Rename: `launcher.exe` -> `PersonaRM.exe`
+
+Installs from v0.1.x-v0.2.2 run `launcher.exe`, and their updater refuses a zip that lacks that exact name. So the
+zip ships the same binary twice, as `PersonaRM.exe` and `launcher.exe`, and the update swaps both in. When the new
+binary is started as `launcher.exe` and `PersonaRM.exe` is next to it, it starts `PersonaRM.exe` with the same
+arguments and exits, so users land on the new name (old shortcuts keep working). The game watcher (`--run`) and the
+restart after an update use `PersonaRM.exe` whenever it exists.
+
+`launcher.exe` can be dropped from the zip (and from `scripts/check-release-files.ps1`) once nobody is still on a
+pre-rename version: ship at least two releases with both names, so every install gets one update that carries
+`PersonaRM.exe` and runs under it from then on, and drop it in a later one. An old install that skips straight over
+that window can no longer self-update and must download the zip by hand.
