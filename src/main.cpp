@@ -97,6 +97,9 @@ static void PrintUsage(const char* prog) {
               << "                     --save-state-at <N> <file>  write a save state at the end of frame N\n"
               << "                     --load-state <file>    start from a save state (same disc and build) instead\n"
               << "                                            of power-on; the run continues to --max-frames\n"
+              << "                     --warp-map <area>[:<entry>]  map change to a field area, like a door (JP disc 1,\n"
+              << "                                            from a field; docs/MAP_TOUR.md); --warp-at <N> not before frame N\n"
+              << "                     --poke-at <N> <addr>=<value>[:<bytes>]  write RAM after frame N (hex)\n"
               << "  --config           Open interactive settings menu\n"
               << "  --scan [dir]       Scan directory for legal game disc images (.iso/.bin/.cue)\n"
               << "  --diagnostics      Run full diagnostic suite\n"
@@ -831,7 +834,42 @@ struct BootOptions {
     uint64_t save_state_at = 0;      // --save-state-at N file: state at the end of frame N (0 = off)
     std::string save_state, load_state;  // --save-state-at file / --load-state file
     int widescreen_w = 4, widescreen_h = 3; // --widescreen W:H (4:3 = off)
+    struct Poke { uint64_t frame; uint32_t addr, value, size; };
+    std::vector<Poke> pokes;         // --poke-at: RAM writes after a frame (docs/MAP_TOUR.md)
+    int32_t warp_area = -1, warp_entry = -1;  // --warp-map <area>[:<entry>] (docs/MAP_TOUR.md)
+    uint64_t warp_at = 0;            // --warp-at <frame>: earliest warp frame (0 = first frame run)
 };
+
+// --warp-map <area>[:<entry>]: decimal or 0x-hex field bank (area) id, optional entry word.
+static bool ParseWarp(const char* spec, int32_t& area, int32_t& entry) {
+    char* end = nullptr;
+    const unsigned long a = std::strtoul(spec, &end, 0);
+    if (end == spec || a > 0x7FFF) return false;
+    area = static_cast<int32_t>(a), entry = -1;
+    if (!*end) return true;
+    if (*end != ':') return false;
+    const char* e = end + 1;
+    const unsigned long n = std::strtoul(e, &end, 0);
+    if (end == e || *end || n > 0xFFFF) return false;
+    entry = static_cast<int32_t>(n);
+    return true;
+}
+
+// --poke-at <frame> <addr>=<value>[:<bytes>] (hex address and value, bytes 1, 2 or 4; default 4).
+static bool ParsePoke(const char* frame, const char* spec, BootOptions::Poke& p) {
+    char* end = nullptr;
+    p.frame = std::strtoull(frame, &end, 10);
+    if (end == frame || *end) return false;
+    p.addr = static_cast<uint32_t>(std::strtoul(spec, &end, 16));
+    if (end == spec || *end != '=') return false;
+    const char* v = end + 1;
+    p.value = static_cast<uint32_t>(std::strtoul(v, &end, 16));
+    if (end == v) return false;
+    p.size = 4;
+    if (*end == ':') p.size = static_cast<uint32_t>(std::strtoul(end + 1, &end, 10));
+    return !*end && (p.size == 1 || p.size == 2 || p.size == 4) && p.addr % p.size == 0;
+}
+
 
 // Overlay slots (OVERLAY_MAP OV-010, discs 1 and 2): code loaded above the resident EXE text.
 static bool InOverlaySlot(uint32_t pc) {
@@ -962,6 +1000,11 @@ static int RunBootHarness(const std::string& disc_path, const BootOptions& opt) 
         : disc.product_id == "SLUS-01158"
         ? BootMilestones{0x80024A14, 0x80023844, 0x80027584, 0x80027500, 0x8007F9B8, 0x8007F9CC}
         : BootMilestones{0x80024760, 0x80023590, 0x800272D0, 0x8002724C, 0x8007E298, 0x8007E2AC};
+    // Map change (docs/MAP_TOUR.md): field bank (area) word, entry word, F0042 field request byte.
+    struct WarpAddrs { uint32_t area, entry, request; };
+    const WarpAddrs wa = disc.product_id == "SLPS-02785" ? WarpAddrs{0x8007E33E, 0x8007E340, 0x800DE798}
+                                                         : WarpAddrs{0, 0, 0};
+    bool warped = false;
     auto hex = [](uint32_t v) { char b[16]; std::snprintf(b, sizeof b, "0x%08X", v); return std::string(b); };
     auto stamp = [&]() {
         return "[BOOT f=" + std::to_string(engine.GetFrameCount()) + " cyc=" +
@@ -1112,6 +1155,27 @@ static int RunBootHarness(const std::string& disc_path, const BootOptions& opt) 
                       << " bios_calls=" << calls << " (+" << (calls - last_calls) << ") polys=" << gpu.GetPolygonCount() << "\n";
             last_calls = calls;
         }
+        // --warp-map: what a door does (docs/MAP_TOUR.md): area and entry words, then the F0042 field
+        // request byte that makes the field ask the scene loop for its map-change overlay. Only from the
+        // F0042 field (scene mode 1): the request byte lives in that overlay's data.
+        if (opt.warp_area >= 0 && !warped && engine.GetFrameCount() >= opt.warp_at &&
+            (engine.Read(ms.scene_mode, 4) & ~0x1000u) == 1) {
+            warped = true;
+            if (!wa.request) {
+                std::cerr << "[BOOT] --warp-map: no warp addresses for this disc\n";
+            } else {
+                engine.Write(wa.area, static_cast<uint32_t>(opt.warp_area), 2);
+                if (opt.warp_entry >= 0) engine.Write(wa.entry, static_cast<uint32_t>(opt.warp_entry), 2);
+                engine.Write(wa.request, 1, 1);
+                std::cout << stamp() << "warp area " << opt.warp_area << " entry "
+                          << (opt.warp_entry >= 0 ? std::to_string(opt.warp_entry) : std::string("kept")) << "\n";
+            }
+        }
+        for (const auto& p : opt.pokes)
+            if (p.frame == engine.GetFrameCount()) {
+                engine.Write(p.addr, p.value, p.size);
+                std::cout << stamp() << "poke " << hex(p.addr) << "=" << hex(p.value) << " (" << p.size << " bytes)\n";
+            }
         save_state_at_frame();
     }
     const double wall = std::chrono::duration<double>(std::chrono::steady_clock::now() - wall_start).count();
@@ -1248,6 +1312,19 @@ int main(int argc, char* argv[]) {
                     if (std::strcmp(argv[k], "--mods") == 0) opt.mods = argv[k + 1];
                     if (std::strcmp(argv[k], "--encounters") == 0) opt.encounters = argv[k + 1];
                     if (std::strcmp(argv[k], "--load-state") == 0) opt.load_state = argv[k + 1];
+                    if (std::strcmp(argv[k], "--warp-map") == 0 && !ParseWarp(argv[k + 1], opt.warp_area, opt.warp_entry)) {
+                        std::cerr << "--warp-map needs <area>[:<entry>] (decimal or 0x hex, docs/MAP_TOUR.md)\n";
+                        return EXIT_FAILURE;
+                    }
+                    if (std::strcmp(argv[k], "--warp-at") == 0) opt.warp_at = std::strtoull(argv[k + 1], nullptr, 10);
+                    if (std::strcmp(argv[k], "--poke-at") == 0) {
+                        BootOptions::Poke p{};
+                        if (k + 2 >= argc || !ParsePoke(argv[k + 1], argv[k + 2], p)) {
+                            std::cerr << "--poke-at needs <frame> <hex addr>=<hex value>[:<bytes 1|2|4>]\n";
+                            return EXIT_FAILURE;
+                        }
+                        opt.pokes.push_back(p);
+                    }
                     if (std::strcmp(argv[k], "--save-state-at") == 0 && k + 2 < argc) {
                         opt.save_state_at = std::strtoull(argv[k + 1], nullptr, 10);
                         opt.save_state = argv[k + 2];
@@ -1295,8 +1372,9 @@ int main(int argc, char* argv[]) {
                 std::strcmp(argv[i], "--watch-pc") == 0 || std::strcmp(argv[i], "--recomp-quantum") == 0 ||
                 std::strcmp(argv[i], "--memcard1") == 0 || std::strcmp(argv[i], "--memcard2") == 0 ||
                 std::strcmp(argv[i], "--mods") == 0 || std::strcmp(argv[i], "--widescreen") == 0 || std::strcmp(argv[i], "--encounters") == 0 ||
+                std::strcmp(argv[i], "--warp-map") == 0 || std::strcmp(argv[i], "--warp-at") == 0 ||
                 std::strcmp(argv[i], "--load-state") == 0) { ++i; continue; } // read by --boot
-            if (std::strcmp(argv[i], "--save-state-at") == 0) { i += 2; continue; } // read by --boot
+            if (std::strcmp(argv[i], "--save-state-at") == 0 || std::strcmp(argv[i], "--poke-at") == 0) { i += 2; continue; } // read by --boot
             if (std::strcmp(argv[i], "--launch") == 0) {
                 return launcher.LaunchGame();
             }
