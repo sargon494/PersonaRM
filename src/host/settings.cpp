@@ -139,6 +139,7 @@ Settings ParseSettings(const std::string& text, std::vector<std::string>* w) {
     GetEnum(video, "video", "window_mode", {"windowed", "fullscreen", "borderless"}, s.video.window_mode, w);
     GetInt(video, "video", "window_scale", 1, 8, s.video.window_scale, w);
     GetBool(video, "video", "integer_scaling", s.video.integer_scaling, w);
+    GetBool(video, "video", "show_status_icons", s.video.show_status_icons, w);
     GetEnum(video, "video", "aspect", {"4:3", "stretch"}, s.video.aspect, w);
     GetBool(video, "video", "vsync", s.video.vsync, w);
     GetEnum(video, "video", "renderer", {"software", "gpu"}, s.video.renderer, w);
@@ -210,6 +211,7 @@ std::string DumpSettings(const Settings& s) {
     v.Set("window_mode", s.video.window_mode);
     v.Set("window_scale", s.video.window_scale);
     v.Set("integer_scaling", s.video.integer_scaling);
+    v.Set("show_status_icons", s.video.show_status_icons);
     v.Set("aspect", s.video.aspect);
     v.Set("vsync", s.video.vsync);
     v.Set("fps_target", s.video.fps_target);

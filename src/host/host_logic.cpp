@@ -224,4 +224,22 @@ std::string InputRecorder::Script(uint64_t end_frame) const {
     return out;
 }
 
+std::vector<std::string> StatusBadges(const std::string& encounter_rate, int battle_speed, bool skip_fmv,
+                                      const std::string& text_speed, bool fast_forward) {
+    std::vector<std::string> b;
+    if (encounter_rate == "none") b.push_back("ENC OFF");
+    else if (encounter_rate == "reduced") b.push_back("ENC 1/2");
+    if (battle_speed > 1) b.push_back("BTL x" + std::to_string(battle_speed));
+    if (skip_fmv) b.push_back("FMV >>");
+    if (text_speed == "fast") b.push_back("TXT >>");
+    else if (text_speed == "instant") b.push_back("TXT >>>");
+    if (fast_forward) b.push_back("FF >>");
+    return b;
+}
+
+float ToastAlpha(int64_t remaining_ms) {
+    if (remaining_ms <= 0) return 0.f;
+    return remaining_ms >= 500 ? 1.f : float(remaining_ms) / 500.f;
+}
+
 } // namespace personarm::host

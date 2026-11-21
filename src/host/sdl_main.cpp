@@ -7,6 +7,7 @@
 #include <SDL3/SDL_main.h>
 
 #include <algorithm>
+#include <cctype>
 #include <array>
 #include <cstdio>
 #include <cstdlib>
@@ -328,6 +329,12 @@ int main(int argc, char** argv) {
     }
     int state_slot = 0;
     uint64_t title_until = 0;
+    // QA hook: PRM_WINDOW_SHOT=file.bmp saves the window (overlay included) once at frame PRM_WINDOW_SHOT_FRAME (0 = while a toast shows).
+    const char* window_shot = std::getenv("PRM_WINDOW_SHOT");
+    const uint64_t window_shot_frame = std::getenv("PRM_WINDOW_SHOT_FRAME") ? std::strtoull(std::getenv("PRM_WINDOW_SHOT_FRAME"), nullptr, 10) : 0;
+    bool window_shot_done = false;
+    std::string toast_text;  // host overlay (drawn after the picture is presented to the window target)
+    uint64_t toast_until = 0;
     auto state_path = [&] {
         return (fs::path(state_dir) / ((engine.DiscSerial().empty() ? std::string("unknown") : engine.DiscSerial()) +
                                        ".state" + std::to_string(state_slot))).string();
@@ -336,6 +343,8 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "[state] %s\n", m.c_str());
         SDL_SetWindowTitle(window, ("PersonaRM - " + m).c_str());
         title_until = SDL_GetTicksNS() + 3 * SDL_NS_PER_SECOND;
+        toast_text = m, toast_until = SDL_GetTicksNS() + 2 * SDL_NS_PER_SECOND;
+        if (!toast_text.empty()) toast_text[0] = char(std::toupper((unsigned char)toast_text[0]));
     };
     auto save_state = [&] {
         std::vector<uint8_t> buf;
@@ -680,6 +689,43 @@ int main(int argc, char** argv) {
                     if (!SDL_SaveBMP(shot, screenshot.c_str())) std::fprintf(stderr, "SDL_SaveBMP: %s\n", SDL_GetError());
                     SDL_DestroySurface(shot);
                 }
+            }
+            {   // Host overlay: drawn after the screenshot read above, so it is never in --screenshot / --dump-dir.
+                const uint64_t now = SDL_GetTicksNS();
+                std::vector<std::string> badges;
+                if (cfg.video.show_status_icons)
+                    badges = host::StatusBadges(game.encounter_rate, battle_speed, game.skip_fmv.value_or(false), game.text_speed, ff);
+                const float ta = toast_until > now ? host::ToastAlpha(int64_t((toast_until - now) / 1000000)) : 0.f;
+                if (!badges.empty() || ta > 0.f) {
+                    // 8 px debug glyphs, scaled to the window height: x2 at 1080p, x4 at 4K.
+                    const float sc = std::max(1.f, float(win_h / 540));
+                    SDL_SetRenderScale(renderer, sc, sc);
+                    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+                    const float vw = float(win_w) / sc, pad = 3.f;
+                    float y = 4.f;
+                    for (const std::string& b : badges) {
+                        const float bw = float(b.size()) * 8.f + 2 * pad;
+                        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 140);
+                        const SDL_FRect box{vw - bw - 4.f, y, bw, 8.f + 2 * pad};
+                        SDL_RenderFillRect(renderer, &box);
+                        SDL_SetRenderDrawColor(renderer, 255, 255, 255, 200);
+                        SDL_RenderDebugText(renderer, box.x + pad, y + pad, b.c_str());
+                        y += box.h + 2.f;
+                    }
+                    if (ta > 0.f) {  // bottom-centre
+                        const float tw = std::min(float(toast_text.size()) * 8.f, vw - 16.f) + 2 * pad;
+                        const SDL_FRect box{(vw - tw) / 2, float(win_h) / sc - 8.f - 2 * pad - 24.f, tw, 8.f + 2 * pad};
+                        SDL_SetRenderDrawColor(renderer, 0, 0, 0, Uint8(170 * ta));
+                        SDL_RenderFillRect(renderer, &box);
+                        SDL_SetRenderDrawColor(renderer, 255, 255, 255, Uint8(255 * ta));
+                        SDL_RenderDebugText(renderer, box.x + pad, box.y + pad, toast_text.c_str());
+                    }
+                    SDL_SetRenderScale(renderer, 1.f, 1.f);
+                }
+                if (window_shot && (window_shot_frame ? frame >= window_shot_frame : ta > 0.9f) && !window_shot_done)  // hidden QA hook, after the overlay
+                    if (SDL_Surface* shot = SDL_RenderReadPixels(renderer, nullptr)) {
+                        window_shot_done = SDL_SaveBMP(shot, window_shot), SDL_DestroySurface(shot);
+                    }
             }
             pace(slot_ns * 60 / uint64_t(present_hz > 60 ? present_hz : 60));  // before the present: even spacing at 90
             if (stats) {

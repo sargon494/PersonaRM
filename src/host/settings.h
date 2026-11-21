@@ -19,6 +19,7 @@ struct VideoSettings {
     std::string window_mode = "windowed";  // windowed | fullscreen | borderless
     int window_scale = 3;                  // windowed client size = 320x240 * scale (1..8)
     bool integer_scaling = false;
+    bool show_status_icons = true;         // top-right badges for the active gameplay tricks (F1-F4, fast-forward)
     std::string aspect = "4:3";            // 4:3 | stretch
     bool vsync = false;
     int fps_target = 60;                   // 30 | 60 | 90 | 120; >60 = --interp, 30 = every other frame presented
