@@ -252,3 +252,16 @@ target_link_libraries(unit_test_save_state PRIVATE personarm_core)
 target_compile_features(unit_test_save_state PRIVATE cxx_std_17)
 add_test(NAME unit_test_save_state COMMAND unit_test_save_state)
 set_tests_properties(unit_test_save_state PROPERTIES LABELS "unit" TIMEOUT 120)
+
+# Harness map warp (docs/MAP_TOUR.md): argument parsing of --warp-map / --poke-at, checked through the CLI
+# before any disc is opened (a bad value is refused; a good one gets as far as the missing disc).
+add_test(NAME cli_warp_map_bad COMMAND personarm --boot no_such_disc.cue --warp-map 12:zz)
+set_tests_properties(cli_warp_map_bad PROPERTIES LABELS "unit" TIMEOUT 30 PASS_REGULAR_EXPRESSION "--warp-map needs")
+add_test(NAME cli_warp_map_ok COMMAND personarm --boot no_such_disc.cue --warp-map 0x0B:0x9D --warp-at 100)
+set_tests_properties(cli_warp_map_ok PROPERTIES LABELS "unit" TIMEOUT 30 PASS_REGULAR_EXPRESSION "cannot boot"
+                     FAIL_REGULAR_EXPRESSION "needs")
+add_test(NAME cli_poke_at_bad COMMAND personarm --boot no_such_disc.cue --poke-at 10 8007E341=1:2)
+set_tests_properties(cli_poke_at_bad PROPERTIES LABELS "unit" TIMEOUT 30 PASS_REGULAR_EXPRESSION "--poke-at needs")
+add_test(NAME cli_poke_at_ok COMMAND personarm --boot no_such_disc.cue --poke-at 10 8007E340=9D:2)
+set_tests_properties(cli_poke_at_ok PROPERTIES LABELS "unit" TIMEOUT 30 PASS_REGULAR_EXPRESSION "cannot boot"
+                     FAIL_REGULAR_EXPRESSION "needs")
