@@ -364,6 +364,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(windows)] // the launcher.exe -> PersonaRM.exe transition only exists on Windows installs
     fn old_install_updates_and_shims_to_new_name() {
         // An old install runs launcher.exe: its updater demands "launcher.exe" in the zip.
         let d = tmp("rename");
