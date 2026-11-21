@@ -592,9 +592,9 @@ void Ps1Gpu::DrawPolygon(uint8_t cmd) {
         }
     }
     {
-        int32_t x[4];
-        for (int i = 0; i < n; ++i) x[i] = v[i].x;
-        if (Squeeze(xyw, x, n, f.textured) != Widescreen2D::kNone) {
+        int32_t x[4], y[4];
+        for (int i = 0; i < n; ++i) x[i] = v[i].x, y[i] = v[i].y;
+        if (Squeeze(xyw, x, y, n, f.textured, f.semi, (m_texpage & 0x1FF) | uint32_t(f.clut) << 16) != Widescreen2D::kNone) {
             for (int i = 0; i < n; ++i) v[i].x = x[i];
             if (m_listener) m_listener->OnSqueeze(x, n);
         }
@@ -648,10 +648,10 @@ void Ps1Gpu::UvLimits(const int32_t* x, const int32_t* y, const int32_t* u, cons
     }
 }
 
-int32_t Ps1Gpu::Squeeze(const uint32_t* xy, int32_t* x, int n, bool textured) {
+int32_t Ps1Gpu::Squeeze(const uint32_t* xy, int32_t* x, const int32_t* y, int n, bool textured, bool semi, uint32_t tex) {
     const int32_t x0 = x[0];
-    if (m_ws2d && m_ws2d->Wide()) {
-        const int32_t cx = m_ws2d->Squeeze2D(xy, x, n, m_drawing.x1, m_drawing.x2, textured);
+    if (m_ws2d && m_ws2d->Scene()) {
+        const int32_t cx = m_ws2d->Squeeze2D(xy, x, y, n, m_drawing.x1, m_drawing.x2, textured, semi, tex);
         if (cx == Widescreen2D::kNone) return cx;
         m_sq_num = m_ws2d->Num(), m_sq_den = m_ws2d->Den();
         if (m_cmd_log && !m_cmd_log->empty()) {  // before the primitive's packet, the log's last entry
@@ -730,8 +730,8 @@ void Ps1Gpu::DrawLineCommand(uint8_t cmd) {
     const uint32_t xy[2] = {m_gp0_packet[1], m_gp0_packet[gouraud ? 3 : 2]};
     Vertex b = ParseVertex(xy[1], gouraud ? m_gp0_packet[2] : c0);
     {
-        int32_t x[2] = {a.x, b.x};
-        m_polyline_cx = Squeeze(xy, x, 2, false);
+        int32_t x[2] = {a.x, b.x}, y[2] = {a.y, b.y};
+        m_polyline_cx = Squeeze(xy, x, y, 2, false, semi, 0);
         if (m_polyline_cx != Widescreen2D::kNone) a.x = x[0], b.x = x[1];
     }
     DrawLine(a, b, gouraud, semi);
@@ -815,8 +815,8 @@ void Ps1Gpu::DrawRectangle(uint8_t cmd) {
     // Widescreen 2D squeeze: draw dw pixels wide, sampling the w-wide texture by nearest neighbour.
     int32_t dw = w;
     {
-        int32_t x[2] = {o.x, o.x + w};
-        if (Squeeze(nullptr, x, 2, f.textured) != Widescreen2D::kNone) {
+        int32_t x[2] = {o.x, o.x + w}, y[2] = {o.y, o.y + h};
+        if (Squeeze(nullptr, x, y, 2, f.textured, f.semi, (m_texpage & 0x1FF) | uint32_t(f.clut) << 16) != Widescreen2D::kNone) {
             o.x = x[0], dw = std::max(1, x[1] - x[0]);
             const int32_t xs[2] = {o.x, o.x + dw};
             if (m_listener) m_listener->OnSqueeze(xs, 2);

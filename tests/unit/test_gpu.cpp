@@ -323,20 +323,48 @@ static void TestWidescreen2D() {
     Send(gpu, {0x65000000, XY(140, 150), 0, XY(20, 1)});
     CHECK_EQ("sprite part", CountSet(gpu, 0, 150, 320, 1), 15);
     CHECK_EQ("sprite part left", gpu.ReadVram(135, 150) != 0 && gpu.ReadVram(134, 150) == 0, 1);
-    // An untextured primitive ends the scene run: HUD line 0..40 -> 40..70
-    Send(gpu, {0x40FFFFFF, XY(0, 220), XY(40, 220)});
-    CHECK_EQ("HUD line", gpu.ReadVram(39, 220) == 0 && gpu.ReadVram(40, 220) != 0 && gpu.ReadVram(70, 220) != 0, 1);
-    Send(gpu, {0x65000000, XY(0, 2), 0, XY(40, 1)});   // textured HUD rect 0..39 -> 40..69
+    // A piece that does not touch the others (an arm 12 px away) is still the same character: same
+    // centre 120, so 172..180 -> 159..165 (around its own centre it would stay at 173..179).
+    Send(gpu, {0x65000000, XY(172, 152), 0, XY(8, 1)});
+    CHECK_EQ("sprite arm", CountSet(gpu, 0, 152, 320, 1), 6);
+    CHECK_EQ("sprite arm left", gpu.ReadVram(159, 152) != 0 && gpu.ReadVram(158, 152) == 0, 1);
+    // An untextured primitive ends the scene run: HUD line 10..50 -> 48..78
+    Send(gpu, {0x40FFFFFF, XY(10, 220), XY(50, 220)});
+    CHECK_EQ("HUD line", gpu.ReadVram(47, 220) == 0 && gpu.ReadVram(48, 220) != 0 && gpu.ReadVram(78, 220) != 0, 1);
+    Send(gpu, {0x65000000, XY(10, 2), 0x00010000, XY(40, 1)});  // textured HUD rect 10..49 -> 48..77
     CHECK_EQ("HUD rect", CountSet(gpu, 0, 2, 320, 1), 30);
-    CHECK_EQ("HUD rect left", gpu.ReadVram(40, 2) != 0 && gpu.ReadVram(39, 2) == 0, 1);
+    CHECK_EQ("HUD rect left", gpu.ReadVram(48, 2) != 0 && gpu.ReadVram(47, 2) == 0, 1);
     Send(gpu, {0x60FFFFFF, XY(0, 1), XY(320, 1)});    // full width (fade), unchanged
     CHECK_EQ("full-width rect", CountSet(gpu, 0, 1, 320, 1), 320);
-    Send(gpu, {0x200000FF, XY(10, 60), XY(50, 10), XY(10, 100)});  // one GTE vertex only: chance, HUD
+    // (a state command ends the fade's overlay run) one GTE vertex only: chance, HUD
+    Send(gpu, {0xE100010A, 0x200000FF, XY(10, 60), XY(50, 10), XY(10, 100)});
     CHECK_EQ("1-match tri", gpu.ReadVram(10, 61) == 0 && gpu.ReadVram(50, 61) != 0, 1);
+
+    // Screen-anchored overlay (the corridor's darkening vignette): a semi-transparent piece touching the
+    // right edge stays as drawn (spans the wide picture), and so does the untextured piece after it.
+    Send(gpu, {0x2AFFFFFF, XY(280, 10), XY(320, 10), XY(280, 20), XY(320, 20)});
+    CHECK_EQ("overlay edge piece", gpu.ReadVram(282, 12) != 0 && gpu.ReadVram(318, 12) != 0, 1);
+    Send(gpu, {0x2AFFFFFF, XY(200, 30), XY(280, 30), XY(200, 40), XY(280, 40)});
+    CHECK_EQ("overlay inner piece", gpu.ReadVram(202, 32) != 0 && gpu.ReadVram(270, 32) != 0, 1);
+    // A state command ends the overlay run: the same quad is HUD again, 200..280 -> 190..250.
+    Send(gpu, {0xE100010A, 0x28FFFFFF, XY(200, 50), XY(280, 50), XY(200, 60), XY(280, 60)});
+    CHECK_EQ("HUD after overlay", gpu.ReadVram(195, 52) != 0 && gpu.ReadVram(260, 52) == 0, 1);
+
+    // Anchor: a character's shadow is a GTE triangle fan centred on (240, 120); its sprite pieces are
+    // squeezed around x=240: head 236..244 -> 237..243, arm 260..268 (16 px off, same character) -> 255..261.
+    for (int32_t px : {240, 230, 250}) ws.NoteProjected(XY(px, px == 240 ? 120 : 125));
+    ws.NoteProjected(XY(240, 130));
+    Send(gpu, {0x20000040, XY(240, 120), XY(230, 125), XY(240, 130)});
+    Send(gpu, {0x20000040, XY(240, 120), XY(240, 130), XY(250, 125)});
+    Send(gpu, {0x65000000, XY(236, 100), 0, XY(8, 1)});
+    CHECK_EQ("fan head", CountSet(gpu, 200, 100, 120, 1), 6);
+    CHECK_EQ("fan head left", gpu.ReadVram(237, 100) != 0 && gpu.ReadVram(236, 100) == 0, 1);
+    Send(gpu, {0x65000000, XY(260, 101), 0, XY(8, 1)});
+    CHECK_EQ("fan arm", gpu.ReadVram(255, 101) != 0 && gpu.ReadVram(254, 101) == 0 && gpu.ReadVram(261, 101) == 0, 1);
 
     // Textured HUD rect 4 -> 3 px: nearest texture columns 0, 1, 2 (x 157..159).
     for (int i = 0; i < 4; ++i) gpu.WriteVram(640 + i, 0, static_cast<uint16_t>(i + 1));
-    Send(gpu, {0xE100010A, 0x65000000, XY(156, 200), 0, XY(4, 1)});
+    Send(gpu, {0xE100010A, 0x65000000, XY(156, 200), 0x00010000, XY(4, 1)});
     CHECK_EQ("tex rect 0", gpu.ReadVram(157, 200), 1);
     CHECK_EQ("tex rect 1", gpu.ReadVram(158, 200), 2);
     CHECK_EQ("tex rect 2", gpu.ReadVram(159, 200), 3);
@@ -350,8 +378,51 @@ static void TestWidescreen2D() {
     CHECK_EQ("ws back to 4:3", ws.Wide(), 0);
 }
 
+// Widescreen classifier rules on their own (drawing area 0..319): sticky per-texture HUD decision and the
+// 4:3 safety net for a large translucent layer that is neither centred nor screen-anchored.
+static void TestWidescreenRules() {
+    using personarm::Widescreen2D;
+    Widescreen2D ws(3, 4);
+    const uint32_t p3d[3] = {XY(10, 10), XY(50, 10), XY(10, 50)};
+    auto frame = [&] { ws.NextFrame(); for (uint32_t p : p3d) ws.NoteProjected(p); };
+    frame();
+    auto tri3d = [&] { int32_t x[3] = {10, 50, 10}, y[3] = {10, 10, 50}; ws.Squeeze2D(p3d, x, y, 3, 0, 319, false, false, 0); };
+    auto rect = [&](int32_t lo, int32_t hi, bool textured, bool semi, uint32_t tex) {
+        int32_t x[2] = {lo, hi}, y[2] = {100, 120};
+        return ws.Squeeze2D(nullptr, x, y, 2, 0, 319, textured, semi, tex);
+    };
+    // A portrait texture first seen as HUD stays HUD (centre 160) when one frame draws it right after 3D;
+    // after kStickyFrames frames of that it follows the stream (own centre 100).
+    tri3d();
+    ws.OtherCommand(false);
+    CHECK_EQ("sticky first HUD", rect(80, 120, true, false, 7), 160);
+    for (int i = 1; i < Widescreen2D::kStickyFrames; ++i) {
+        frame();
+        tri3d();
+        CHECK_EQ("sticky keeps HUD", rect(80, 120, true, false, 7), 160);
+    }
+    frame();
+    tri3d();
+    CHECK_EQ("sticky flips", rect(80, 120, true, false, 7), 100);
+
+    // Safety net: a centred translucent box (dialogue window) is HUD; an off-centre translucent layer
+    // 10..250 cannot be placed: fallback to 4:3 (nothing squeezed, GTE not widened), sticky for
+    // kFallbackFrames frames after the last one.
+    ws.OtherCommand(false);
+    CHECK_EQ("centred box", rect(16, 306, false, true, 0), 160);
+    CHECK_EQ("no fallback", ws.Fallback(), 0);
+    CHECK_EQ("uncertain layer", rect(10, 250, false, true, 0), Widescreen2D::kNone);
+    CHECK_EQ("fallback", ws.Fallback() && !ws.Wide(), 1);
+    CHECK_EQ("fallback: HUD not squeezed", rect(100, 140, false, false, 0), Widescreen2D::kNone);
+    for (int i = 1; i < Widescreen2D::kFallbackFrames; ++i) frame();
+    CHECK_EQ("fallback sticky", ws.Fallback(), 1);
+    frame();
+    CHECK_EQ("fallback over", ws.Fallback() == 0 && ws.Wide(), 1);
+}
+
 int main() {
     TestWidescreen2D();
+    TestWidescreenRules();
     TestFillRule();
     TestGouraud();
     TestTextures();

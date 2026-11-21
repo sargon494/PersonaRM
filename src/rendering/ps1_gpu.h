@@ -234,7 +234,7 @@ private:
     /// decides and the command log gets the decision as a GP0 NOP entry [3, 00AB0000h, centre - x[0],
     /// num | den << 12] before the primitive's packet; a replay (no Widescreen2D) applies that entry to its
     /// (lerped) vertices, so interpolated pictures keep 2D at 4:3 too.
-    int32_t Squeeze(const uint32_t* xy, int32_t* x, int n, bool textured);
+    int32_t Squeeze(const uint32_t* xy, int32_t* x, const int32_t* y, int n, bool textured, bool semi, uint32_t tex);
 
     // VRAM to CPU (C0h) transfer state
     uint32_t m_read_x = 0, m_read_y = 0, m_read_w = 0, m_read_h = 0;
