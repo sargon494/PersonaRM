@@ -105,7 +105,7 @@
                 </article>
                 <article class="card reveal">
                     <h3>ランチャーが製品です</h3>
-                    <p>自動更新付きのゲームライブラリです。今後、PersonaRM は他のゲーム機の Atlus 作品を同じランチャーに加えることを計画しています。時期は約束していません。</p>
+                    <p>自動更新付きのゲームライブラリです。今後、PersonaRM は他のゲーム機の Atlus 作品を同じランチャーに加えることを計画しています。今後の候補(計画段階、時期未定、まだ遊べるものはありません):デジタル・デビル・サーガ アバタール・チューナー 1・2(PlayStation 2)、真・女神転生IV と 真・女神転生IV FINAL(Nintendo 3DS)。時期は約束していません。</p>
                 </article>
             </div>
         </section>
@@ -134,16 +134,16 @@
                     <p><strong>セーブ</strong> メモリーカードとステートセーブ。</p>
                 </li>
                 <li><span class="chip works">動作</span>
-                    <p><strong>フレームレートと解像度</strong> 30/60/90/120 fps(90 と 120 では 3D の背景だけを補間するため、テクスチャのちらつきはありません)、GPU レンダラーで 4K まで。高解像度での細い線やタイルの継ぎ目は修正済みです。</p>
+                    <p><strong>フレームレートと解像度</strong> 30/60/90/120 fps(90 と 120 では 3D の背景だけを補間するため、テクスチャのちらつきはありません)、GPU レンダラーで 4K まで。高解像度での細い線やタイルの継ぎ目は修正済みです。GPU レンダラーでメニューのポートレートとテキストがちらつく問題も修正済みです。</p>
                 </li>
                 <li><span class="chip works">動作</span>
-                    <p><strong>ランチャー</strong> 自動更新付きのゲームライブラリ。初回の PLAY で、お使いの PC 上でディスクからネイティブコードを準備します(約 10〜15 秒、以降はキャッシュ)。</p>
+                    <p><strong>ランチャー</strong> 自動更新付きのゲームライブラリ。初回の PLAY で、お使いの PC 上でディスクからネイティブコードを準備します(約 10〜15 秒、以降はキャッシュ)。「Find my discs」で日本版・米国版・ディスク 2 のプロモーション版を検出して項目を自動入力し、ダンプが完全かも確認します。画面上の小さなバッジで F1〜F4 のゲームプレイ設定と早送りが分かり、「Show status icons」でオフにできます。<code>launcher.exe</code> の旧バージョンは自動更新され、<code>PersonaRM.exe</code> に移行します。</p>
                 </li>
                 <li><span class="chip works">動作</span>
                     <p><strong>ディスク</strong> 日本版ディスク 1(主)、米国英語版。日本版ディスク 2(プロモーション用)も起動。</p>
                 </li>
                 <li><span class="chip experimental">実験的</span>
-                    <p><strong>ワイドスクリーン</strong> 利用可能ですが粗削りです。推奨は 4:3。</p>
+                    <p><strong>ワイドスクリーン</strong> 利用可能ですが粗削りです。キャラクターが分離しなくなり、全画面のフェード、色調、影が横長の画面全体を覆うようになりました。対応できない場面は自動的に 4:3 になります。推奨は 4:3。</p>
                 </li>
                 <li><span class="chip experimental">実験的</span>
                     <p><strong>Linux</strong> ビルドはできますが、未検証です。</p>
@@ -166,7 +166,7 @@
                 <li class="reveal">
                     <h3>PersonaRM をダウンロードする</h3>
                     <p><a href="https://github.com/sargon494/PersonaRM/releases/latest">最新リリース</a>(v0.2.0)から
-                        Windows 用の zip をダウンロードし、展開して <code>launcher.exe</code> を実行します。</p>
+                        Windows 用の zip をダウンロードし、展開して <code>PersonaRM.exe</code> を実行します。</p>
                 </li>
                 <li class="reveal">
                     <h3>ディスクを指定して PLAY を押す</h3>
@@ -221,7 +221,7 @@ personarm_sdl "/path/to/disc1.cue" --recomp --memcard1 "/path/to/card1.mcd"</cod
                 </article>
                 <article class="feature reveal">
                     <h3>ディスクの処理</h3>
-                    <p>ISO 9660 と生の CD-ROM XA イメージを <code>.cue</code> の解決付きで扱い、ゲームのデータファイルをマップするツールも備えます。</p>
+                    <p>ISO 9660 と生の CD-ROM XA イメージを <code>.cue</code> の解決付きで扱い、ゲームのデータファイルをマップするツールも備えます。開発者向けのマップツアーは、すべてのフィールドエリアを自動で読み込んで見た目の問題を探します(日本版ディスク 1 の 300 エリアすべてが読み込まれます)。</p>
                 </article>
                 <article class="feature reveal">
                     <h3>表示モード</h3>
