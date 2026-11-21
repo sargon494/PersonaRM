@@ -97,8 +97,8 @@ static void PrintUsage(const char* prog) {
               << "                     --save-state-at <N> <file>  write a save state at the end of frame N\n"
               << "                     --load-state <file>    start from a save state (same disc and build) instead\n"
               << "                                            of power-on; the run continues to --max-frames\n"
-              << "                     --warp-map <area>[:<entry>]  map change to a field area, like a door (JP disc 1,\n"
-              << "                                            from a field; docs/MAP_TOUR.md); --warp-at <N> not before frame N\n"
+              << "                     --warp-map <area>[:<entry>]  map change to a field area, like a door (disc 1,\n"
+              << "                                            JP or US, from a field; docs/MAP_TOUR.md); --warp-at <N> not before frame N\n"
               << "                     --poke-at <N> <addr>=<value>[:<bytes>]  write RAM after frame N (hex)\n"
               << "  --config           Open interactive settings menu\n"
               << "  --scan [dir]       Scan directory for legal game disc images (.iso/.bin/.cue)\n"
@@ -1003,6 +1003,7 @@ static int RunBootHarness(const std::string& disc_path, const BootOptions& opt) 
     // Map change (docs/MAP_TOUR.md): field bank (area) word, entry word, F0042 field request byte.
     struct WarpAddrs { uint32_t area, entry, request; };
     const WarpAddrs wa = disc.product_id == "SLPS-02785" ? WarpAddrs{0x8007E33E, 0x8007E340, 0x800DE798}
+                       : disc.product_id == "SLUS-01158" ? WarpAddrs{0x8007FA5E, 0x8007FA60, 0x800E2F90}
                                                          : WarpAddrs{0, 0, 0};
     bool warped = false;
     auto hex = [](uint32_t v) { char b[16]; std::snprintf(b, sizeof b, "0x%08X", v); return std::string(b); };

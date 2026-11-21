@@ -7,9 +7,11 @@ Developer tool (not shipped). See docs/MAP_TOUR.md.
         --state <field.state> --out <folder outside the repo> --areas 0-120 [--jobs 6]
 
 Needs Pillow. Writes <out>/<area>/{43,169}/frame_*.png, <out>/<area>/*.log and <out>/index.html.
+JP or US disc 1. --sdl <personarm_sdl.exe> adds the player-config pass (GPU 4x, --interp 120) per area.
 """
 import argparse
 import concurrent.futures as cf
+import functools
 import html
 import json
 import os
@@ -18,7 +20,7 @@ import subprocess
 import sys
 
 try:
-    from PIL import Image
+    from PIL import Image, ImageChops, ImageFilter, ImageStat
 except ImportError:  # pragma: no cover
     sys.exit("map_tour needs Pillow (pip install pillow)")
 
@@ -139,10 +141,222 @@ def reflag(out):
     for r in load_results(out):
         d = os.path.join(out, '%03d' % r['area'])
         imgs = {t: Image.open(os.path.join(d, v[0])) if v[0] else None for t, v in r['frames'].items()}
-        keep = [f for f in r['flags'] if f.startswith('HIGH') and 'edge step' not in f]
-        flags = keep + image_flags(imgs.get('43'), imgs.get('169'))
-        with open(os.path.join(d, 'result.json'), 'w', encoding='utf-8') as f:
-            json.dump({'area': r['area'], 'flags': flags, 'frames': {t: v[0] for t, v in r['frames'].items()}}, f)
+        keep = [f for f in r['flags'] if f.startswith('HIGH') and 'edge step' not in f and 'GPU' not in f]
+        g = r.get('gpu') or {}
+        gpu = [f for f in r['flags'] if 'GPU pass' in f] + gpu_flags(g.get('metrics') or {})
+        r['flags'] = keep + image_flags(imgs.get('43'), imgs.get('169')) + gpu
+        save_result(d, r)
+
+
+# ---- Player-config pass (--sdl): personarm_sdl with the GPU renderer, 4x and 120 Hz interpolation ----------------
+# Thresholds (luma 0..255). The software 60 Hz 1x run of the same state and input is the reference: emulation
+# does not depend on the renderer, so its frame f is the picture the game drew at f.
+WINDOW = (-4, 3)       # software frames f-4..f+3 can be on screen at GPU present f (interpolation is late; the
+                       # GPU picture of a double-buffered game can also be up to two frames ahead of the display)
+BACK_LEVEL = 0.5       # a present closer to an older frame than to the one already shown, by this mean luma
+JITTER_LEVEL = 8       # GPU present-to-present change, averaged over each 1x pixel's kxk block
+JITTER_PIXELS = 20     # 1x pixels that may change between presents while still in the game: MED above
+JITTER_HIGH = 300      # ... HIGH above (a visible flicker rather than a sub-pixel edge wobble)
+LINE_LEVEL = 48        # GPU pixel vs the software frame upscaled (nearest): dither and filtering stay below
+LINE_PIXELS = 400      # thin (1-2 px wide) stray hi-res pixels on still, edge-free areas before flagging
+GROSS_LEVEL = 16       # median over presents of the mean |GPU downscaled - software| of the best frame of the window
+GPU_TAIL = 90          # presents dumped for frames stop+1..stop+90: still until +60, then right held 30 frames
+SETTLE = 8             # frames after the state load not judged (GPU upscaled VRAM and interpolation history refill)
+SPIKE_LEVEL = 8        # one present's mean |GPU - software| above the median of the 8 presents around it
+KIND_WORD = {'back': 'back in time', 'jitter': 'jitter', 'lines': 'lines', 'spike': 'spike', 'gross': 'differs'}  # crop -> flag
+
+
+def mask(img, level):
+    return img.point(lambda v: 255 if v > level else 0)
+
+
+def count(m):
+    return m.histogram()[255]
+
+
+def hotspot(m, w=80, h=60):
+    """Box (in m's pixels) of w x h around the 16x16 cell with the most set pixels."""
+    cw, ch = max(1, m.size[0] // 16), max(1, m.size[1] // 16)
+    grid = list(m.resize((cw, ch), Image.BOX).tobytes())
+    i = grid.index(max(grid))
+    cx, cy = (i % cw) * 16 + 8, (i // cw) * 16 + 8
+    x0 = min(max(0, cx - w // 2), max(0, m.size[0] - w))
+    y0 = min(max(0, cy - h // 2), max(0, m.size[1] - h))
+    return (x0, y0, x0 + w, y0 + h)
+
+
+def save_crop(path, imgs, box, k):
+    """Side by side crops (box in 1x pixels) of the widest images (k x) and of 1x ones, all shown at k x."""
+    parts, wide = [], max(im.size[0] for im in imgs)
+    for im in imgs:
+        s = max(1, round(im.size[0] * k / wide))
+        c = im.crop(tuple(v * s for v in box))
+        parts.append(c.resize(((box[2] - box[0]) * k, (box[3] - box[1]) * k), Image.NEAREST).convert('RGB'))
+    out = Image.new('RGB', (sum(p.size[0] for p in parts) + 4 * (len(parts) - 1), parts[0].size[1]), (255, 0, 255))
+    x = 0
+    for p in parts:
+        out.paste(p, (x, 0))
+        x += p.size[0] + 4
+    out.save(path)
+
+
+def thin_strays(gpu_l, sw_l, still_hi, k):
+    """Hi-res pixels far from the upscaled software frame, away from its edges, on still areas, and thin
+    (gone after a 3x3 opening): seams, outlines and stray lines rather than shape or shading changes."""
+    up = sw_l.resize(gpu_l.size, Image.NEAREST)
+    edges = mask(sw_l.filter(ImageFilter.FIND_EDGES), 24).filter(ImageFilter.MaxFilter(3)).resize(gpu_l.size, Image.NEAREST)
+    stray = ImageChops.darker(ImageChops.subtract(mask(ImageChops.difference(gpu_l, up), LINE_LEVEL), edges), still_hi)
+    return ImageChops.subtract(stray, stray.filter(ImageFilter.MinFilter(3)).filter(ImageFilter.MaxFilter(3)))
+
+
+def analyse_gpu(pg, ps, gd, start):
+    """Metrics, crops and a representative picture from the dumped GPU presents (pg) and software frames (ps)."""
+    sw, swc = {}, {}
+    for n in os.listdir(ps):
+        m = re.match(r'f(\d+)_0_t\d+\.png$', n)
+        if m:
+            swc[int(m.group(1))] = Image.open(os.path.join(ps, n)).convert('RGB')
+            sw[int(m.group(1))] = luma(swc[int(m.group(1))])
+    pres = []
+    for n in sorted(os.listdir(pg)):
+        m = re.match(r'f(\d+)_(\d+)_t(\d+)\.png$', n)
+        if m and int(m.group(1)) >= start + SETTLE:
+            pres.append((int(m.group(1)), int(m.group(2)), os.path.join(pg, n)))
+    if not pres or not sw:
+        return ['HIGH GPU pass: no pictures'], [], None, {}
+    still = {}
+    def still_mask(f):  # 255 where the software frames of the window agree (grown by one pixel)
+        if f not in still:
+            fs = [sw.get(i) for i in range(f + WINDOW[0], f + WINDOW[1] + 1)]
+            if any(x is None for x in fs) or any(x.size != fs[-1].size for x in fs):
+                still[f] = None
+            else:
+                ch = Image.new('L', fs[-1].size, 0)
+                for a, b in zip(fs, fs[1:]):
+                    ch = ImageChops.lighter(ch, mask(ImageChops.difference(a, b), 0))
+                still[f] = ImageChops.invert(ch.filter(ImageFilter.MaxFilter(3)))
+        return still[f]
+    worst = {'jitter': (0, None), 'lines': (0, None), 'spike': (0, None), 'gross': (0, None), 'back': (0, None)}
+    seq, prev, shot = [], None, None  # seq: (gross, label, small GPU, best software) per comparable present
+    for f, s, path in pres:
+        rgb = Image.open(path).convert('RGB')
+        g = luma(rgb)
+        ref = sw.get(f)
+        k = g.size[0] // ref.size[0] if ref else 0
+        if not k or g.size != (ref.size[0] * k, ref.size[1] * k):
+            prev = None
+            continue  # 24bpp / display mode change: not comparable
+        small = g.resize(ref.size, Image.BOX)
+        dist = {i: ImageStat.Stat(ImageChops.difference(small, sw[i])).mean[0]
+                for i in range(f + WINDOW[0], f + WINDOW[1] + 1) if i in sw and sw[i].size == ref.size}
+        bi = min(dist, key=dist.get)
+        gr = dist[bi]
+        shown = [i for i in dist if dist[i] <= gr + BACK_LEVEL]  # the game frames this present can be
+        label = 'f%d/%d' % (f, s)
+        # Back in time: this present is an older game frame than one a previous present already showed.
+        if prev is not None and prev[4] and max(shown) < prev[4] and prev[4] in dist and dist[prev[4]] > gr + BACK_LEVEL:
+            back = prev[4] - max(shown)
+            if back > worst['back'][0]:
+                change = ImageChops.difference(prev[3], rgb).point(lambda v: min(255, 4 * v))
+                hs = hotspot(mask(ImageChops.difference(prev[2], g).resize(ref.size, Image.BOX), JITTER_LEVEL))
+                worst['back'] = (back, (hs, [prev[3], rgb, change], k, '%s shows f%d after %s showed f%d' % (label, max(shown), prev[1], prev[4])))
+        seq.append((gr, label, rgb.resize(ref.size, Image.BOX), swc[bi]))
+        if gr > worst['gross'][0]:
+            worst['gross'] = (gr, ((0, 0) + ref.size, [seq[-1][2], swc[bi]], 1, label))
+        sm = still_mask(f)
+        if sm is not None:
+            if prev is not None and prev[0] >= f - 1 and prev[2].size == g.size:
+                jit = ImageChops.darker(mask(ImageChops.difference(prev[2], g).resize(ref.size, Image.BOX), JITTER_LEVEL), sm)
+                if count(jit) > worst['jitter'][0]:
+                    change = ImageChops.difference(prev[3], rgb).point(lambda v: min(255, 4 * v))
+                    worst['jitter'] = (count(jit), (hotspot(jit), [prev[3], rgb, change], k, '%s vs %s' % (prev[1], label)))
+            th = thin_strays(g, sw[bi], sm.resize(g.size, Image.NEAREST), k)
+            if count(th) > worst['lines'][0]:
+                hs = hotspot(th.resize(ref.size, Image.BOX).point(lambda v: 255 if v else 0))
+                worst['lines'] = (count(th), (hs, [rgb, swc[bi]], k, label))
+        newest = max(min(shown), prev[4] if prev is not None and prev[4] else 0)  # newest frame shown so far
+        prev = (f, label, g, rgb, newest)
+        if f <= start + 60:
+            shot = rgb
+    # A spike: one present much farther from the game's frames than the presents around it (a pop or flash).
+    for i, (gr, label, small, best) in enumerate(seq):
+        around = sorted(x[0] for x in seq[max(0, i - 4):i] + seq[i + 1:i + 5])
+        if around and gr - around[len(around) // 2] > worst['spike'][0]:
+            worst['spike'] = (gr - around[len(around) // 2], ((0, 0) + small.size, [seq[i - 1][2] if i else small, small, best], 1,
+                                                            '%s (previous | this | software)' % label))
+    grs = sorted(x[0] for x in seq)
+    metrics = {'jitter_px': worst['jitter'][0], 'line_px': worst['lines'][0], 'spike': round(worst['spike'][0], 1),
+               'back_frames': worst['back'][0],
+               'gross_median': round(grs[len(grs) // 2], 1) if grs else 0, 'presents': len(pres)}
+    crops = []
+    for kind in ('back', 'jitter', 'lines', 'spike', 'gross'):  # the worst case of each, flagged or not (--reflag)
+        if worst[kind][1]:
+            box, imgs, k, what = worst[kind][1]
+            save_crop(os.path.join(gd, 'crop_%s.png' % kind), imgs, box, k)
+            crops.append(('crop_%s.png' % kind, '%s %s' % (kind, what)))
+    return gpu_flags(metrics), crops, shot, metrics
+
+
+def gpu_flags(m):
+    flags = []
+    if m.get('back_frames', 0) > 0:
+        flags.append('HIGH GPU present went back in time (%d frames)' % m['back_frames'])
+    if m.get('jitter_px', 0) > JITTER_HIGH:
+        flags.append('HIGH GPU jitter in a still scene (%d px)' % m['jitter_px'])
+    elif m.get('jitter_px', 0) > JITTER_PIXELS:
+        flags.append('MED GPU jitter in a still scene (%d px)' % m['jitter_px'])
+    if m.get('line_px', 0) > LINE_PIXELS:
+        flags.append('MED GPU thin stray lines (%d hi-res px)' % m['line_px'])
+    if m.get('gross_median', 0) > GROSS_LEVEL:
+        flags.append('MED GPU differs from software (median %.0f)' % m['gross_median'])
+    if m.get('spike', 0) > SPIKE_LEVEL:
+        flags.append('MED GPU spike: one present off the game frames (+%.0f)' % m['spike'])
+    return flags
+
+
+def gpu_pass(o, area, d, stop, state):
+    """personarm_sdl from the area's state: GPU 4x 120 Hz presents and the software 1x reference."""
+    gd = os.path.join(d, 'gpu')
+    pg, ps, sd = (os.path.join(gd, x) for x in ('pg', 'ps', 'sd'))
+    for x in (pg, ps, sd):
+        os.makedirs(x, exist_ok=True)
+        for n in os.listdir(x):
+            os.remove(os.path.join(x, n))
+    for n in os.listdir(gd):
+        if n.startswith('crop_') or n == 'shot.png':
+            os.remove(os.path.join(gd, n))
+    os.replace(state, os.path.join(sd, o.serial + '.state0'))  # --load-state N reads <save_dir>/<serial>.state<N>
+    with open(os.path.join(gd, 'settings.json'), 'w', encoding='utf-8') as f:
+        json.dump({'general': {'save_dir': sd, 'pause_on_focus_loss': False}}, f)
+    with open(os.path.join(gd, 'input.txt'), 'w', encoding='utf-8') as f:
+        f.write('%d right 30\n' % (stop + 61))
+    end = stop + GPU_TAIL
+    flags = []
+    for tag, dump, extra in (('gpu', pg, ['--renderer', 'gpu', '--resolution-scale', '4', '--interp', '120']),
+                             ('sw', ps, ['--renderer', 'software', '--resolution-scale', '1', '--interp', '60'])):
+        last = end + (WINDOW[1] if tag == 'sw' else 0)
+        args = [o.disc, '--settings', os.path.join(gd, 'settings.json'), '--hidden', '--unthrottled', '--mute',
+                '--no-recomp', '--load-state', '0', '--frames', str(last), '--dump-dir', dump, '--dump-from',
+                str(stop + 1), '--dump-to', str(last), '--input-script', os.path.join(gd, 'input.txt')] + extra
+        code, text = run(o.sdl, args, os.path.join(gd, tag + '.log'), o.timeout)
+        if code == 'timeout':
+            flags.append('HIGH GPU pass: hang (%s)' % tag)
+        elif code != 0:
+            flags.append('HIGH GPU pass: crash (%s exit %s)' % (tag, code))
+        if 'loaded slot 0' not in text:
+            flags.append('HIGH GPU pass: could not load the state (%s)' % tag)
+        if '[gpu] present failed' in text:
+            flags.append('HIGH GPU pass: present failed (fell back to software)')
+    if flags:
+        return flags, [], None, {}
+    f2, crops, shot, metrics = analyse_gpu(pg, ps, gd, stop)
+    if shot is not None:
+        shot.resize((640, 480), Image.BOX).save(os.path.join(gd, 'shot.png'))
+    if not o.keep_presents:
+        for x in (pg, ps, sd):
+            for n in os.listdir(x):
+                os.remove(os.path.join(x, n))
+    return f2, crops, 'gpu/shot.png' if shot is not None else None, metrics
 
 
 def tour_area(o, area, start):
@@ -150,6 +364,7 @@ def tour_area(o, area, start):
     os.makedirs(d, exist_ok=True)
     stop = start + o.frames
     res = {'area': area, 'flags': [], 'frames': {}}
+    state = os.path.join(d, 'area.state')
     for tag, extra in (('43', []), ('169', ['--widescreen', '16:9'])):
         fd = os.path.join(d, tag)
         os.makedirs(fd, exist_ok=True)
@@ -157,6 +372,8 @@ def tour_area(o, area, start):
             os.remove(os.path.join(fd, n))
         args = ['--boot', o.disc, '--load-state', o.state, '--warp-map', str(area), '--max-frames', str(stop),
                 '--dump-frames', fd, '--every', str(o.every)] + extra
+        if tag == '43' and o.sdl:
+            args += ['--save-state-at', str(stop), state]
         code, text = run(o.exe, args, os.path.join(d, tag + '.log'), o.timeout)
         if code == 'timeout':
             res['flags'].append('HIGH hang (%s timeout)' % tag)
@@ -177,9 +394,21 @@ def tour_area(o, area, start):
         name, img = last_frame(fd)
         res['frames'][tag] = (os.path.join(tag, name) if name else None, img)
     res['flags'] += image_flags(res['frames']['43'][1], res['frames']['169'][1])
+    if o.sdl:
+        if os.path.isfile(state):
+            gf, crops, shot, metrics = gpu_pass(o, area, d, stop, state)
+            res['flags'] += gf
+            res['gpu'] = {'crops': crops, 'shot': shot, 'metrics': metrics}
+        else:
+            res['flags'].append('HIGH GPU pass: no area state from the harness')
+    save_result(d, res)
+    return {'area': area, 'flags': res['flags']}
+
+
+def save_result(d, r):
     with open(os.path.join(d, 'result.json'), 'w', encoding='utf-8') as f:
-        json.dump({'area': area, 'flags': res['flags'], 'frames': {t: v[0] for t, v in res['frames'].items()}}, f)
-    return res
+        json.dump({'area': r['area'], 'flags': r['flags'], 'frames': {t: v[0] for t, v in r['frames'].items()},
+                   'gpu': r.get('gpu')}, f)
 
 
 def load_results(out):
@@ -198,12 +427,20 @@ def load_results(out):
 def write_sheet(out, results, title):
     bad = sum(1 for r in results if any(not f.startswith('LOW') for f in r['flags']))
     rows = []
+    gpu = any(r.get('gpu') for r in results)
     for r in results:
         cells = []
         for tag, width in (('43', 320), ('169', 427)):
             rel = r['frames'][tag][0]
             cells.append('<td>%s</td>' % ('<img src="%03d/%s" width="%d" height="240">' % (r['area'], rel.replace(os.sep, '/'), width)
                                           if rel else '-'))
+        if gpu:
+            g = r.get('gpu') or {}
+            cells.append('<td>%s</td>' % ('<img src="%03d/%s" width="320" height="240">' % (r['area'], g['shot']) if g.get('shot') else '-'))
+            cells.append('<td>%s<br><small>%s</small></td>' % (
+                ''.join('<div><img src="%03d/gpu/%s" height="120"><br>%s</div>' % (r['area'], n, html.escape(w)) for n, w in g.get('crops', [])
+                        if any(KIND_WORD[w.split()[0]] in f for f in r['flags'])),
+                html.escape(' '.join('%s=%s' % kv for kv in sorted((g.get('metrics') or {}).items())))))
         flags = '<br>'.join(html.escape(f) for f in r['flags']) or 'ok'
         sev = next((s.lower() for s in ('HIGH', 'MED', 'LOW') if any(f.startswith(s) for f in r['flags'])), 'ok')
         rows.append('<tr class="%s"><td>%d<br>0x%02X</td>%s<td>%s</td></tr>' % (sev, r['area'], r['area'], ''.join(cells), flags))
@@ -211,7 +448,11 @@ def write_sheet(out, results, title):
             'td{border-bottom:1px solid #333;padding:4px;vertical-align:top}tr.high td:last-child{color:#f66}tr.med td:last-child{color:#fb4}tr.low td:last-child{color:#999}img{image-rendering:pixelated}'
             '</style><h1>%s</h1><p>%d areas, %d with HIGH/MED flags (LOW: side bands with no geometry, usually a small room). 16:9 frames are anamorphic captures shown stretched to 16:9.</p>'
             '<label><input type="checkbox" onchange="document.querySelectorAll(\'tr.ok,tr.low\').forEach(r=>r.hidden=this.checked)"> HIGH/MED only</label>'
-            '<table><tr><th>area</th><th>4:3</th><th>16:9</th><th>flags</th></tr>%s</table>') % (html.escape(title), len(results), bad, '\n'.join(rows))
+            '%s<table><tr><th>area</th><th>4:3</th><th>16:9</th>%s<th>flags</th></tr>%s</table>') % (
+                html.escape(title), len(results), bad,
+                '<p>GPU: personarm_sdl --renderer gpu --resolution-scale 4 --interp 120, 4:3, still for 60 frames then right held 30; '
+                'crops: GPU | software 1x upscaled (lines), present | next present (jitter), live | synthesized | live (interp).</p>' if gpu else '',
+                '<th>GPU 4x 120 Hz</th><th>GPU crops</th>' if gpu else '', '\n'.join(rows))
     with open(os.path.join(out, 'index.html'), 'w', encoding='utf-8') as f:
         f.write(page)
     md = ['| area | flags |', '|---|---|'] + ['| %d | %s |' % (r['area'], '; '.join(r['flags']) or 'ok') for r in results]
@@ -233,6 +474,8 @@ def main():
     ap.add_argument('--timeout', type=float, default=180)
     ap.add_argument('--title', default='PersonaRM map tour')
     ap.add_argument('--reflag', action='store_true', help='only recompute flags and the sheet from --out')
+    ap.add_argument('--sdl', help='personarm_sdl.exe: also run the player-config pass (GPU 4x, --interp 120)')
+    ap.add_argument('--keep-presents', action='store_true', help='keep the dumped GPU/software presents (large)')
     o = ap.parse_args()
     if o.reflag:
         reflag(o.out)
@@ -242,6 +485,7 @@ def main():
     if not (o.exe and o.disc and o.state):
         ap.error('--exe, --disc and --state are needed for a tour')
     o.exe, o.disc, o.state, o.out = (os.path.abspath(p) for p in (o.exe, o.disc, o.state, o.out))
+    o.sdl = os.path.abspath(o.sdl) if o.sdl else None
     os.makedirs(o.out, exist_ok=True)
     # Frame the state was saved at: the harness prints it on load.
     code, text = run(o.exe, ['--boot', o.disc, '--load-state', o.state, '--max-frames', '0'], os.path.join(o.out, 'probe.log'), 120)
@@ -249,10 +493,12 @@ def main():
     if not m:
         sys.exit('cannot load the state (see probe.log)')
     start = int(m.group(1))
+    m = re.search(r'\] disc (\S+) entry', text)
+    o.serial = m.group(1) if m else 'unknown'
     areas = parse_areas(o.areas)
     results = []
-    with cf.ThreadPoolExecutor(o.jobs) as ex:
-        for r in ex.map(lambda a: tour_area(o, a, start), areas):
+    with cf.ProcessPoolExecutor(o.jobs) as ex:  # processes: the GPU-pass image analysis is CPU bound
+        for r in ex.map(functools.partial(tour_area, o, start=start), areas):
             print('area %3d: %s' % (r['area'], '; '.join(r['flags']) or 'ok'), flush=True)
             results.append(r)
     every = load_results(o.out)
@@ -269,6 +515,18 @@ if __name__ == '__main__':
                 img.putpixel((x, y), (0, 0, 0))
         assert any('HIGH edge step x=40' in f for f in edge_flags(img)), edge_flags(img)
         assert edge_flags(Image.new('RGB', (320, 240), (90, 90, 90))) == []
+        sw = Image.new('L', (320, 240), 100)
+        still = Image.new('L', (1280, 960), 255)
+        hi = sw.resize((1280, 960))
+        assert count(thin_strays(hi, sw, still, 4)) == 0
+        seam = hi.copy()
+        seam.paste(255, (0, 500, 1280, 501))  # a 1 px line on a flat area: a seam
+        assert count(thin_strays(seam, sw, still, 4)) > LINE_PIXELS
+        blob = hi.copy()
+        blob.paste(255, (400, 400, 480, 480))  # a solid shape: not thin
+        assert count(thin_strays(blob, sw, still, 4)) < 50, count(thin_strays(blob, sw, still, 4))
+        assert gpu_flags({'jitter_px': JITTER_HIGH + 1})[0].startswith('HIGH GPU jitter')
+        assert gpu_flags({'jitter_px': JITTER_PIXELS, 'line_px': 0, 'spike': 0, 'gross_median': 0}) == []
         print('self-test ok')
     else:
         main()
