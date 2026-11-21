@@ -1,6 +1,7 @@
 // No console window in release builds on Windows.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
+mod disc;
 mod model;
 mod update;
 
@@ -95,6 +96,8 @@ enum Msg {
     /// personarm_native progress, then its end (None = native code ready, Some = why not).
     Native(NativeLine),
     NativeEnd(Option<String>),
+    /// "Find my discs" finished: what it found, the cache entries it made, seconds it took.
+    Scan(Vec<disc::Found>, disc::Cache, f32),
 }
 
 enum Upd {
@@ -137,6 +140,10 @@ struct App {
     focus_first: bool,
     /// Preparing native code before PLAY: progress 0..1, message, and the game command to start after.
     native: Option<(f32, String, PathBuf, Vec<String>)>,
+    /// "Find my discs": running now, what the last run found, and how long it took (None = never ran).
+    scanning: bool,
+    found: Vec<disc::Found>,
+    scan_secs: Option<f32>,
 }
 
 impl App {
@@ -150,6 +157,37 @@ impl App {
             });
             ctx.request_repaint();
         });
+    }
+
+    /// Search the usual folders (and the user's extra ones) on a thread; the UI repaints once when it is done.
+    fn start_scan(&mut self, ctx: &egui::Context) {
+        if self.scanning {
+            return;
+        }
+        self.scanning = true;
+        let (games, dirs, mut cache) = (self.cfg.games.clone(), self.cfg.scan_dirs.clone(), self.cfg.disc_cache.clone());
+        let (tx, ctx) = (self.tx.clone(), ctx.clone());
+        std::thread::spawn(move || {
+            let t = std::time::Instant::now();
+            let found = disc::scan(&games, &dirs, &mut cache);
+            let _ = tx.send(Msg::Scan(found, cache, t.elapsed().as_secs_f32()));
+            ctx.request_repaint();
+        });
+    }
+
+    /// Fill the empty (or missing) Japanese / English disc fields with the complete discs that were found.
+    fn apply_found(&mut self) -> bool {
+        let mut changed = false;
+        for f in self.found.iter().filter(|f| f.disc.problem.is_none()) {
+            let g = &mut self.cfg.games[f.game];
+            if let Some(slot) = disc::slot_of(g, &f.disc) {
+                if path_state(g.discs.get(slot).map_or("", String::as_str), false) != PathState::Found {
+                    g.discs.insert(slot.into(), f.path.to_string_lossy().into_owned());
+                    changed = true;
+                }
+            }
+        }
+        changed
     }
 
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
@@ -184,7 +222,13 @@ impl App {
                 }
             });
         }
-        Self { page, sel: 0, covers: HashMap::new(), cfg, settings, doc, capture: None, dirty: false, error, logo, upd: Upd::None, tx, rx, t0: -10.0, dir: 1.0, shot: arg("--shot"), frames: 0, focus_first: std::env::args().any(|a| a == "--focus"), native: None }
+        let mut app = Self { page, sel: 0, covers: HashMap::new(), cfg, settings, doc, capture: None, dirty: false, error, logo, upd: Upd::None, tx, rx, t0: -10.0, dir: 1.0, shot: arg("--shot"), frames: 0, focus_first: std::env::args().any(|a| a == "--focus"), native: None, scanning: false, found: Vec::new(), scan_secs: None };
+        // First launch, no disc set anywhere: look for the discs once (hidden `--find` forces it).
+        let no_disc = !app.cfg.games.iter().any(|g| g.discs.values().any(|d| path_state(d, false) == PathState::Found));
+        if (!app.cfg.scanned && no_disc) || std::env::args().any(|a| a == "--find") {
+            app.start_scan(&cc.egui_ctx);
+        }
+        app
     }
 
     fn save(&mut self) {
@@ -337,12 +381,17 @@ fn state_line(ui: &mut egui::Ui, s: PathState, empty: bool, unset: &str) {
         PathState::Missing => (Icon::Cross, RED_HI, "file missing"),
         PathState::NotSet => (Icon::Dash, MUTED, "not set"),
     };
+    icon_line(ui, k, col, if empty { unset } else { txt });
+}
+
+fn icon_line(ui: &mut egui::Ui, k: Icon, col: Color32, txt: &str) -> egui::Response {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 5.0;
         let (r, _) = ui.allocate_exact_size(egui::vec2(12.0, 14.0), egui::Sense::hover());
         icon(ui.painter(), r.center(), k, col);
-        ui.label(RichText::new(if empty { unset } else { txt }).size(13.0).color(col));
-    });
+        ui.label(RichText::new(txt).size(13.0).color(col));
+    })
+    .response
 }
 
 fn combo(ui: &mut egui::Ui, id: &str, cur: &mut String, opts: &[(&str, &str)]) -> bool {
@@ -360,6 +409,11 @@ fn combo(ui: &mut egui::Ui, id: &str, cur: &mut String, opts: &[(&str, &str)]) -
 /// `dir`: the path is a folder. `empty`: state to show when the field is empty (it can fall back to a
 /// default); `unset`: the words for that case.
 fn path_row(ui: &mut egui::Ui, path: &mut String, dir: bool, empty: PathState, unset: &str, pick: impl FnOnce() -> Option<PathBuf>) -> bool {
+    path_row_v(ui, path, dir, empty, unset, None, pick)
+}
+
+/// `path_row` with an optional verdict (ok, text) that replaces "found" once the file exists (disc check).
+fn path_row_v(ui: &mut egui::Ui, path: &mut String, dir: bool, empty: PathState, unset: &str, verdict: Option<(bool, String)>, pick: impl FnOnce() -> Option<PathBuf>) -> bool {
     let mut changed = false;
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing.y = 3.0;
@@ -377,6 +431,10 @@ fn path_row(ui: &mut egui::Ui, path: &mut String, dir: bool, empty: PathState, u
             }
         });
         let st = path_state(path, dir);
+        if let (PathState::Found, Some((ok, t))) = (st, &verdict) {
+            icon_line(ui, if *ok { Icon::Check } else { Icon::Cross }, if *ok { PAPER } else { RED_HI }, t);
+            return;
+        }
         state_line(ui, if st == PathState::NotSet { empty } else { st }, st == PathState::NotSet, unset);
     });
     changed
@@ -693,7 +751,9 @@ impl App {
         let mut dirty = false;
         let s = &mut self.settings;
         let cap = &mut self.capture;
-        let g = &mut self.cfg.games[self.sel];
+        let (cache, g) = (&mut self.cfg.disc_cache, &mut self.cfg.games[self.sel]);
+        let (ctx, scanning, found, secs) = (ui.ctx().clone(), self.scanning, &self.found, self.scan_secs);
+        let (mut find, mut folder) = (false, None);
         let name = g.name.clone();
         ui.horizontal(|ui| {
             ui.label(RichText::new(name.clone()).family(cond()).size(26.0).extra_letter_spacing(2.0));
@@ -708,12 +768,39 @@ impl App {
             heading(ui, "DISCS");
             hint(ui, &format!("Pick the .cue of your own {name} disc image (Japanese and/or US release). The Language option below chooses which disc boots."));
             ui.add_space(2.0);
+            ui.horizontal(|ui| {
+                find = ui.add_enabled(!scanning, egui::Button::new(caps("Find my discs", 15.0))).clicked();
+                if ui.add_enabled(!scanning, egui::Button::new("Search a folder...")).clicked() {
+                    folder = rfd::FileDialog::new().pick_folder();
+                }
+                if scanning {
+                    ui.label(RichText::new("Searching Downloads, Documents and Desktop...").size(13.0).color(MUTED));
+                }
+            });
+            for f in found.iter().filter(|f| f.game == self.sel) {
+                let promo = disc::PROMO_SERIALS.contains(&f.disc.serial.as_str());
+                let t = format!("{} \u{2014} {} ({}){}", name, disc::Region::of(&f.disc.serial).label(), f.disc.serial, if promo { " \u{b7} Disc 2 promo, not the game disc" } else { "" });
+                let ok = f.disc.problem.is_none();
+                let ic = if !ok { Icon::Cross } else if promo { Icon::Ring } else { Icon::Check };
+                icon_line(ui, ic, if ok { PAPER } else { RED_HI }, &if ok { t } else { format!("{t} \u{b7} incomplete") })
+                    .on_hover_text(f.path.to_string_lossy());
+            }
+            match (scanning, secs, found.iter().any(|f| f.game == self.sel)) {
+                (false, Some(s), false) => hint(ui, &format!("No disc found ({s:.1} s). Use Search a folder, or Browse below.")),
+                (false, Some(s), true) => hint(ui, &format!("Searched in {s:.1} s. Empty disc fields were filled in.")),
+                _ => {}
+            }
+            ui.add_space(2.0);
             grid("discs").show(ui, |ui| {
                 for (code, label) in [("ja", "Japanese disc"), ("en", "English disc")] {
                     grid_row(ui, label, |ui| {
                         let mut p = g.discs.get(code).cloned().unwrap_or_default();
-                        let pick = || rfd::FileDialog::new().add_filter("Disc image", &["cue"]).pick_file();
-                        if path_row(ui, &mut p, false, PathState::NotSet, "not set", pick) {
+                        let pick = || rfd::FileDialog::new().add_filter("Disc image", &["cue", "iso"]).pick_file();
+                        let v = (path_state(&p, false) == PathState::Found).then(|| {
+                            let r = disc::identify_cached(cache, std::path::Path::new(p.trim().trim_matches('"')));
+                            disc::verdict(g, code, &r)
+                        });
+                        if path_row_v(ui, &mut p, false, PathState::NotSet, "not set", v, pick) {
                             g.discs.insert(code.into(), p);
                             dirty = true;
                         }
@@ -786,6 +873,17 @@ impl App {
         ui.add_space(4.0);
         let r = ui.allocate_space(egui::vec2(ui.available_width(), 46.0)).1;
         let play = red_button(ui, r, id("play"), "Play", 24.0, true).clicked();
+        if let Some(d) = folder {
+            let d = d.to_string_lossy().into_owned();
+            if !self.cfg.scan_dirs.contains(&d) {
+                self.cfg.scan_dirs.push(d);
+            }
+            find = true;
+            dirty = true;
+        }
+        if find {
+            self.start_scan(&ctx);
+        }
         (dirty, play)
     }
 
@@ -811,6 +909,9 @@ impl App {
     /// Hidden `--shot <file.png>`: save the window's own pixels after a few frames, then quit.
     fn screenshot(&mut self, ctx: &egui::Context) {
         let Some(path) = self.shot.clone() else { return };
+        if self.scanning {
+            return; // the thread repaints when it is done
+        }
         self.frames += 1;
         ctx.send_viewport_cmd(ViewportCommand::Focus); // focus rings only draw in a focused window
         ctx.request_repaint();
@@ -857,6 +958,15 @@ impl eframe::App for App {
                         }
                         self.launch(&ctx, exe, args);
                     }
+                }
+                Msg::Scan(found, cache, secs) => {
+                    self.cfg.disc_cache.extend(cache);
+                    self.found = found;
+                    self.scan_secs = Some(secs);
+                    self.scanning = false;
+                    self.cfg.scanned = true;
+                    self.apply_found();
+                    self.dirty = true; // not the local `dirty`: the page below overwrites it
                 }
                 Msg::Done => {
                     // Files are swapped: start the new launcher and let this one go.

@@ -91,6 +91,12 @@ pub struct LauncherConfig {
     /// Make every launcher transition instant.
     pub reduce_motion: bool,
     pub games: Vec<Game>,
+    /// Extra folders the user picked for "Find my discs".
+    pub scan_dirs: Vec<String>,
+    /// The automatic first-launch disc search already ran.
+    pub scanned: bool,
+    /// Disc identification by path (valid while size and mtime match): see `disc::identify_cached`.
+    pub disc_cache: crate::disc::Cache,
 }
 
 impl Default for LauncherConfig {
@@ -101,6 +107,9 @@ impl Default for LauncherConfig {
             resolution: 1,
             check_updates: true,
             reduce_motion: false,
+            scan_dirs: Vec::new(),
+            scanned: false,
+            disc_cache: Default::default(),
             games: vec![Game {
                 name: "Persona 2: Eternal Punishment".into(),
                 serials: ["SLPS-02785", "SLPS-02786", "SLUS-01158", "SLUS-01339"].map(String::from).to_vec(),

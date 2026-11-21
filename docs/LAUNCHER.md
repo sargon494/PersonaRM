@@ -10,9 +10,22 @@ Dark theme, resizable window (minimum 480x520), no repaint loop while idle (idle
   with an icon (shape, not only colour): check **Ready**, ring **Set up** (no valid disc yet), cross **Game exe
   missing**. Ready cards have a **PLAY** button that launches directly; **Set up** opens the game page. With a cover the
   card shows it; without one it is the red-bar title card. No box art is shipped.
-- **Game page**: a one-line explanation (pick the `.cue` of your own disc image, Japanese and/or US release; the
+- **Game page**: a one-line explanation (pick the `.cue` of your own disc image or let **Find my discs** do it, Japanese and/or US release; the
   Language option chooses which disc boots), the discs, language, text speed, cover picker and PLAY. Every path
   field shows its state, validated on each edit: check found, cross file missing, dash not set.
+- **Discs, zero setup**: the launcher reads the disc itself (`launcher/src/disc.rs`), nobody has to understand `.cue`
+  files. It reads the data track of a `.cue`, `.bin` or `.iso` (ISO 9660 volume, `SYSTEM.CNF`, `BOOT` line: a few
+  sectors, never a whole-disc hash) and shows the serial and region: `SLPS-02785` Japan disc 1, `SLUS-01158` US.
+  `SLPS-02786` (Japan disc 2, the Sumaru TV promo) is labelled and never put in the game slot.
+  **Find my discs** (game page) scans Downloads, Documents and Desktop (and the same under OneDrive) four folders
+  deep, plus any folder added with **Search a folder...** (kept in `scan_dirs`), on a background thread (20 s cap;
+  Downloads with several discs takes well under a second), lists "Persona 2: Eternal Punishment - US (SLUS-01158)"
+  and fills the empty (or missing) Japanese / English fields. The same search runs once automatically on the
+  first launch when no disc is set (`scanned` in `launcher.json`). Browsing to a file shows the verdict where
+  "found" used to be: "US release (SLUS-01158)", "Not Persona 2 (found SLUS-00xxx)", "Disc image incomplete
+  (missing X.bin)" (also: file not a whole number of sectors, fewer sectors than the volume or the cue say).
+  Results are cached by path in `disc_cache` of `launcher.json`, valid while the size and mtime of the cue and its
+  files are unchanged. Hidden `--find` forces the search (used for the screenshot).
 - **Settings** (gear + "Settings" in the header): shared options in two columns (one when narrow), each technical
   option with a one-line hint (renderer, resolution, frame rate; widescreen is tagged EXPERIMENTAL), plus
   **Reduce motion**. All fit at the default window size; scroll bars are thin and always visible.
