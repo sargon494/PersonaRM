@@ -76,7 +76,7 @@
                 </p>
                 <div class="actions">
                     <div class="dl">
-                        <a class="btn btn-primary" href="https://github.com/sargon494/PersonaRM/releases/latest">v0.1.4 をダウンロード</a>
+                        <a class="btn btn-primary" href="https://github.com/sargon494/PersonaRM/releases/latest">v0.2.0 をダウンロード</a>
                         <small>Windows · ディスクはご自身で用意 · 実験的</small>
                     </div>
                     <a class="btn" href="https://github.com/sargon494/PersonaRM">ソースを見る</a>
@@ -119,8 +119,9 @@
             <ul class="today reveal">
                 <li>イントロ、タイトル画面、ニューゲーム、ストーリーシーン、自由移動、最初の戦闘。</li>
                 <li>メモリーカードのセーブとロード、ステートセーブ。</li>
+                <li>ネイティブコード(再コンパイル、Windows):インタプリタより約 2 倍速く、日本版ディスク 1 で結果は同一。</li>
                 <li>30、60、90、120 fps、GPU レンダラーでの 4K までの内部解像度。</li>
-                <li>自動更新されるゲームライブラリ型ランチャー。</li>
+                <li>自動更新されるゲームライブラリ型ランチャー。ゲームごとのゲームプレイオプション(エンカウント率、ムービーのスキップ、戦闘速度、テキスト速度)付き。</li>
             </ul>
             <ul class="status-list reveal" aria-label="項目別の進捗">
                 <li><span class="chip works">動作</span>
@@ -133,10 +134,10 @@
                     <p><strong>セーブ</strong> メモリーカードとステートセーブ。</p>
                 </li>
                 <li><span class="chip works">動作</span>
-                    <p><strong>フレームレートと解像度</strong> 30/60/90/120 fps、GPU レンダラーで 4K まで。</p>
+                    <p><strong>フレームレートと解像度</strong> 30/60/90/120 fps(90 と 120 では 3D の背景だけを補間するため、テクスチャのちらつきはありません)、GPU レンダラーで 4K まで。高解像度での細い線やタイルの継ぎ目は修正済みです。</p>
                 </li>
                 <li><span class="chip works">動作</span>
-                    <p><strong>ランチャー</strong> 自動更新付きのゲームライブラリ。</p>
+                    <p><strong>ランチャー</strong> 自動更新付きのゲームライブラリ。初回の PLAY で、お使いの PC 上でディスクからネイティブコードを準備します(約 10〜15 秒、以降はキャッシュ)。</p>
                 </li>
                 <li><span class="chip works">動作</span>
                     <p><strong>ディスク</strong> 日本版ディスク 1(主)、米国英語版。日本版ディスク 2(プロモーション用)も起動。</p>
@@ -164,13 +165,13 @@
                 </li>
                 <li class="reveal">
                     <h3>PersonaRM をダウンロードする</h3>
-                    <p><a href="https://github.com/sargon494/PersonaRM/releases/latest">最新リリース</a>(v0.1.4)から
+                    <p><a href="https://github.com/sargon494/PersonaRM/releases/latest">最新リリース</a>(v0.2.0)から
                         Windows 用の zip をダウンロードし、展開して <code>launcher.exe</code> を実行します。</p>
                 </li>
                 <li class="reveal">
                     <h3>ディスクを指定して PLAY を押す</h3>
                     <p>ランチャーでディスクの <code>.cue</code>(日本版または米国英語版)を指定し、
-                        <strong>PLAY</strong> を押します。</p>
+                        <strong>PLAY</strong> を押します。初回の PLAY では、ランチャーがお使いの PC でディスクからネイティブコードを準備するため、さらに約 10〜15 秒かかります。</p>
                 </li>
             </ol>
             <div class="devblock reveal">
@@ -268,7 +269,7 @@ personarm_sdl "/path/to/disc1.cue" --recomp --memcard1 "/path/to/card1.mcd"</cod
             <h2><em>降りる</em>準備はできましたか?</h2>
             <p>ランチャーをダウンロードし、ご自身のディスクを指定して PLAY を押すだけです。</p>
             <div class="dl">
-                <a class="btn btn-primary" href="https://github.com/sargon494/PersonaRM/releases/latest">v0.1.4 をダウンロード</a>
+                <a class="btn btn-primary" href="https://github.com/sargon494/PersonaRM/releases/latest">v0.2.0 をダウンロード</a>
                 <small>Windows · ディスクはご自身で用意 · 実験的</small>
             </div>
             <p class="dev-note">開発者の方は <a href="https://github.com/sargon494/PersonaRM">クローンしてソースからビルド</a>してください。</p>
