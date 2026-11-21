@@ -5,7 +5,7 @@ Dark theme, resizable window (minimum 480x520), no repaint loop while idle (idle
 
 ## Pages
 
-- **Library** (home): a grid of 250x330 px cards (it reflows with the window width), one per entry of `games`, with
+- **Library** (home): a grid of 250x348 px cards (it reflows with the window width), one per entry of `games`, with
   a summary next to the heading ("1 game · 1 ready"). A card shows the title, a platform badge (`PS1`) and a status
   with an icon (shape, not only colour): check **Ready**, ring **Set up** (no valid disc yet), cross **Game exe
   missing**. Ready cards have a **PLAY** button that launches directly; **Set up** opens the game page. With a cover the
@@ -32,6 +32,23 @@ Dark theme, resizable window (minimum 480x520), no repaint loop while idle (idle
 
 Keyboard: Tab / arrows move focus (red focus ring), Enter plays (or opens Set up) on a focused card, Esc goes back
 from the game and settings pages. The header shows `Release vX.Y.Z` (`PRM_VERSION` or the crate version).
+
+## Playtime
+
+The windowless watcher (`PersonaRM --run`) that waits for the game records every session in `playtime.json`
+(`launcher/src/playtime.rs`): start, duration, whether the game exited with status 0, and the serial of the disc
+that was launched (read from the disc, so Japan and US are told apart). The game is the library entry whose
+`serials` contain it. Per game: total time, sessions, longest, first/last played, the same per disc serial, and the
+last 50 sessions. Sessions under 10 s (crash on start, quick quit) add no time and are only counted as "quick quits";
+a crash or non-zero exit still records its session. The file is written atomically (temp file + rename).
+A missing file (old launcher) is empty; an unreadable one is kept as `playtime.json.corrupt` and the stats restart.
+It is **wall time while the game process is open**: time paused by "Pause when unfocused" still counts (the host has
+no channel to the launcher; adding one was not worth it). If the watcher itself is killed, that session is lost.
+
+UI: each library card has a muted line ("12 h 30 min · last played yesterday", or "Not played yet"). The game page
+ends with a **Playtime** section (totals, average, per-version split, recent sessions with relative dates, **Show all**,
+and **Reset playtime...** which asks for confirmation). Relative dates use the local time zone (today, yesterday,
+N days ago, then the date after 30 days). Nothing repaints while idle.
 
 ## Motion
 
@@ -77,6 +94,7 @@ If `personarm_sdl` is not next to the launcher, pick it under Settings > **Game 
 | file | content |
 |---|---|
 | `%APPDATA%\PersonaRM\launcher.json` | launcher config: game library (name, platform, serials, disc `.cue` per language, cover, exe, args), `personarm_sdl` path, renderer, internal resolution |
+| `%APPDATA%\PersonaRM\playtime.json` | playtime per game (see Playtime); separate from `launcher.json`; a damaged file is moved to `playtime.json.corrupt` and the stats restart |
 | `%APPDATA%\PersonaRM\PersonaRM\settings.json` | the game's settings ([SETTINGS.md](SETTINGS.md)); the launcher changes only its keys, every other key is preserved |
 | `%APPDATA%\PersonaRM\logs\personarm_sdl.log` | stderr of the last game run |
 
