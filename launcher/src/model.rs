@@ -379,13 +379,13 @@ pub fn parse_native_line(line: &str) -> Option<NativeLine> {
 // ── io ──
 
 /// Hand-edited files (Windows PowerShell, Notepad) often start with a UTF-8 BOM.
-fn strip_bom(t: &str) -> &str { t.strip_prefix('\u{feff}').unwrap_or(t) }
+pub(crate) fn strip_bom(t: &str) -> &str { t.strip_prefix('\u{feff}').unwrap_or(t) }
 
 pub fn load_launcher()-> LauncherConfig {
     std::fs::read_to_string(launcher_json()).ok().and_then(|t| serde_json::from_str(strip_bom(&t)).ok()).unwrap_or_default()
 }
 
-fn write_atomic(path: &std::path::Path, text: &str) -> std::io::Result<()> {
+pub(crate) fn write_atomic(path: &std::path::Path, text: &str) -> std::io::Result<()> {
     if let Some(d) = path.parent() {
         std::fs::create_dir_all(d)?;
     }
