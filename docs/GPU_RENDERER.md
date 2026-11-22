@@ -50,7 +50,7 @@ prototype did (`[gpu] renderer: ... readback present`).
 | Resource | Format | Size | Role |
 |---|---|---|---|
 | `vram1x` | R16_UNORM | 1024×512 | copy of the 1x VRAM: every texel and CLUT lookup reads it (`Load`, exact 16-bit) |
-| `hi` | RGBA8 | 1024s×512s | the scaled VRAM: render target; 5-bit channels as c5/31, mask bit in alpha |
+| `hi` | RGBA8 | 1024s×512s | the scaled VRAM: render target; 5-bit channels as c5 << 3, mask bit in alpha |
 | `tmp` | RGBA8 | 1024s×512s | staging for overlapping 80h copies; destination copy for mask-checked B/2+F/2 |
 | `out` | RGBA8 | (w·s)×(h·s) | display area converted with the 1x formula (c5 << 3); presented directly |
 | `hi2`, `snap0/1`, `vram1x2` | RGBA8, R16 | as `hi`, `vram1x` | `--interp` only: replay target, the scaled pictures of the last two game frames |
@@ -77,8 +77,16 @@ primitives with the same pipeline, scissor and HD image become one draw call.
   a pixel past both ends along the major axis: the pixels the 1x DDA plots, with fine edges at s× (the
   software scaled raster draws s×s blocks). Gouraud colours interpolate along it; dithering, semi-transparency
   and the mask bits as polygons.
-- **UV**: interpolated as float texel coordinates (+0.5, the software's half-texel shift) and floored in
-  the shader, then texture window, page, 4/8/15-bit decode and CLUT lookup on `vram1x`, as `FetchTexel`.
+- **Polygon UV and gouraud colour**: not the fp32 interpolation. Each vertex carries the triangle's three
+  fine vertices, colours and UVs; the shader computes the barycentric weights of its fine pixel in integers
+  and `DrawTriangle`'s nearest-rounded lerp exactly (a float estimate corrected by the remainder, which fits
+  32 bits when the products do not), UV in 1/(256 s) texels with the half-texel shift as the scaled pass.
+  Fine samples land on, or within fp32 noise of, texel and colour-step boundaries; the fp32 interpolation
+  rounded them either way depending on where the primitive sits, so single pixels differed between the two
+  display buffers and toggled every other frame (a 1/512 tie bias fixed the exact ties only).
+- **UV** (rectangles, lines): interpolated as float texel coordinates and floored in the shader (their fine
+  samples never land on a boundary). Then, for all primitives, texture window, page, 4/8/15-bit decode and
+  CLUT lookup on `vram1x`, as `FetchTexel`.
   Texel 0000h discards. Modulation `(t5 * c8) >> 4`, raw `t5 << 3`.
 - **UV limits** (scale > 1, polygons, both renderers): the floored texel is clamped to the range the 1x
   raster can sample (`Ps1Gpu::UvLimits`: the vertex UV range less one pixel's worth of texels at the end
@@ -86,11 +94,12 @@ primitives with the same pipeline, scissor and HD image become one draw call.
   and drew the next sprite cell's row: a thin line under feet and letters (the compass `N`), cell outlines,
   dark seams between floor tiles. 1x is unchanged.
 - **Dithering**: the 4×4 table indexed by (pixel / s) & 3, applied in the 8-bit domain before `>> 3`.
-- **Semi-transparency**: fixed-function blending on c5/31 values: B/2+F/2 = `ONE, CONSTANT(0.5)` with
+- **Semi-transparency**: fixed-function blending on c5 << 3 values (exact in 8 bits): B/2+F/2 = `ONE, CONSTANT(0.5)` with
   the shader halving F; B+F = `ONE, ONE`; B−F = reverse subtract; B+F/4 = `ONE, ONE` with the shader
   writing `c5 >> 2`. Untextured semi primitives blend all pixels. Textured ones are drawn twice: opaque
   pipeline keeping texels with bit 15 clear, then the blend pipeline keeping texels with bit 15 set.
-  B/2+F/2 rounds where the software truncates (≤ 1 step of 31).
+  Channels are stored as c5 << 3, so every blend is exact in 8 bits and B/2+F/2 floors as the software
+  (stored as c5/31 it rounded odd sums up, depending on the destination).
 - **Mask bit**: the set bit (E6h.0) and texel bit 15 go to alpha. The check bit (E6h.1) is a test on the
   destination's alpha, done by blending instead of a stencil plane (no second copy of the mask bit to keep
   in sync through uploads, copies and blits): five more pipelines with source factor
@@ -250,6 +259,7 @@ looked at.
 | shrine, `--interp 120` / `90`, 4x | f6700-6701 | 0.71-0.77% from the live picture | text correct (was every glyph = the last uploaded one) |
 | JP shrine / US shrine / Mizuno, `--interp 120` + 16:9, 4x | f6700, f6800, f17000 | 0.35-0.38% from the live 16:9 picture | box stays 4:3 in synthesized pictures; 9x checked at f6700 |
 | office walking, `--interp 120` + 16:9 and `--interp 90`, 4x | f18900-18915, 32 / 24 presents | no picture far from both neighbours (flicker score 0.01 / 0) | |
+| map tour areas 33, 35, 36, 37, 58 (`--sdl` states), live and replayed in both display buffers | f19451-19490 | 0% / 0% | every frame identical to software 4x; was 20k-95k pixels off by one step and 1-2 pixels differing between the buffers |
 | shrine, `--mods` | f6700 | 6.7% / 3.9% | test pack (every dumped texture 4x with a red hatch): floor, walls, the shrine and Tatsuya's legs replaced as in software; his torso and the old woman stay original (one upload per primitive, see HD textures) |
 
 Software 4x of this build against the build before: byte-identical (f6700, f18900, SHA-256), so the

@@ -23,47 +23,81 @@ namespace {
 // Vertex attr[3] flags (shared with the pixel shader).
 constexpr uint32_t kTex = 1, kRaw = 2, kDither = 4, kPassOpaque = 8, kPassSemi = 16, kMaskSet = 32, kDstRead = 64;
 constexpr uint32_t kUvLimit = 128;  // texel limits (Ps1Gpu::UvLimits): u in attr[0] bits 16-31, v in attr[1] bits 16-31
-constexpr uint32_t kBlend = 1u << 14, kBlit = 1u << 15;
+constexpr uint32_t kBlend = 1u << 14, kBlit = 1u << 15, kExact = 1u << 16;
 
 const char* kShaderVs = R"(
-struct VIn { float2 pos : TEXCOORD0; float3 col : TEXCOORD1; float2 uv : TEXCOORD2; uint4 attr : TEXCOORD3; uint2 hd : TEXCOORD4; };
+struct VIn { float2 pos : TEXCOORD0; float3 col : TEXCOORD1; float2 uv : TEXCOORD2; uint4 attr : TEXCOORD3; uint2 hd : TEXCOORD4;
+             uint4 ta : TEXCOORD5; uint4 tb : TEXCOORD6; };
 struct VOut { float4 pos : SV_Position; float3 col : TEXCOORD0; float2 uv : TEXCOORD1; nointerpolation uint4 attr : TEXCOORD2;
-              nointerpolation uint2 hd : TEXCOORD3; };
-VOut main(VIn i) { VOut o; o.pos = float4(i.pos, 0, 1); o.col = i.col; o.uv = i.uv; o.attr = i.attr; o.hd = i.hd; return o; }
+              nointerpolation uint2 hd : TEXCOORD3; nointerpolation uint4 ta : TEXCOORD4; nointerpolation uint4 tb : TEXCOORD5; };
+VOut main(VIn i) {
+    VOut o; o.pos = float4(i.pos, 0, 1); o.col = i.col; o.uv = i.uv; o.attr = i.attr; o.hd = i.hd; o.ta = i.ta; o.tb = i.tb; return o;
+}
 )";
 
 // Same math as Ps1Gpu::PlotPixel / FetchTexel; textures and CLUTs come from the 1x VRAM (R16_UNORM).
-// The target holds 5-bit channels as c5/31 and the mask bit in alpha; fixed-function blending does
+// The target holds 5-bit channels as c5 << 3 (exact in 8 bits: blending then floors B/2+F/2 as the CPU,
+// where c5/31 rounded odd sums up) and the mask bit in alpha; fixed-function blending does
 // the semi-transparency (mode 0 via blend constant 0.5, mode 2 via reverse subtract) and the mask check
 // (destination alpha). Mask-checked B/2+F/2 reads the destination from a copy (dst) instead: kDstRead.
 const char* kShaderPs = R"(
 struct VOut { float4 pos : SV_Position; float3 col : TEXCOORD0; float2 uv : TEXCOORD1; nointerpolation uint4 attr : TEXCOORD2;
-              nointerpolation uint2 hd : TEXCOORD3; };
+              nointerpolation uint2 hd : TEXCOORD3; nointerpolation uint4 ta : TEXCOORD4; nointerpolation uint4 tb : TEXCOORD5; };
 Texture2D<float> vram : register(t0, space2);
 Texture2D<float4> dst : register(t1, space2);
 Texture2D<float4> hd : register(t2, space2);
 SamplerState smp : register(s0, space2);
 SamplerState smp1 : register(s1, space2);
 SamplerState smp2 : register(s2, space2);
-// Fine samples land exactly on texel / colour-step boundaries (s even: UV u + 0.5 + j/s); the fp32
-// interpolation rounds such ties either way depending on where the primitive sits (each display buffer),
-// so pictures alternated. kTie breaks them upward, as the CPU's fixed-point scaled pass does.
+// Polygons (kExact) skip the fp32 interpolation: their fine samples land on, or within fp32 noise of,
+// texel / colour-step boundaries, which it rounded either way depending on where the primitive sits (each
+// display buffer), so pixels alternated. They take the CPU's integer lerp (Ps1Gpu::DrawTriangle) instead.
+// Rectangles and lines never sample on a boundary; kTie only absorbs the fp32 noise there.
 static const float kTie = 1.0 / 512.0;
 static const int kD[16] = {-4, 0, -3, 1, 2, -2, 3, -1, -3, 1, -4, 0, 3, -1, 2, -2};
 uint rd(uint x, uint y) { return (uint)(vram.Load(int3(x & 1023u, y & 511u, 0)) * 65535.0 + 0.5); }
+int2 xy16(uint w) { return int2(int(w << 16) >> 16, int(w) >> 16); }
+// floor((2 sum(w a) + A) / (2 A)), the CPU's nearest-rounded lerp, exactly: a float estimate corrected by
+// the remainder, which wraps right in 32 bits (the products do not fit, the remainder does).
+int lerpx(int3 w, int A, int3 a) {
+    int D = 2 * A, q = (int)floor((2.0 * dot(float3(w), float3(a)) + float(A)) / float(D));
+    int r = int(2u * (uint(w.x) * uint(a.x) + uint(w.y) * uint(a.y) + uint(w.z) * uint(a.z)) + uint(A) - uint(q) * uint(D));
+    [loop] for (int k = 0; k < 4 && r < 0; ++k) { --q; r += D; }
+    [loop] for (int k = 0; k < 4 && r >= D; ++k) { ++q; r -= D; }
+    return q;
+}
+int fdiv(int a, int b) { return a >= 0 ? a / b : -((b - 1 - a) / b); }
 float4 main(VOut i) : SV_Target {
     uint tp = i.attr.x, clut = i.attr.y, tw = i.attr.z, fl = i.attr.w;
     uint s = (fl >> 8) & 15u;
     if (fl & 0x8000u) {  // blit: nearest upscale of the 1x VRAM
         uint2 p = uint2(i.pos.xy) / s;
         uint t = rd(p.x, p.y);
-        return float4(float3(t & 31u, (t >> 5) & 31u, (t >> 10) & 31u) / 31.0, (float)(t >> 15));
+        return float4(float3(t & 31u, (t >> 5) & 31u, (t >> 10) & 31u) * (8.0 / 255.0), (float)(t >> 15));
     }
     int3 c8 = int3(floor(i.col + (0.5 + kTie)));
+    float2 sub = frac(i.uv);  // HD: position inside the texel
+    int iu = (int)floor(i.uv.x + kTie), iv = (int)floor(i.uv.y + kTie);
+    if (fl & 0x10000u) {  // weights of the fine pixel: the CPU samples at the integer point the GPU's centre stands for
+        int2 P = int2(i.pos.xy), a = xy16(i.ta.x), b = xy16(i.ta.y), c = xy16(i.ta.z);
+        int A = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+        int3 w = int3((c.x - b.x) * (P.y - b.y) - (c.y - b.y) * (P.x - b.x), (a.x - c.x) * (P.y - c.y) - (a.y - c.y) * (P.x - c.x),
+                      (b.x - a.x) * (P.y - a.y) - (b.y - a.y) * (P.x - a.x));
+        if (A < 0) { A = -A; w = -w; }
+        if (A == 0) discard;
+        uint3 rgb = uint3(i.tb.x, i.tb.y, i.tb.z);
+        c8 = int3(lerpx(w, A, int3(rgb & 255u)), lerpx(w, A, int3((rgb >> 8u) & 255u)), lerpx(w, A, int3((rgb >> 16u) & 255u)));
+        if (fl & 1u) {  // UV in 1/(256 s) texels shifted by half a texel (1x: texels), as the CPU's scaled pass
+            int q = s == 1u ? 1 : 256 * (int)s, h = q / 2;
+            uint3 uv = uint3(i.ta.w & 0xFFFFu, i.ta.w >> 16, i.tb.w);
+            int ru = lerpx(w, A, int3(uv & 255u) * q + h), rv = lerpx(w, A, int3((uv >> 8u) & 255u) * q + h);
+            iu = fdiv(ru, q), iv = fdiv(rv, q);
+            sub = float2(ru - iu * q, rv - iv * q) / float(q);
+        }
+    }
     uint stp = 0;
     bool blend = (fl & 0x4000u) != 0;
     if (fl & 1u) {
-        int iu = (int)floor(i.uv.x + kTie), iv = (int)floor(i.uv.y + kTie);
         if (fl & 128u) {
             iu = clamp(iu, (int)((tp >> 16) & 255u), (int)(tp >> 24));
             iv = clamp(iv, (int)((clut >> 16) & 255u), (int)(clut >> 24));
@@ -83,8 +117,8 @@ float4 main(VOut i) : SV_Target {
             uint W = (i.hd.y & 0xFFFFu) * ppw, H = i.hd.y >> 16, hw, hh;
             if (tx < W && ty < H) {
                 hd.GetDimensions(hw, hh);
-                uint hx = min(hw - 1u, (uint)((float(tx) + frac(i.uv.x)) * hw / W));
-                uint hy = min(hh - 1u, (uint)((float(ty) + frac(i.uv.y)) * hh / H));
+                uint hx = min(hw - 1u, (uint)((float(tx) + sub.x) * hw / W));
+                uint hy = min(hh - 1u, (uint)((float(ty) + sub.y) * hh / H));
                 float4 c = hd.Load(int3(hx, hy, 0));
                 if (c.a < 0.5) discard;
                 uint3 c5 = uint3(c.rgb * 255.0 + 0.5) >> 3;
@@ -103,12 +137,12 @@ float4 main(VOut i) : SV_Target {
     int d = 0;
     if (fl & 4u) { uint2 p = uint2(i.pos.xy) / s; d = kD[(p.y & 3u) * 4u + (p.x & 3u)]; }
     int3 c5 = clamp(c8 + d, 0, 255) >> 3;
-    float3 f = float3(c5) / 31.0;
+    float3 f = float3(c5) * (8.0 / 255.0);
     if (blend) {
         uint m = (fl >> 12) & 3u;
-        if (fl & 64u) f = float3((int3(floor(dst.Load(int3(i.pos.xy, 0)).rgb * 31.0 + 0.5)) + c5) >> 1) / 31.0;
-        else if (m == 0u) f = float3(c5) / 62.0;
-        else if (m == 3u) f = float3(c5 >> 2) / 31.0;
+        if (fl & 64u) f = float3(((int3(dst.Load(int3(i.pos.xy, 0)).rgb * 255.0 + 0.5) >> 3) + c5) >> 1) * (8.0 / 255.0);
+        else if (m == 0u) f = float3(c5) * (4.0 / 255.0);
+        else if (m == 3u) f = float3(c5 >> 2) * (8.0 / 255.0);
     }
     return float4(f, (stp | ((fl >> 5) & 1u)) != 0u ? 1.0 : 0.0);
 }
@@ -121,7 +155,7 @@ Texture2D<float4> hi : register(t0, space2);
 SamplerState smp : register(s0, space2);
 float4 main(VOut i) : SV_Target {
     uint2 p = (uint2(i.pos.xy) + i.attr.xy) % i.attr.zw;
-    float3 c = floor(hi.Load(int3(p, 0)).rgb * 31.0 + 0.5);
+    float3 c = float3(uint3(hi.Load(int3(p, 0)).rgb * 255.0 + 0.5) >> 3);
     return float4(c * 8.0 / 255.0, 1.0);
 }
 )";
@@ -196,13 +230,15 @@ bool GpuRenderer::Init(Ps1Gpu& gpu, uint32_t scale, std::string* err, SDL_GPUDev
         {2, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(Vtx, u)},
         {3, 0, SDL_GPU_VERTEXELEMENTFORMAT_UINT4, offsetof(Vtx, attr)},
         {4, 0, SDL_GPU_VERTEXELEMENTFORMAT_UINT2, offsetof(Vtx, hd)},
+        {5, 0, SDL_GPU_VERTEXELEMENTFORMAT_UINT4, offsetof(Vtx, tri)},
+        {6, 0, SDL_GPU_VERTEXELEMENTFORMAT_UINT4, offsetof(Vtx, tri) + 16},
     };
     SDL_GPUColorTargetDescription ct{};
     ct.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
     SDL_GPUGraphicsPipelineCreateInfo pi{};
     pi.vertex_shader = vs;
     pi.fragment_shader = ps;
-    pi.vertex_input_state = {&vb, 1, va, 5};
+    pi.vertex_input_state = {&vb, 1, va, 7};
     pi.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
     pi.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
     pi.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
@@ -519,6 +555,10 @@ void GpuRenderer::FlushPending() {
     size_t nv = 0;
     Rect bb{INT32_MAX, INT32_MAX, INT32_MIN, INT32_MIN};
     const int tri[2][3] = {{0, 1, 2}, {1, 2, 3}};
+    const int32_t si = int32_t(m_s);
+    auto fine = [&](int q) { return (uint32_t(p.x[q] * si) & 0xFFFF) | uint32_t(p.y[q] * si) << 16; };
+    auto rgb = [&](int q) { return uint32_t(p.r[q]) | uint32_t(p.g[q]) << 8 | uint32_t(p.b[q]) << 16; };
+    auto uv = [&](int q) { return p.tex ? uint32_t(p.u[q] - 0.5f) | uint32_t(p.v[q] - 0.5f) << 8 : 0u; };  // no half-texel shift
     for (int t = 0; t < (p.n == 4 ? 2 : 1); ++t) {
         const int *k = tri[t];
         const int32_t x0 = std::min({p.x[k[0]], p.x[k[1]], p.x[k[2]]}), x1 = std::max({p.x[k[0]], p.x[k[1]], p.x[k[2]]});
@@ -528,7 +568,8 @@ void GpuRenderer::FlushPending() {
         for (int j = 0; j < 3; ++j) {  // +0.5: the software samples at integer coords, the GPU at pixel centres
             const int q = k[j];
             v[nv++] = {(float(p.x[q]) * s + 0.5f) / W * 2 - 1, 1 - (float(p.y[q]) * s + 0.5f) / H * 2, p.r[q], p.g[q], p.b[q],
-                       p.u[q], p.v[q], {a[0], a[1], a[2], a[3]}};
+                       p.u[q], p.v[q], {a[0], a[1], a[2], a[3] | kExact}, {},
+                       {fine(k[0]), fine(k[1]), fine(k[2]), uv(k[0]) | uv(k[1]) << 16, rgb(k[0]), rgb(k[1]), rgb(k[2]), uv(k[2])}};
         }
     }
     with_hd(v, nv);

@@ -70,6 +70,9 @@ private:
         float x, y, r, g, b, u, v;
         uint32_t attr[4];  // texpage, clut, texwindow, flags (see kShaderPs)
         uint32_t hd[2];    // HD replacement: upload x | y << 10 | 1 << 31, w | h << 16 (VRAM words); 0 = none
+        // Polygons (kExact): the triangle's three vertices, the same in each, for the CPU's integer lerp.
+        // tri[0..2] fine x | y << 16 (int16), tri[3] uv0 | uv1 << 16, tri[4..6] rgb, tri[7] uv2 (uv = u | v << 8).
+        uint32_t tri[8];
     };
     // Textures by index (Op::Whole, Present sources).
     enum Tex : uint8_t { kHi, kHi2, kSnap0, kSnap1, kTmp, kTexCount };
