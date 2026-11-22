@@ -217,6 +217,8 @@ void Ps1Gpu::ExecuteGP1Command(uint32_t word) {
                 m_cmd_log->push_back(0);
                 m_cmd_log->push_back(uint32_t(x) | uint32_t(y) << 16);
                 for (uint32_t w : state) LogWords(&w, 1);
+                m_flip_vram = m_vram;
+                if (m_listener) m_listener->OnFlip(*this);
             }
             m_display.x = x;
             m_display.y = y;

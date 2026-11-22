@@ -47,11 +47,11 @@ public:
     uint32_t LastDrawCalls() const { return m_last_draws; }
 
     /// Frame interpolation (rendering/frame_interp.h) on the GPU. EnableInterp allocates the replay target
-    /// and two snapshots; Flip snapshots the live target when the interpolator saw a new game frame;
-    /// between BeginReplay(scratch) and EndReplay the interpolator's scratch GPU replays the lerped packets
-    /// into the replay target (started from the latest snapshot), textures from the scratch's 1x VRAM.
+    /// and two snapshots; each logged flip (OnFlip) snapshots the live target as it is then, as the
+    /// interpolator's FlipVram; between BeginReplay(scratch) and EndReplay the interpolator's scratch GPU
+    /// replays the lerped packets into the replay target, started from the previous flip's snapshot (what
+    /// the latest segment was drawn over), textures from the scratch's 1x VRAM.
     bool EnableInterp(std::string* err);
-    void Flip();
     void BeginReplay(Ps1Gpu& scratch);
     void EndReplay();
 
@@ -60,6 +60,7 @@ public:
     void OnLine(const Ps1Gpu& gpu, int32_t ax, int32_t ay, uint32_t ac, int32_t bx, int32_t by, uint32_t bc, bool gouraud,
                 bool semi) override;
     void OnSqueeze(const int32_t* x, int n) override;
+    void OnFlip(const Ps1Gpu& gpu) override;
     /// HD texture replacement (--mods): textured primitives sampling a replaced upload draw from its HD
     /// image (rendering/vram_texture_hook.h). Null = off.
     void SetTextureHook(VramTextureHook* hook) { m_hook = hook; }
@@ -126,7 +127,7 @@ private:
     std::vector<Op> m_ops;
     Pending m_pending;
     uint8_t m_set = 0;              // set being recorded (1 between BeginReplay and EndReplay)
-    uint8_t m_snap = kSnap0;        // snapshot of the latest flip (the other one: the flip before)
+    uint8_t m_snap = kSnap0;        // snapshot at the latest flip (the other one: the flip before)
     GpuDrawingArea m_live_area;     // saved over a replay
     Ps1Gpu* m_replay_gpu = nullptr; // the scratch GPU listened to during a replay
     VramTextureHook* m_hook = nullptr;

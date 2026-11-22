@@ -42,7 +42,7 @@ class FrameInterpolator {
 public:
     struct Frame {
         std::vector<uint32_t> cmds;  // packets drawn since the previous flip
-        std::vector<uint16_t> vram;  // VRAM after the emulated frame that flipped to it
+        std::vector<uint16_t> vram;  // VRAM at the flip to it (Ps1Gpu::GetFlipVram)
         GpuDisplayArea disp;
         uint64_t flip_frame = 0;     // engine frame count after the flip
     };
@@ -53,8 +53,10 @@ public:
     bool Active(uint64_t frame) const { return m_count >= 2 && frame - m_cur.flip_frame <= kStaleFrames; }
     /// Picture at fraction t of the way from the previous game frame to the latest (one game frame of
     /// latency): t <= 0 the previous frame as emulated, t >= 1 the latest, else a replay of the latest
-    /// with lerped vertices, or the previous frame when the pair is not interpolable (scene cut, FMV,
-    /// 24-bit display, too few matches). `out` = VRAM to read the display area `disp` from.
+    /// segment over the previous frame's VRAM with lerped vertices; the latest frame when the pair is not
+    /// interpolable (scene cut, FMV, 24-bit display, too few matches). `out` = VRAM to read the display
+    /// area `disp` from. A still pair gives the latest frame at every t, and t never shows a frame older
+    /// than an earlier t of the same or the previous pair did.
     void Render(double t, const std::vector<uint16_t>*& out, GpuDisplayArea& disp);
     /// t for a host tick at fractional engine time `time` (frames): elapsed since the latest flip over
     /// the interval between the last two flips.

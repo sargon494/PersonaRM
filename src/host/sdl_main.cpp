@@ -554,8 +554,7 @@ int main(int argc, char** argv) {
         // GPU uses to squeeze 2D); 2D-only screens (title, FMV, menus without a scene) keep their 4:3 picture.
         const Widescreen2D* ws = engine.GetWidescreen2D();
         const bool wide_now = ws && ws->Wide() && !gpu.GetDisplayArea().is_24bit;
-        if (interp_hz && interp.Consume(cmd_log, gpu, frame)) {
-            if (use_gpu) gpu_renderer.Flip();  // snapshot the scaled picture of the new game frame
+        if (interp_hz && interp.Consume(cmd_log, gpu, frame)) {  // the GPU renderer snapshotted it at the flip (OnFlip)
             if (interp.Active(frame)) {
                 ++pairs;
                 pairs_ok += interp.PairOk();
@@ -614,7 +613,7 @@ int main(int argc, char** argv) {
                 t = interp.Fraction(double(frame) + phases[s]);
                 const uint64_t t0 = SDL_GetTicksNS();
                 const bool lerp = t > 0 && t < 1 && interp.PairOk();  // else Render shows one of the two frames
-                src = lerp ? GpuRenderer::kReplay : t >= 1 ? GpuRenderer::kCur : GpuRenderer::kPrev;
+                src = lerp ? GpuRenderer::kReplay : t >= 1 || !interp.PairOk() ? GpuRenderer::kCur : GpuRenderer::kPrev;
                 if (lerp && use_gpu) gpu_renderer.BeginReplay(interp.Scratch());  // the replay draws at s x too
                 interp.Render(t, vram, d);
                 if (lerp && use_gpu) gpu_renderer.EndReplay();
