@@ -21,7 +21,7 @@ namespace personarm {
 ///    or covering nearly all of it (fades, the corridor's darkening vignette, letterbox bars), and the
 ///    untextured 2D drawn right after it: left as drawn, so it spans the whole wide picture;
 ///  - scene sprite: textured 2D after a 3D primitive (field and battle characters: flat quads placed at a
-///    projected point). The pieces of one character (one run, each near the ones before) are squeezed by
+///    projected point). The pieces of one character (one run, each near the ones before; another palette over another shadow starts the next) are squeezed by
 ///    num/den around one anchor: the centre of the character's shadow (a GTE triangle fan drawn before it)
 ///    when one is near, else the first piece's centre. The character keeps its shape and its place;
 ///  - HUD: any other 2D (after a non-drawing GP0 command, a line or an untextured primitive) is squeezed
@@ -100,9 +100,15 @@ public:
         int32_t cx = (x1 + x2 + 1) / 2;
         if (scene) {
             m_overlay = false;
-            if (!m_group || lo > m_group_hi + kNear || hi < m_group_lo - kNear) {
-                m_group = true, m_group_lo = lo, m_group_hi = hi;
-                m_anchor = FindFan(lo, hi, ylo, (lo + hi + 1) / 2);
+            // A piece touching the group with another palette pair (two 16-colour CLUTs side by side, hence
+            // >> 17) over another shadow is the next character (a party bunched up while running); without
+            // its own shadow it is part of this one (a corpse's blood pool).
+            int32_t fan = kNone;
+            const bool apart = lo > m_group_hi + kNear || hi < m_group_lo - kNear;
+            if (m_group && !apart && tex >> 17 != m_group_clut) fan = FindFan(lo, hi, ylo, kNone);
+            if (!m_group || apart || (fan != kNone && fan != m_anchor)) {
+                m_group = true, m_group_lo = lo, m_group_hi = hi, m_group_clut = tex >> 17;
+                m_anchor = fan != kNone ? fan : FindFan(lo, hi, ylo, (lo + hi + 1) / 2);
             }
             m_group_lo = std::min(m_group_lo, lo), m_group_hi = std::max(m_group_hi, hi);
             cx = m_anchor;
@@ -200,6 +206,7 @@ private:
     bool m_group = false;     // inside a scene sprite group (one character)
     bool m_overlay = false;   // inside a screen-anchored overlay run
     int32_t m_anchor = 0, m_group_lo = 0, m_group_hi = 0;
+    uint32_t m_group_clut = 0;
     uint32_t m_prev_tri = kNoWord;
     bool m_in_fan = false;
     std::vector<Fan> m_fans;
