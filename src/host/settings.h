@@ -44,6 +44,11 @@ struct GameSettings {
     }
 };
 
+/// Every host action that can be bound (input.hotkeys = keyboard chord, input.gamepad_hotkeys = button held with the
+/// hotkey button): name, default key, default pad button ("" = none). The four gameplay tricks are the `Hotkey` enum.
+struct HostAction { const char* name; const char* key; const char* pad; };
+const std::vector<HostAction>& HostActions();
+
 /// In-game hotkeys that cycle a gameplay option. The action names are the keys of input.hotkeys.
 enum class Hotkey { EncounterRate, BattleSpeed, SkipFmv, TextSpeed };
 constexpr Hotkey kHotkeys[] = {Hotkey::EncounterRate, Hotkey::BattleSpeed, Hotkey::SkipFmv, Hotkey::TextSpeed};
@@ -59,8 +64,12 @@ struct Settings {
     std::string save_dir;         // memory card directory (see MemcardFor)
     /// action -> key/button names (SDL spelling). Always the full set: defaults, overridden per action.
     std::map<std::string, std::vector<std::string>> keyboard, gamepad;
-    /// action (HotkeyAction) -> SDL key name; always all four, defaults F1..F4.
+    /// HostActions() name -> key chord ("F5", "Ctrl+S", "Alt+Return"; SDL key names); always all of them.
     std::map<std::string, std::string> hotkeys;
+    /// input.gamepad_hotkeys: `pad_modifier` (button name, default "guide") held + the action's button; "" = unbound.
+    /// Also "fast_forward_alone" (default "rightstick"): held on its own, no modifier.
+    std::string pad_modifier = "guide";
+    std::map<std::string, std::string> pad_hotkeys;
     std::map<std::string, GameSettings> games;
     JsonValue raw = JsonValue::MakeObject();  // the document as read: unknown keys survive a write
 };

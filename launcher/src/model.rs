@@ -123,16 +123,61 @@ impl Default for LauncherConfig {
     }
 }
 
-/// In-game hotkeys (`input.hotkeys` of settings.json): action, default key, label.
-pub const HOTKEYS: [(&str, &str, &str); 4] = [
-    ("encounter_rate", "F1", "Encounters"),
-    ("battle_speed", "F2", "Battle speed"),
-    ("skip_fmv", "F3", "Skip movies"),
-    ("text_speed", "F4", "Text speed"),
+/// Host actions (`input.hotkeys` = keyboard chord, `input.gamepad_hotkeys` = button held with the hotkey button):
+/// action, label, default key, default pad button ("" = none). Same table as `HostActions()` in src/host/settings.cpp.
+pub const HOST_ACTIONS: [(&str, &str, &str, &str); 11] = [
+    ("save_state", "Save state", "F5", "rightshoulder"),
+    ("load_state", "Load state", "F8", "leftshoulder"),
+    ("prev_slot", "Previous slot", "F6", "dpleft"),
+    ("next_slot", "Next slot", "F7", "dpright"),
+    ("fast_forward", "Fast-forward (hold)", "Tab", "righttrigger"),
+    ("encounter_rate", "Encounters", "F1", "y"),
+    ("battle_speed", "Battle speed", "F2", "x"),
+    ("skip_fmv", "Skip movies", "F3", "b"),
+    ("text_speed", "Text speed", "F4", "a"),
+    ("toggle_fullscreen", "Fullscreen", "Alt+Return", ""),
+    ("quit", "Quit (asks first)", "Escape", ""),
 ];
 
-/// Keys the game itself uses (save states, fast-forward, quit): not offered for hotkeys.
-pub const RESERVED_KEYS: [&str; 6] = ["F5", "F6", "F7", "F8", "Tab", "Escape"];
+/// Gamepad buttons offered, SDL names: (name, label).
+pub const PAD_BUTTONS: [(&str, &str); 19] = [
+    ("a", "Cross (A)"), ("b", "Circle (B)"), ("x", "Square (X)"), ("y", "Triangle (Y)"),
+    ("leftshoulder", "L1"), ("rightshoulder", "R1"), ("lefttrigger", "L2"), ("righttrigger", "R2"),
+    ("leftstick", "L3"), ("rightstick", "R3"), ("dpup", "D-pad up"), ("dpdown", "D-pad down"),
+    ("dpleft", "D-pad left"), ("dpright", "D-pad right"), ("start", "Start"), ("back", "Select / Back"),
+    ("guide", "Guide / PS button"), ("touchpad", "Touchpad click"), ("misc1", "Share / Mic"),
+];
+/// Buttons that make sense as the hotkey button (held, never a trigger on its own).
+pub const PAD_MODIFIERS: [&str; 6] = ["guide", "touchpad", "back", "start", "leftstick", "misc1"];
+
+/// The game's own keyboard map (`KeyboardMap()` in src/host/host_logic.cpp): the keys a bare hotkey may not take.
+const GAME_KEYS: [&str; 15] = ["Up", "Down", "Left", "Right", "X", "Z", "S", "A", "Return", "Backspace", "Right Shift", "Q", "W", "1", "2"];
+
+pub fn pad_label(name: &str) -> &str {
+    PAD_BUTTONS.iter().find(|b| b.0 == name).map_or(name, |b| b.1)
+}
+
+/// "Ctrl+Shift+Alt+Key" -> (mods bitset 1 ctrl, 2 shift, 4 alt, 8 gui, key). Modifier prefixes are case-insensitive;
+/// what is left is an SDL key name ("Keypad +" keeps its plus). None when no key is left.
+pub fn split_chord(text: &str) -> Option<(u8, String)> {
+    let (mut mods, mut rest) = (0u8, text);
+    while let Some(i) = rest.find('+').filter(|&i| i > 0) {
+        mods |= match rest[..i].to_ascii_lowercase().as_str() {
+            "ctrl" | "control" => 1,
+            "shift" => 2,
+            "alt" => 4,
+            "gui" | "win" | "cmd" | "meta" | "super" => 8,
+            _ => break,
+        };
+        rest = &rest[i + 1..];
+    }
+    (!rest.is_empty()).then(|| (mods, rest.to_string()))
+}
+
+pub fn join_chord(mods: u8, key: &str) -> String {
+    let p = |bit: u8, n: &str| if mods & bit != 0 { format!("{n}+") } else { String::new() };
+    format!("{}{}{}{}{key}", p(1, "Ctrl"), p(2, "Shift"), p(4, "Alt"), p(8, "Gui"))
+}
 
 /// SDL scancode name for the name egui gives a key (`Key::name`), or None when SDL has no such key.
 pub fn sdl_key_name(egui_name: &str) -> Option<String> {
@@ -173,8 +218,14 @@ pub struct GameSettings {
     /// 1..3.
     pub battle_speed: u32,
     pub skip_fmv: bool,
-    /// Action -> SDL key name, all of `HOTKEYS`.
+    /// Action -> key chord ("F5", "Ctrl+S"), all of `HOST_ACTIONS`.
     pub hotkeys: BTreeMap<String, String>,
+    /// Action -> gamepad button held with `pad_modifier` ("" = unbound), all of `HOST_ACTIONS`.
+    pub pad_hotkeys: BTreeMap<String, String>,
+    /// The hotkey button (`input.gamepad_hotkeys.modifier`).
+    pub pad_modifier: String,
+    /// Keys the game itself uses (`input.keyboard`, read only): a hotkey may not be one of them on its own.
+    pub game_keys: Vec<String>,
     pub save_dir: String,
     pub pause_on_focus_loss: bool,
     pub show_status_icons: bool,
@@ -195,7 +246,10 @@ impl Default for GameSettings {
             encounter_rate: "normal".into(),
             battle_speed: 1,
             skip_fmv: false,
-            hotkeys: HOTKEYS.iter().map(|h| (h.0.to_string(), h.1.to_string())).collect(),
+            hotkeys: HOST_ACTIONS.iter().map(|h| (h.0.to_string(), h.2.to_string())).collect(),
+            pad_hotkeys: HOST_ACTIONS.iter().map(|h| (h.0.to_string(), h.3.to_string())).collect(),
+            pad_modifier: "guide".into(),
+            game_keys: GAME_KEYS.map(String::from).to_vec(),
             save_dir: String::new(),
             pause_on_focus_loss: true,
             show_status_icons: true,
@@ -239,8 +293,28 @@ impl GameSettings {
         let game = |k: &str| serials.iter().find_map(|id| get(doc, &["game", id, k]));
         let mut hotkeys = d.hotkeys.clone();
         for (action, key) in hotkeys.iter_mut() {
-            if let Some(k) = get(doc, &["input", "hotkeys", action]).and_then(Value::as_str).filter(|k| !k.is_empty()) {
+            if let Some(k) = get(doc, &["input", "hotkeys", action]).and_then(Value::as_str).filter(|k| split_chord(k).is_some()) {
                 *key = k.to_string();
+            }
+        }
+        let mut pad_hotkeys = d.pad_hotkeys.clone();
+        for (action, b) in pad_hotkeys.iter_mut() {
+            if let Some(k) = get(doc, &["input", "gamepad_hotkeys", action]).and_then(Value::as_str).filter(|k| k.is_empty() || PAD_BUTTONS.iter().any(|p| p.0 == *k)) {
+                *b = k.to_string();
+            }
+        }
+        let pad_modifier = get(doc, &["input", "gamepad_hotkeys", "modifier"]).and_then(Value::as_str).filter(|k| PAD_BUTTONS.iter().any(|p| p.0 == *k)).unwrap_or(&d.pad_modifier).to_string();
+        // the game's keys: each action of input.keyboard replaces its default list
+        let mut game_keys = d.game_keys.clone();
+        if let Some(kb) = get(doc, &["input", "keyboard"]).and_then(Value::as_object) {
+            let mut per: BTreeMap<&str, Vec<String>> = BTreeMap::new();
+            for (act, names) in kb {
+                per.insert(act, names.as_array().map(|l| l.iter().filter_map(|n| n.as_str().map(String::from)).collect()).unwrap_or_default());
+            }
+            if !per.is_empty() {
+                let overridden: Vec<&str> = per.keys().copied().collect();
+                let defaults: [(&str, &[&str]); 14] = [("up", &["Up"]), ("down", &["Down"]), ("left", &["Left"]), ("right", &["Right"]), ("cross", &["X"]), ("circle", &["Z"]), ("square", &["S"]), ("triangle", &["A"]), ("start", &["Return"]), ("select", &["Backspace", "Right Shift"]), ("l1", &["Q"]), ("r1", &["W"]), ("l2", &["1"]), ("r2", &["2"])];
+                game_keys = defaults.iter().filter(|(a, _)| !overridden.contains(a)).flat_map(|(_, k)| k.iter().map(|k| k.to_string())).chain(per.into_values().flatten()).collect();
             }
         }
         Self {
@@ -248,6 +322,9 @@ impl GameSettings {
             battle_speed: game("battle_speed").and_then(Value::as_u64).filter(|n| (1..=3).contains(n)).map_or(d.battle_speed, |n| n as u32),
             skip_fmv: game("skip_fmv").and_then(Value::as_bool).unwrap_or(d.skip_fmv),
             hotkeys,
+            pad_hotkeys,
+            pad_modifier,
+            game_keys,
             native,
             language: s(&["general", "language"], &d.language),
             fps: u(&["video", "fps_target"], d.fps),
@@ -293,6 +370,58 @@ impl GameSettings {
         for (action, key) in &self.hotkeys {
             set(doc, &["input", "hotkeys", action], json!(key));
         }
+        for (action, b) in &self.pad_hotkeys {
+            set(doc, &["input", "gamepad_hotkeys", action], json!(b));
+        }
+        set(doc, &["input", "gamepad_hotkeys", "modifier"], json!(self.pad_modifier));
+    }
+
+    /// Bind `action` to a key chord. Refuses a bare key the game uses; a chord already on another action swaps
+    /// places with this one's old chord. Err = the reason, nothing changed.
+    pub fn bind_key(&mut self, action: &str, chord: &str) -> Result<(), String> {
+        let (mods, key) = split_chord(chord).ok_or("not a key")?;
+        if mods == 0 && self.game_keys.contains(&key) {
+            return Err(format!("{key} is a game button; add Ctrl, Shift or Alt (e.g. Ctrl+{key})"));
+        }
+        let chord = join_chord(mods, &key);
+        let old = self.hotkeys.get(action).cloned().ok_or("unknown action")?;
+        if let Some(other) = self.hotkeys.iter().find(|(a, v)| **v == chord && *a != action).map(|(a, _)| a.clone()) {
+            self.hotkeys.insert(other, old);
+        }
+        self.hotkeys.insert(action.into(), chord);
+        Ok(())
+    }
+
+    /// Bind `action` to a gamepad button ("" = none). Not the hotkey button itself; a button already used by another
+    /// action swaps places.
+    pub fn bind_pad(&mut self, action: &str, button: &str) -> Result<(), String> {
+        let old = self.pad_hotkeys.get(action).cloned().ok_or("unknown action")?;
+        if !button.is_empty() && button == self.pad_modifier {
+            return Err(format!("{} is the hotkey button", pad_label(button)));
+        }
+        if !button.is_empty() {
+            if let Some(other) = self.pad_hotkeys.iter().find(|(a, v)| v.as_str() == button && *a != action).map(|(a, _)| a.clone()) {
+                self.pad_hotkeys.insert(other, old);
+            }
+        }
+        self.pad_hotkeys.insert(action.into(), button.into());
+        Ok(())
+    }
+
+    /// Choose the hotkey button; refused while an action uses it.
+    pub fn set_modifier(&mut self, button: &str) -> Result<(), String> {
+        if let Some((a, _)) = self.pad_hotkeys.iter().find(|(_, v)| v.as_str() == button) {
+            let label = HOST_ACTIONS.iter().find(|h| h.0 == a).map_or(a.as_str(), |h| h.1);
+            return Err(format!("{} is bound to {label}; change that first", pad_label(button)));
+        }
+        self.pad_modifier = button.into();
+        Ok(())
+    }
+
+    /// Every hotkey (keyboard, gamepad and the hotkey button) back to its default.
+    pub fn reset_hotkeys(&mut self) {
+        let d = Self::default();
+        (self.hotkeys, self.pad_hotkeys, self.pad_modifier) = (d.hotkeys, d.pad_hotkeys, d.pad_modifier);
     }
 }
 
@@ -493,6 +622,54 @@ mod tests {
         let bad = json!({"game": {"SLPS-02785": {"battle_speed": 9, "encounter_rate": 4}}});
         assert_eq!(GameSettings::from_value(&bad, &serials()).battle_speed, 1);
         assert_eq!(GameSettings::from_value(&bad, &serials()).encounter_rate, "normal");
+    }
+
+    #[test]
+    fn hotkey_bindings_conflicts_and_roundtrip() {
+        let mut s = GameSettings::default();
+        assert_eq!(s.hotkeys.len(), 11);
+        assert_eq!((s.hotkeys["save_state"].as_str(), s.pad_hotkeys["save_state"].as_str(), s.pad_modifier.as_str()), ("F5", "rightshoulder", "guide"));
+        // chords
+        assert_eq!(split_chord("Ctrl+Shift+S"), Some((3, "S".into())));
+        assert_eq!(split_chord("Keypad +"), Some((0, "Keypad +".into())));
+        assert_eq!(split_chord("Ctrl+"), None);
+        assert_eq!(join_chord(5, "Return"), "Ctrl+Alt+Return");
+        // a bare game key is refused, with a modifier it is fine (the host holds the key back from the game)
+        assert!(s.bind_key("save_state", "Z").is_err());
+        assert_eq!(s.hotkeys["save_state"], "F5");
+        assert!(s.bind_key("save_state", "Ctrl+Z").is_ok());
+        assert_eq!(s.hotkeys["save_state"], "Ctrl+Z");
+        // an already used chord swaps
+        assert!(s.bind_key("load_state", "F1").is_ok());
+        assert_eq!((s.hotkeys["load_state"].as_str(), s.hotkeys["encounter_rate"].as_str()), ("F1", "F8"));
+        // pad: the hotkey button is refused, a used button swaps, "" unbinds
+        assert!(s.bind_pad("quit", "guide").is_err());
+        assert!(s.bind_pad("quit", "rightshoulder").is_ok());
+        assert_eq!((s.pad_hotkeys["quit"].as_str(), s.pad_hotkeys["save_state"].as_str()), ("rightshoulder", ""));
+        assert!(s.bind_pad("quit", "").is_ok());
+        // the hotkey button cannot be one an action uses
+        assert!(s.set_modifier("a").is_err() && s.pad_modifier == "guide");
+        assert!(s.set_modifier("touchpad").is_ok() && s.bind_pad("quit", "touchpad").is_err());
+        // write + read back, unknown keys kept
+        let mut doc = json!({"input": {"gamepad_hotkeys": {"future": "x"}, "keyboard": {"cross": ["K"]}}});
+        s.apply(&mut doc, &serials(), 0);
+        assert_eq!(doc["input"]["gamepad_hotkeys"]["modifier"], "touchpad");
+        assert_eq!(doc["input"]["gamepad_hotkeys"]["quit"], "");
+        assert_eq!(doc["input"]["gamepad_hotkeys"]["future"], "x");
+        assert_eq!(doc["input"]["hotkeys"]["save_state"], "Ctrl+Z");
+        let back = GameSettings::from_value(&doc, &serials());
+        assert_eq!((back.hotkeys.clone(), back.pad_hotkeys.clone(), back.pad_modifier.clone()), (s.hotkeys.clone(), s.pad_hotkeys.clone(), "touchpad".to_string()));
+        // the game's keys follow input.keyboard: cross is K now (X free), the other actions keep their defaults
+        assert!(back.game_keys.contains(&"K".to_string()) && !back.game_keys.contains(&"X".to_string()) && back.game_keys.contains(&"Z".to_string()));
+        let mut back = back;
+        assert!(back.bind_key("quit", "X").is_ok());
+        // bad values in the file fall back to the defaults
+        let bad = json!({"input": {"hotkeys": {"quit": "Ctrl+"}, "gamepad_hotkeys": {"modifier": "nope", "quit": "nope"}}});
+        let b = GameSettings::from_value(&bad, &serials());
+        assert_eq!((b.hotkeys["quit"].as_str(), b.pad_modifier.as_str(), b.pad_hotkeys["quit"].as_str()), ("Escape", "guide", ""));
+        // reset
+        s.reset_hotkeys();
+        assert_eq!((s.hotkeys, s.pad_hotkeys, s.pad_modifier), (GameSettings::default().hotkeys, GameSettings::default().pad_hotkeys, "guide".to_string()));
     }
 
     #[test]

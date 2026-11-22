@@ -166,6 +166,56 @@ int main() {
     }
     CHECK(ToastAlpha(2000) == 1.f && ToastAlpha(500) == 1.f && ToastAlpha(250) == 0.5f && ToastAlpha(0) == 0.f && ToastAlpha(-5) == 0.f);
 
+    // Key chords.
+    {
+        std::string k; unsigned m;
+        CHECK(ParseKeyChord("F5", k, m) && k == "F5" && m == 0);
+        CHECK(ParseKeyChord("Ctrl+S", k, m) && k == "S" && m == kModCtrl);
+        CHECK(ParseKeyChord("shift+CTRL+Alt+Return", k, m) && k == "Return" && m == (kModCtrl | kModShift | kModAlt));
+        CHECK(ParseKeyChord("Keypad +", k, m) && k == "Keypad +" && m == 0);
+        CHECK(ParseKeyChord("Ctrl++", k, m) && k == "+" && m == kModCtrl);
+        CHECK(ParseKeyChord("Cmd+Q", k, m) && m == kModGui);
+        CHECK(!ParseKeyChord("", k, m));
+        CHECK(FormatKeyChord("S", kModShift | kModCtrl) == "Ctrl+Shift+S" && FormatKeyChord("F5", 0) == "F5");
+    }
+    // Pad buttons by name; the table matches SDL's enum values (south=0 ... touchpad=20).
+    CHECK(PadButtonId("a") == 0 && PadButtonId("guide") == 5 && PadButtonId("touchpad") == 20 && PadButtonId("righttrigger") == 31 &&
+          PadButtonId("nope") == -1 && std::string(PadButtonName(10)) == "rightshoulder");
+    // Pad combos: modifier (guide) + R1 saves once; the combo buttons are held back from the game while the modifier is
+    // held and until they are released; without the modifier nothing fires and nothing is swallowed.
+    {
+        const int G = PadButtonId("guide"), R1 = PadButtonId("rightshoulder"), R2 = PadButtonId("righttrigger"), X = PadButtonId("a");
+        PadHotkeys pk;
+        pk.Configure(G, {{"save_state", R1}, {"fast_forward", R2}, {"text_speed", X}, {"quit", -1}});
+        auto bit = [](int id) { return 1u << id; };
+        auto r = pk.Step(bit(R1));  // no modifier: the game gets R1
+        CHECK(r.pressed.empty() && r.swallow == 0 && !r.fast_forward);
+        r = pk.Step(0);
+        r = pk.Step(bit(G));
+        CHECK(r.pressed.empty() && r.swallow == 0);
+        r = pk.Step(bit(G) | bit(R1));
+        CHECK(r.pressed == std::vector<std::string>{"save_state"} && r.swallow == bit(R1));
+        r = pk.Step(bit(G) | bit(R1));  // held: no repeat
+        CHECK(r.pressed.empty() && r.swallow == bit(R1));
+        r = pk.Step(bit(R1));  // modifier let go first: R1 stays held back until released
+        CHECK(r.pressed.empty() && r.swallow == bit(R1));
+        r = pk.Step(0);
+        CHECK(r.swallow == 0);
+        r = pk.Step(bit(G) | bit(R2) | bit(X));  // two at once; fast-forward is a hold
+        CHECK(r.fast_forward && r.swallow == (bit(R2) | bit(X)) && r.pressed.size() == 2);
+        r = pk.Step(bit(G));
+        CHECK(!r.fast_forward && r.swallow == 0);
+        // A button already held before the modifier is not taken over.
+        pk.Configure(G, {{"save_state", R1}});
+        r = pk.Step(bit(R1));
+        r = pk.Step(bit(R1) | bit(G));
+        CHECK(r.pressed.empty() && r.swallow == 0);
+        pk.Configure(-1, {{"save_state", R1}});  // no modifier configured: inert
+        CHECK(pk.Step(bit(R1)).pressed.empty());
+    }
+    CHECK(AgoText(0) == "just now" && AgoText(30) == "30 s ago" && AgoText(120) == "2 min ago" && AgoText(7300) == "2 h ago" &&
+          AgoText(200000) == "2 d ago");
+
     std::puts("test_host_logic: OK");
     return 0;
 }

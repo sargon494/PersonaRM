@@ -1,10 +1,12 @@
 #include "host/host_logic.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <utility>
 
 namespace personarm::host {
 
@@ -240,6 +242,78 @@ std::vector<std::string> StatusBadges(const std::string& encounter_rate, int bat
 float ToastAlpha(int64_t remaining_ms) {
     if (remaining_ms <= 0) return 0.f;
     return remaining_ms >= 500 ? 1.f : float(remaining_ms) / 500.f;
+}
+
+namespace {
+bool IsMod(const std::string& t, unsigned& bit) {
+    std::string l;
+    for (char c : t) l += char(std::tolower((unsigned char)c));
+    if (l == "ctrl" || l == "control") bit = kModCtrl;
+    else if (l == "shift") bit = kModShift;
+    else if (l == "alt") bit = kModAlt;
+    else if (l == "gui" || l == "win" || l == "cmd" || l == "meta" || l == "super") bit = kModGui;
+    else return false;
+    return true;
+}
+struct PadName { const char* name; int id; };
+const PadName kPadNames[] = {
+    {"a", 0}, {"b", 1}, {"x", 2}, {"y", 3}, {"back", 4}, {"guide", 5}, {"start", 6}, {"leftstick", 7}, {"rightstick", 8},
+    {"leftshoulder", 9}, {"rightshoulder", 10}, {"dpup", 11}, {"dpdown", 12}, {"dpleft", 13}, {"dpright", 14}, {"misc1", 15},
+    {"paddle1", 16}, {"paddle2", 17}, {"paddle3", 18}, {"paddle4", 19}, {"touchpad", 20}, {"lefttrigger", 30}, {"righttrigger", 31}};
+} // namespace
+
+bool ParseKeyChord(const std::string& text, std::string& key, unsigned& mods) {
+    std::string rest = text;
+    mods = 0;
+    for (size_t plus; (plus = rest.find('+')) != std::string::npos && plus > 0;) {
+        unsigned bit;
+        if (!IsMod(rest.substr(0, plus), bit)) break;
+        mods |= bit;
+        rest.erase(0, plus + 1);
+    }
+    key = rest;
+    return !key.empty();
+}
+std::string FormatKeyChord(const std::string& key, unsigned mods) {
+    return std::string(mods & kModCtrl ? "Ctrl+" : "") + (mods & kModShift ? "Shift+" : "") + (mods & kModAlt ? "Alt+" : "") +
+           (mods & kModGui ? "Gui+" : "") + key;
+}
+
+int PadButtonId(const std::string& name) {
+    for (const PadName& p : kPadNames) if (name == p.name) return p.id;
+    return -1;
+}
+const char* PadButtonName(int id) {
+    for (const PadName& p : kPadNames) if (p.id == id) return p.name;
+    return "";
+}
+
+void PadHotkeys::Configure(int modifier, std::vector<std::pair<std::string, int>> binds) {
+    modifier_ = modifier, binds_ = std::move(binds), prev_ = latched_ = 0;
+}
+PadHotkeys::Result PadHotkeys::Step(uint32_t down) {
+    Result r;
+    const bool mod = modifier_ >= 0 && (down >> modifier_ & 1);
+    uint32_t combo = 0;
+    for (const auto& [action, id] : binds_) {
+        if (id < 0 || id == modifier_) continue;
+        const uint32_t bit = 1u << id;
+        combo |= bit;
+        if (mod && (down & bit) && !(prev_ & bit)) r.pressed.push_back(action), latched_ |= bit;  // only a fresh press
+        if (action == "fast_forward" && (latched_ & down & bit)) r.fast_forward = true;
+    }
+    latched_ &= down;
+    r.swallow = latched_ & combo;
+    prev_ = down;
+    return r;
+}
+
+std::string AgoText(int64_t s) {
+    if (s < 5) return "just now";
+    if (s < 60) return std::to_string(s) + " s ago";
+    if (s < 3600) return std::to_string(s / 60) + " min ago";
+    if (s < 86400) return std::to_string(s / 3600) + " h ago";
+    return std::to_string(s / 86400) + " d ago";
 }
 
 } // namespace personarm::host
