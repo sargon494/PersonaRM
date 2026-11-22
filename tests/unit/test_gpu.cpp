@@ -420,9 +420,42 @@ static void TestWidescreenRules() {
     CHECK_EQ("fallback over", ws.Fallback() == 0 && ws.Wide(), 1);
 }
 
+// Running party (field, 16:9): the shadows of two characters are drawn first (GTE fans centred on x 100 and
+// 130), then their sprites, each with its own palette pair. Bunched up, Ulala's pieces start 8 px after
+// Maya's: they must still be squeezed around her own shadow (130), not Maya's (100). One character's two
+// palettes side by side (CLUT 0x3E54 / 0x3E55) stay one character.
+static void TestWidescreenParty() {
+    using personarm::Widescreen2D;
+    Widescreen2D ws(3, 4);
+    ws.NextFrame();
+    auto fan = [&](int32_t cx) {
+        const uint32_t c = XY(cx, 150), a = XY(cx - 10, 155), b = XY(cx, 160), d = XY(cx + 10, 155);
+        for (uint32_t p : {c, a, b, d}) ws.NoteProjected(p);
+        const uint32_t t1[3] = {c, a, b}, t2[3] = {c, b, d};
+        int32_t x1[3] = {cx, cx - 10, cx}, y1[3] = {150, 155, 160}, x2[3] = {cx, cx, cx + 10}, y2[3] = {150, 160, 155};
+        ws.Squeeze2D(t1, x1, y1, 3, 0, 319, false, false, 0);
+        ws.Squeeze2D(t2, x2, y2, 3, 0, 319, false, false, 0);
+    };
+    auto piece = [&](int32_t lo, int32_t hi, uint32_t clut) {
+        int32_t x[4] = {lo, hi, lo, hi}, y[4] = {100, 100, 130, 130};
+        return ws.Squeeze2D(nullptr, x, y, 4, 0, 319, true, false, 0x0005 | clut << 16);
+    };
+    fan(100);
+    fan(130);
+    CHECK_EQ("maya body", piece(90, 110, 0x3E14), 100);
+    CHECK_EQ("maya arm", piece(104, 112, 0x3E14), 100);
+    CHECK_EQ("ulala body (touching maya)", piece(120, 140, 0x3E54), 130);
+    CHECK_EQ("ulala second palette", piece(118, 126, 0x3E55), 130);
+    CHECK_EQ("ulala legs", piece(122, 138, 0x3E54), 130);
+    // A corpse (no shadow) and its blood pool in another palette stay one: both around the corpse's centre.
+    CHECK_EQ("corpse", piece(200, 240, 0x3F94), 220);
+    CHECK_EQ("blood pool", piece(236, 260, 0x3E24), 220);
+}
+
 int main() {
     TestWidescreen2D();
     TestWidescreenRules();
+    TestWidescreenParty();
     TestFillRule();
     TestGouraud();
     TestTextures();
