@@ -198,8 +198,29 @@ int main() {
     CHECK(CycleGameOption(cg, Hotkey::TextSpeed) == "fast" && CycleGameOption(cg, Hotkey::TextSpeed) == "instant" &&
           CycleGameOption(cg, Hotkey::TextSpeed) == "normal" && cg.text_speed == "normal");
     const Settings hd = DefaultSettings();
-    CHECK(hd.hotkeys.size() == 4 && hd.hotkeys.at("encounter_rate") == "F1" && hd.hotkeys.at("battle_speed") == "F2" &&
+    CHECK(hd.hotkeys.size() == HostActions().size() && hd.hotkeys.at("encounter_rate") == "F1" && hd.hotkeys.at("battle_speed") == "F2" &&
           hd.hotkeys.at("skip_fmv") == "F3" && hd.hotkeys.at("text_speed") == "F4");
+    // Every host action has a default key and pad button; all key defaults parse; pad defaults are valid.
+    CHECK(hd.hotkeys.at("save_state") == "F5" && hd.hotkeys.at("load_state") == "F8" && hd.hotkeys.at("prev_slot") == "F6" &&
+          hd.hotkeys.at("next_slot") == "F7" && hd.hotkeys.at("fast_forward") == "Tab" &&
+          hd.hotkeys.at("toggle_fullscreen") == "Alt+Return" && hd.hotkeys.at("quit") == "Escape");
+    CHECK(hd.pad_modifier == "guide" && hd.pad_hotkeys.at("save_state") == "rightshoulder" && hd.pad_hotkeys.at("load_state") == "leftshoulder" &&
+          hd.pad_hotkeys.at("fast_forward") == "righttrigger" && hd.pad_hotkeys.at("fast_forward_alone") == "rightstick" &&
+          hd.pad_hotkeys.at("encounter_rate") == "y" && hd.pad_hotkeys.at("quit").empty());
+    for (const HostAction& a : HostActions()) {
+        std::string k; unsigned m;
+        CHECK(ParseKeyChord(hd.hotkeys.at(a.name), k, m));
+        CHECK(a.pad[0] == 0 || PadButtonId(a.pad) >= 0);
+    }
+    w.clear();
+    // gamepad_hotkeys: modifier + buttons round trip; bad names warn and keep the default; "" unbinds; key chords.
+    Settings pads = ParseSettings(R"({"input":{"gamepad_hotkeys":{"modifier":"touchpad","save_state":"x","load_state":"",
+        "next_slot":"nope","modifier2":"a"},"hotkeys":{"save_state":"Ctrl+S","quit":"Ctrl+"}}})", &w);
+    CHECK(w.size() == 3);  // next_slot name, modifier2 unknown, quit chord
+    CHECK(pads.pad_modifier == "touchpad" && pads.pad_hotkeys.at("save_state") == "x" && pads.pad_hotkeys.at("load_state").empty() &&
+          pads.pad_hotkeys.at("next_slot") == "dpright" && pads.hotkeys.at("save_state") == "Ctrl+S" && pads.hotkeys.at("quit") == "Escape");
+    const Settings pads2 = ParseSettings(DumpSettings(pads), &w);
+    CHECK(pads2.pad_modifier == "touchpad" && pads2.pad_hotkeys == pads.pad_hotkeys && pads2.hotkeys == pads.hotkeys);
     w.clear();
     Settings hk = ParseSettings(R"({"input":{"hotkeys":{"skip_fmv":"F9","bogus":"F1","text_speed":3}}, "launcher":{"x":1}})", &w);
     CHECK(w.size() == 2 && hk.hotkeys.at("skip_fmv") == "F9" && hk.hotkeys.at("text_speed") == "F4");

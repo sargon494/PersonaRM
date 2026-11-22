@@ -126,6 +126,8 @@ struct App {
     doc: Value,
     /// Hotkey action waiting for a key press (game page).
     capture: Option<&'static str>,
+    /// Why the last hotkey change was refused (game page).
+    hk_msg: Option<String>,
     dirty: bool,
     error: Option<String>,
     logo: Option<egui::TextureHandle>,
@@ -228,7 +230,7 @@ impl App {
                 }
             });
         }
-        let mut app = Self { page, sel: 0, covers: HashMap::new(), cfg, settings, doc, capture: None, dirty: false, error, logo, upd: Upd::None, tx, rx, t0: -10.0, dir: 1.0, shot: arg("--shot"), frames: 0, focus_first: std::env::args().any(|a| a == "--focus"), native: None, scanning: false, found: Vec::new(), scan_secs: None, play: playtime::load(), tz: playtime::tz_offset(), confirm_reset: false, all_sessions: false };
+        let mut app = Self { page, sel: 0, covers: HashMap::new(), cfg, settings, doc, capture: None, hk_msg: None, dirty: false, error, logo, upd: Upd::None, tx, rx, t0: -10.0, dir: 1.0, shot: arg("--shot"), frames: 0, focus_first: std::env::args().any(|a| a == "--focus"), native: None, scanning: false, found: Vec::new(), scan_secs: None, play: playtime::load(), tz: playtime::tz_offset(), confirm_reset: false, all_sessions: false };
         // First launch, no disc set anywhere: look for the discs once (hidden `--find` forces it).
         let no_disc = !app.cfg.games.iter().any(|g| g.discs.values().any(|d| path_state(d, false) == PathState::Found));
         if (!app.cfg.scanned && no_disc) || std::env::args().any(|a| a == "--find") {
@@ -832,7 +834,7 @@ impl App {
     fn game_page(&mut self, ui: &mut egui::Ui) -> (bool, bool) {
         let mut dirty = false;
         let s = &mut self.settings;
-        let cap = &mut self.capture;
+        let (cap, hk_msg) = (&mut self.capture, &mut self.hk_msg);
         let (cache, g) = (&mut self.cfg.disc_cache, &mut self.cfg.games[self.sel]);
         let (ctx, scanning, found, secs) = (ui.ctx().clone(), self.scanning, &self.found, self.scan_secs);
         let (mut find, mut folder) = (false, None);
@@ -917,41 +919,72 @@ impl App {
                     dirty |= path_row(ui, &mut g.cover, false, PathState::NotSet, "not set (title card)", pick);
                 });
             });
-            heading(ui, "HOTKEYS");
-            hint(ui, "In game these change the options above and save them. Click a field, then press a key (Esc cancels).");
-            hint(ui, "F5-F8, Tab and Esc are used by the game itself.");
+            heading(ui, "CONTROLS / HOTKEYS");
+            hint(ui, "Keyboard: click a field, then press a key or a combo such as Ctrl+S (Esc cancels). Handy on small keyboards.");
+            hint(ui, "Gamepad: hold the Hotkey button and press the chosen button; that combo never reaches the game.");
+            hint(ui, "Keys the game uses (arrows, X Z S A, Q W 1 2, Enter, Backspace) need Ctrl, Shift or Alt.");
             ui.add_space(2.0);
-            grid("hotkeys").show(ui, |ui| {
-                for (action, _, label) in HOTKEYS {
-                    grid_row(ui, label, |ui| {
-                        let waiting = *cap == Some(action);
-                        let shown = if waiting { "press a key...".to_string() } else { s.hotkeys[action].clone() };
-                        if ui.add(egui::Button::new(shown).min_size(egui::vec2(170.0, 0.0)).selected(waiting)).clicked() {
-                            *cap = if waiting { None } else { Some(action) };
+            grid("hotkey_btn").show(ui, |ui| {
+                grid_row(ui, "Hotkey button", |ui| {
+                    let mut m = s.pad_modifier.clone();
+                    let opts: Vec<(&str, &str)> = PAD_MODIFIERS.iter().map(|b| (*b, pad_label(b))).collect();
+                    if combo(ui, "padmod", &mut m, &opts) && m != s.pad_modifier {
+                        match s.set_modifier(&m) {
+                            Ok(()) => (*hk_msg, dirty) = (None, true),
+                            Err(e) => *hk_msg = Some(e),
                         }
-                    });
+                    }
+                    hint(ui, "Steam or the Xbox Game Bar can swallow Guide: pick Touchpad or Select instead.");
+                });
+            });
+            ui.add_space(4.0);
+            egui::Grid::new("hotkeys").num_columns(3).min_col_width(130.0).spacing([10.0, 7.0]).show(ui, |ui| {
+                ui.label("");
+                ui.label(RichText::new("KEYBOARD").family(cond()).color(MUTED).size(13.0).extra_letter_spacing(2.0));
+                ui.label(RichText::new(format!("GAMEPAD  ({} +)", pad_label(&s.pad_modifier))).family(cond()).color(MUTED).size(13.0).extra_letter_spacing(2.0));
+                ui.end_row();
+                for (action, label, _, _) in HOST_ACTIONS {
+                    ui.label(label);
+                    let waiting = *cap == Some(action);
+                    let shown = if waiting { "press a key...".to_string() } else { s.hotkeys[action].clone() };
+                    if ui.add(egui::Button::new(shown).min_size(egui::vec2(170.0, 0.0)).selected(waiting)).clicked() {
+                        *cap = if waiting { None } else { Some(action) };
+                        *hk_msg = None;
+                    }
+                    let mut b = s.pad_hotkeys[action].clone();
+                    let mut opts: Vec<(&str, &str)> = vec![("", "None")];
+                    opts.extend(PAD_BUTTONS.iter().filter(|p| p.0 != s.pad_modifier).copied());
+                    if combo(ui, &format!("pad_{action}"), &mut b, &opts) && b != s.pad_hotkeys[action] {
+                        match s.bind_pad(action, &b) {
+                            Ok(()) => (*hk_msg, dirty) = (None, true),
+                            Err(e) => *hk_msg = Some(e),
+                        }
+                    }
+                    ui.end_row();
                 }
             });
+            if let Some(m) = hk_msg.as_deref() {
+                icon_line(ui, Icon::Cross, RED_HI, m);
+            }
+            if ui.button("Reset to defaults").clicked() {
+                s.reset_hotkeys();
+                (*cap, *hk_msg, dirty) = (None, None, true);
+            }
             if let Some(action) = *cap {
                 let pressed = ui.input(|i| i.events.iter().find_map(|e| match e {
-                    egui::Event::Key { key, pressed: true, repeat: false, .. } => Some(*key),
+                    egui::Event::Key { key, pressed: true, repeat: false, modifiers, .. } => Some((*key, *modifiers)),
                     _ => None,
                 }));
-                if let Some(key) = pressed {
-                    match sdl_key_name(key.name()) {
-                        _ if key == egui::Key::Escape => *cap = None,
-                        Some(k) if !RESERVED_KEYS.contains(&k.as_str()) => {
-                            // a key already bound to another action swaps places with this one's old key
-                            let old = s.hotkeys[action].clone();
-                            if let Some(other) = s.hotkeys.iter().find(|(a, v)| **v == k && **a != action).map(|(a, _)| a.clone()) {
-                                s.hotkeys.insert(other, old);
-                            }
-                            s.hotkeys.insert(action.to_string(), k);
-                            *cap = None;
-                            dirty = true;
+                if let Some((key, m)) = pressed {
+                    if key == egui::Key::Escape && !m.any() {
+                        *cap = None;
+                    } else if let Some(k) = sdl_key_name(key.name()) {
+                        let mods = u8::from(m.ctrl) | u8::from(m.shift) << 1 | u8::from(m.alt) << 2;
+                        match s.bind_key(action, &join_chord(mods, &k)) {
+                            Ok(()) => (*cap, *hk_msg, dirty) = (None, None, true),
+                            Err(e) => (*cap, *hk_msg) = (None, Some(e)),
                         }
-                        _ => {} // reserved or not an SDL key: keep waiting
-                    }
+                    } // else not an SDL key: keep waiting
                 }
             }
             playtime_section(ui, pt, now, tz, confirm, all, &mut reset);

@@ -40,7 +40,8 @@ can read and write the same file. Implementation: `src/host/settings.{h,cpp}`.
   "input": {
     "keyboard": { "cross": ["X"], "start": ["Return"], "select": ["Backspace", "Right Shift"] },
     "gamepad":  { "cross": ["a"], "l2": ["lefttrigger"] },
-    "hotkeys":  { "encounter_rate": "F1", "battle_speed": "F2", "skip_fmv": "F3", "text_speed": "F4" }
+    "hotkeys":  { "save_state": "Ctrl+S", "encounter_rate": "F1", "quit": "Escape" },
+    "gamepad_hotkeys": { "modifier": "touchpad", "save_state": "rightshoulder" }
   },
   "game": {
     "SLPS-02192": {
@@ -93,9 +94,10 @@ An action present in the file replaces that action's defaults; absent actions ke
 and unknown key names log a warning and are ignored. Defaults: see `KeyboardMap()` / `GamepadMap()` in
 `src/host/host_logic.cpp`.
 
-`hotkeys` maps an in-game **action** to one key (SDL scancode name, as in `keyboard`): see
-[Gameplay hotkeys](#gameplay-hotkeys). Defaults F1 `encounter_rate`, F2 `battle_speed`, F3 `skip_fmv`,
-F4 `text_speed`. Unknown actions and unknown key names log a warning and are ignored.
+`hotkeys` maps every in-game **host action** to one key chord (SDL scancode names as in `keyboard`, optionally
+prefixed by `Ctrl+`, `Shift+`, `Alt+` or `Gui+`: `"Ctrl+S"`, `"Alt+Return"`): see [Hotkeys](#hotkeys).
+`gamepad_hotkeys` binds the same actions to a gamepad button held together with the **hotkey button**.
+Unknown actions, bad chords and unknown button names log a warning and keep the default.
 
 ### game
 
@@ -118,28 +120,53 @@ is skipped with a line on stderr (`[GAMEPLAY] ... no patch for disc ...` or `[PA
 the game runs untouched. Left at their defaults they change nothing. `encounter_rate` and `skip_fmv` rewrite a few
 instructions of the field / movie code each time it is loaded: with `recomp` that code then runs interpreted.
 
-## Gameplay hotkeys
+## Hotkeys
 
-In game, one key per gameplay option cycles it and writes it to this file under `game.<serial>`
-(only that key, onto the file as it is then, so launcher edits and unknown keys survive):
+Every host action is rebindable, on the keyboard (`input.hotkeys`) and on a gamepad (`input.gamepad_hotkeys`).
+The launcher's game page has a **Controls / Hotkeys** section for it (click a field and press the key or combo;
+a dropdown for the gamepad button; conflicts swap, game keys are refused on their own).
 
-| action (`input.hotkeys`) | default | cycle |
+| action | keyboard default | gamepad default (hotkey button + ...) |
 |---|---|---|
-| `encounter_rate` | F1 | normal, reduced, none |
-| `battle_speed` | F2 | 1, 2, 3 |
-| `skip_fmv` | F3 | off, on |
-| `text_speed` | F4 | normal, fast, instant |
+| `save_state` | F5 | R1 (`rightshoulder`) |
+| `load_state` | F8 | L1 (`leftshoulder`) |
+| `prev_slot` / `next_slot` | F6 / F7 | D-pad left / right (`dpleft` / `dpright`) |
+| `fast_forward` (held) | Tab | R2 (`righttrigger`) |
+| `encounter_rate` | F1 | Triangle (`y`) |
+| `battle_speed` | F2 | Square (`x`) |
+| `skip_fmv` | F3 | Circle (`b`) |
+| `text_speed` | F4 | Cross (`a`) |
+| `toggle_fullscreen` | Alt+Return | none |
+| `quit` (asks to confirm) | Escape | none |
 
-A notice shows in the window title for 3 s and on stderr. The patches are rebuilt on the spot: if the code
-they rewrite is already loaded they take effect at once, otherwise the notice says
-`(applies from the next area)` (encounters) or `(applies from the next movie)` (skip movies). Going back to
-the original encounter / movie code restores it at once. Text speed back to `normal` restores the game's own
-delay when it was seen this session, else `(applies after restart)`. A disc with no patch for the option logs
-`[GAMEPLAY] ... no patch for disc` and the notice says it is not supported. F5-F8 and Tab are not used.
+- **Keyboard chords**: `"Ctrl+S"` works on keyboards without an F-row. The modifiers must match exactly (a plain
+  `F5` does not fire on Shift+F5). While a chord with a modifier is held, its key does not reach the game even when
+  the game uses it (so `Ctrl+S` does not press Square).
+- **Gamepad**: all 14 PS1 buttons belong to the game, so emulator actions need the **hotkey button**
+  (`gamepad_hotkeys.modifier`, default `guide`, the PS / Xbox button where SDL reports it). Hold it and press the
+  action's button. While the hotkey button is held, the buttons of every bound combo are not sent to the game, and a
+  combo button pressed under the hotkey button stays hidden until released. Steam or the Xbox Game Bar can swallow
+  the Guide button: set `modifier` to another button, e.g. `"touchpad"` (DualSense touchpad click, free) or `"back"`
+  (Select; the game then also sees Select while you press it). Button names: `a b x y back guide start leftstick
+  rightstick leftshoulder rightshoulder dpup dpdown dpleft dpright misc1 touchpad lefttrigger righttrigger` (SDL3
+  names; `a b x y` are Cross, Circle, Square, Triangle). `""` unbinds an action. A bound button may not be the hotkey button.
+- `gamepad_hotkeys.fast_forward_alone` (default `rightstick`, R3): fast-forward held on its own, no hotkey button;
+  `""` turns it off.
+- **Gameplay tricks** (F1-F4 by default): one key per option cycles it and writes it to this file under
+  `game.<serial>` (only that key, onto the file as it is then, so launcher edits and unknown keys survive):
+  `encounter_rate` normal, reduced, none; `battle_speed` 1, 2, 3; `skip_fmv` off, on; `text_speed` normal, fast, instant.
+  The patches are rebuilt on the spot: if the code they rewrite is already loaded they take effect at once, otherwise
+  the notice says `(applies from the next area)` (encounters) or `(applies from the next movie)` (skip movies). Going
+  back to the original encounter / movie code restores it at once. Text speed back to `normal` restores the game's own
+  delay when it was seen this session, else `(applies after restart)`. A disc with no patch for the option logs
+  `[GAMEPLAY] ... no patch for disc` and the notice says it is not supported.
+- **On screen**: every action shows a toast at the bottom (2 s, fading) and on stderr / the window title, drawn before
+  the present and never in screenshots or frame dumps. The gameplay tricks also show badges top-right (`video.show_status_icons`),
+  and a slot change, save or load shows a `SLOT n` badge for 2 s.
 
 ## Save states and fast-forward
 
-Keys in `personarm_sdl` (fixed for now, not in `input`):
+Default keys in `personarm_sdl` (rebindable, see [Hotkeys](#hotkeys); gamepad: hotkey button + R1 / L1 / D-pad / R2):
 
 | key | action |
 |---|---|
@@ -149,8 +176,9 @@ Keys in `personarm_sdl` (fixed for now, not in `input`):
 | Tab (held), gamepad right-stick click (held) | fast-forward |
 
 - **Files**: `<save_dir>/<serial>.state<N>` (e.g. `SLPS-02785.state0`); with an empty `save_dir`, the
-  settings directory. Written atomically (`.tmp` then rename). The result shows on stderr (`[state] ...`)
-  and in the window title for 3 s.
+  settings directory. Written atomically (`.tmp` then rename). The result shows as a toast
+  (`Saved to slot 3`, `Loaded slot 3`, `Slot 4 (empty)`, `Slot 4 - saved 2 min ago`, or the reason a load failed), plus
+  a `SLOT n` badge, on stderr (`[state] ...`) and in the window title for 3 s.
 - **What a state holds**: CPU (registers, delay slots, COP0), GTE, RAM, scratchpad, GPU (VRAM, registers,
   packet and transfer state), DMA, interrupt controller, timers, CD-ROM (controller, position, pending
   responses, sector buffers), XA decoder, MDEC, SPU (sound RAM, voices, reverb, queued CD audio), the

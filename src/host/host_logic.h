@@ -54,6 +54,32 @@ const std::vector<NamedBit>& ActionNames();
 /// Pad bit for one name of the tables above, 0 = unmapped.
 uint16_t PadBitForName(const std::vector<NamedBit>& map, const std::string& name);
 
+/// Keyboard hotkey "Ctrl+Shift+Alt+Gui+Key": modifier prefixes (case-insensitive: ctrl/control, shift, alt, gui/win/cmd/meta/super)
+/// then an SDL key name ("F5", "Return", "Keypad +"). False when no key name is left.
+constexpr unsigned kModCtrl = 1, kModShift = 2, kModAlt = 4, kModGui = 8;
+bool ParseKeyChord(const std::string& text, std::string& key, unsigned& mods);
+std::string FormatKeyChord(const std::string& key, unsigned mods);  // canonical spelling, inverse of ParseKeyChord
+
+/// Gamepad button ids = SDL_GamepadButton values (south=0 "a" ... touchpad=20), plus 30 "lefttrigger" and 31 "righttrigger"
+/// (axes, folded in as buttons by the host). -1 for an unknown name.
+int PadButtonId(const std::string& name);
+const char* PadButtonName(int id);
+/// Gamepad hotkeys: hold `modifier`, press another button. While the modifier is held (and until released, if the button
+/// went down under it) the combo's buttons are reported in `swallow` so the game never sees them.
+class PadHotkeys {
+public:
+    struct Result { std::vector<std::string> pressed; bool fast_forward = false; uint32_t swallow = 0; };
+    void Configure(int modifier, std::vector<std::pair<std::string, int>> binds);  // action -> button id (-1 = unbound)
+    Result Step(uint32_t down);  // `down`: bit per button id held now
+private:
+    int modifier_ = -1;
+    std::vector<std::pair<std::string, int>> binds_;
+    uint32_t prev_ = 0, latched_ = 0;
+};
+
+/// "just now", "30 s ago", "2 min ago", "3 h ago", "4 d ago".
+std::string AgoText(int64_t seconds);
+
 /// personarm_sdl command line.
 struct HostOptions {
     std::string disc, screenshot, input_script, dump_dir;

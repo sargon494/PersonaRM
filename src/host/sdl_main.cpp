@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <array>
 #include <cstdio>
 #include <cstdlib>
@@ -74,10 +75,13 @@ static void Usage() {
                          "  --window-mode M      windowed, fullscreen or borderless (Alt+Enter toggles)\n"
                          "  --window-scale N     windowed size = 320x240 * N (1..8)\n"
                          "  --volume N, --mute   master volume 0..100 / silence\n"
-                         "Keys: F1 encounters, F2 battle speed, F3 skip movies, F4 text speed (cycle, saved to the\n"
-                         "  settings file; rebind in input.hotkeys), F5 save state, F8 load state, F6/F7 previous/next slot (0-9; files\n"
+                         "Keys (all rebindable: input.hotkeys, \"Ctrl+S\" style; gamepad = hold the hotkey button + another,\n"
+                         "  input.gamepad_hotkeys): F1 encounters, F2 battle speed, F3 skip movies, F4 text speed (cycle, saved to the\n"
+                         "  settings file), F5 save state, F8 load state, F6/F7 previous/next slot (0-9; files\n"
                          "  <save_dir>/<serial>.state<N>), Tab or gamepad right-stick click held = fast-forward\n"
-                         "  (up to video.fast_forward_max x, audio muted), Alt+Enter fullscreen, Esc quit\n");
+                         "  (up to video.fast_forward_max x, audio muted), Alt+Enter fullscreen, Esc quit.\n"
+                         "  Gamepad: Guide + R1 save, + L1 load, + D-pad left/right slot, + R2 fast-forward, + Triangle/Square/\n"
+                         "  Circle/Cross the four tricks\n");
 }
 
 int main(int argc, char** argv) {
@@ -328,7 +332,7 @@ int main(int argc, char** argv) {
         if (const char* pref = SDL_GetPrefPath("PersonaRM", "PersonaRM")) state_dir = pref;
     }
     int state_slot = 0;
-    uint64_t title_until = 0;
+    uint64_t title_until = 0, slot_badge_until = 0;
     // QA hook: PRM_WINDOW_SHOT=file.bmp saves the window (overlay included) once at frame PRM_WINDOW_SHOT_FRAME (0 = while a toast shows).
     const char* window_shot = std::getenv("PRM_WINDOW_SHOT");
     const uint64_t window_shot_frame = std::getenv("PRM_WINDOW_SHOT_FRAME") ? std::strtoull(std::getenv("PRM_WINDOW_SHOT_FRAME"), nullptr, 10) : 0;
@@ -339,13 +343,15 @@ int main(int argc, char** argv) {
         return (fs::path(state_dir) / ((engine.DiscSerial().empty() ? std::string("unknown") : engine.DiscSerial()) +
                                        ".state" + std::to_string(state_slot))).string();
     };
-    auto notify = [&](const std::string& m) {  // stderr + window title for a few seconds
+    auto notify = [&](const std::string& m) {  // stderr + window title for a few seconds + the on-screen toast
         std::fprintf(stderr, "[state] %s\n", m.c_str());
         SDL_SetWindowTitle(window, ("PersonaRM - " + m).c_str());
         title_until = SDL_GetTicksNS() + 3 * SDL_NS_PER_SECOND;
         toast_text = m, toast_until = SDL_GetTicksNS() + 2 * SDL_NS_PER_SECOND;
         if (!toast_text.empty()) toast_text[0] = char(std::toupper((unsigned char)toast_text[0]));
     };
+    auto slot_name = [&] { return "slot " + std::to_string(state_slot); };
+    auto show_slot = [&] { slot_badge_until = SDL_GetTicksNS() + 2 * SDL_NS_PER_SECOND; };
     auto save_state = [&] {
         std::vector<uint8_t> buf;
         engine.SaveState(buf);
@@ -359,21 +365,35 @@ int main(int argc, char** argv) {
             ok = bool(f);
         }
         if (ok) fs::rename(tmp, path, ec);  // atomic: a crash never leaves half a state
-        if (!ok || ec) { fs::remove(tmp, ec); notify("cannot write " + path); return; }
-        notify("saved slot " + std::to_string(state_slot) + " (" + path + ")");
+        if (!ok || ec) { fs::remove(tmp, ec); notify("could not save " + slot_name() + ": cannot write " + path); return; }
+        std::fprintf(stderr, "[state] %s\n", path.c_str());
+        show_slot();
+        notify("saved to " + slot_name());
     };
     auto load_state = [&] {
         const std::string path = state_path();
         std::ifstream f(path, std::ios::binary);
-        if (!f) { notify("slot " + std::to_string(state_slot) + " is empty"); return; }
+        show_slot();
+        if (!f) { notify("could not load: " + slot_name() + " is empty"); return; }
         const std::vector<uint8_t> buf((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
         std::string err;
-        if (!engine.LoadState(buf, &err)) { notify("slot " + std::to_string(state_slot) + ": " + err); return; }
+        if (!engine.LoadState(buf, &err)) { notify("could not load " + slot_name() + ": " + err); return; }
         if (audio) SDL_ClearAudioStream(audio);
         cmd_log.clear();
         interp = interp::FrameInterpolator();
         next = SDL_GetTicksNS();
-        notify("loaded slot " + std::to_string(state_slot) + " (frame " + std::to_string(engine.GetFrameCount()) + ")");
+        std::fprintf(stderr, "[state] frame %llu\n", (unsigned long long)engine.GetFrameCount());
+        notify("loaded " + slot_name());
+    };
+    auto change_slot = [&](int delta) {
+        state_slot = (state_slot + delta + 10) % 10;
+        std::error_code ec;
+        const auto t = fs::last_write_time(state_path(), ec);
+        const std::string n = "slot " + std::to_string(state_slot);
+        show_slot();
+        if (ec) { notify(n + " (empty)"); return; }
+        const auto age = std::chrono::duration_cast<std::chrono::seconds>(fs::file_time_type::clock::now() - t).count();
+        notify(n + " - saved " + host::AgoText(age));
     };
     // Fast-forward (held): up to fast_forward_max emulated frames per 1/60 s, one picture each, audio dropped.
     const int ff_max = std::clamp(cfg.video.fast_forward_max, 2, 16);
@@ -386,14 +406,35 @@ int main(int argc, char** argv) {
                      engine.DiscSerial().empty() ? "(unrecognized)" : engine.DiscSerial().c_str());
     else if (battle_speed > 1) std::printf("[gameplay] battle_speed=%d\n", battle_speed);
 
-    // Hotkeys (input.hotkeys, F1-F4 by default): cycle a gameplay option live and write it to settings.json.
-    struct HotkeyBind { SDL_Scancode code; host::Hotkey action; };
+    // Hotkeys (input.hotkeys / input.gamepad_hotkeys): every host action, "Ctrl+S"-style chords on the keyboard,
+    // hotkey button + another on a gamepad. F1-F4 cycle a gameplay option live and write it to settings.json.
+    struct HotkeyBind { SDL_Scancode code; unsigned mods; std::string action; };
     std::vector<HotkeyBind> hotkeys;
-    for (host::Hotkey h : host::kHotkeys) {
-        const std::string& name = cfg.hotkeys.at(host::HotkeyAction(h));
-        if (SDL_Scancode sc = SDL_GetScancodeFromName(name.c_str()); sc != SDL_SCANCODE_UNKNOWN) hotkeys.push_back({sc, h});
-        else std::fprintf(stderr, "[settings] input.hotkeys.%s: unknown key \"%s\"\n", host::HotkeyAction(h), name.c_str());
+    for (const host::HostAction& a : host::HostActions()) {
+        std::string name; unsigned mods = 0;
+        host::ParseKeyChord(cfg.hotkeys.at(a.name), name, mods);
+        if (SDL_Scancode sc = SDL_GetScancodeFromName(name.c_str()); sc != SDL_SCANCODE_UNKNOWN) hotkeys.push_back({sc, mods, a.name});
+        else std::fprintf(stderr, "[settings] input.hotkeys.%s: unknown key \"%s\"\n", a.name, name.c_str());
     }
+    auto mods_of = [](SDL_Keymod m) {
+        return (m & SDL_KMOD_CTRL ? host::kModCtrl : 0u) | (m & SDL_KMOD_SHIFT ? host::kModShift : 0u) |
+               (m & SDL_KMOD_ALT ? host::kModAlt : 0u) | (m & SDL_KMOD_GUI ? host::kModGui : 0u);
+    };
+    auto chord_held = [&](const char* action, const bool* ks) {
+        const unsigned held = mods_of(SDL_GetModState());
+        for (const HotkeyBind& b : hotkeys) if (b.action == action && ks[b.code] && b.mods == held) return true;
+        return false;
+    };
+    host::PadHotkeys pad_hk;
+    {
+        std::vector<std::pair<std::string, int>> binds;
+        for (const host::HostAction& a : host::HostActions()) {
+            const std::string& n = cfg.pad_hotkeys.at(a.name);
+            if (!n.empty()) binds.push_back({a.name, host::PadButtonId(n)});
+        }
+        pad_hk.Configure(host::PadButtonId(cfg.pad_modifier), binds);
+    }
+    const int pad_ff_alone = host::PadButtonId(cfg.pad_hotkeys.at("fast_forward_alone"));
     uint32_t text_default = 0;  // the game's own text delay, seen while text_speed was normal
     auto toggle_option = [&](host::Hotkey h) {
         const std::string serial = engine.DiscSerial();
@@ -445,40 +486,41 @@ int main(int argc, char** argv) {
         notify(note);
     };
 
+    // One place for every action, whatever pressed it (key chord or pad combo). fast_forward is polled, not dispatched.
+    auto dispatch = [&](const std::string& a) {
+        if (a == "save_state") save_state();
+        else if (a == "load_state") load_state();
+        else if (a == "next_slot") change_slot(1);
+        else if (a == "prev_slot") change_slot(-1);
+        else if (a == "toggle_fullscreen") {
+            if (hidden) return;  // leave fullscreen / enter the configured (else borderless) one
+            if (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) window_mode = "windowed";
+            else window_mode = cfg.video.window_mode == "windowed" ? "borderless" : cfg.video.window_mode;
+            apply_mode(window_mode);
+        } else if (a == "quit") {
+            // Ask first: Esc sits next to keys used in play, and quitting loses unsaved progress.
+            if (hidden) { quit = true; return; }
+            const SDL_MessageBoxButtonData buttons[] = {
+                {SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 0, "Keep playing"},
+                {SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 1, "Quit"},
+            };
+            const SDL_MessageBoxData box{SDL_MESSAGEBOX_WARNING, window, "PersonaRM",
+                                         "Quit the game? Unsaved progress will be lost.", 2, buttons, nullptr};
+            int choice = 0;
+            if (SDL_ShowMessageBox(&box, &choice) && choice == 1) quit = true;
+            next = SDL_GetTicksNS();  // the dialog paused us: don't race to catch up
+        } else for (host::Hotkey h : host::kHotkeys)
+            if (a == host::HotkeyAction(h)) toggle_option(h);
+    };
     if (opt.load_slot >= 0) { state_slot = opt.load_slot; load_state(); }  // reproduce a reported moment
     while (!quit && engine.GetState() == EngineState::Running && (!max_frames || engine.GetFrameCount() < max_frames)) {
         SDL_Event ev;
         while (SDL_PollEvent(&ev)) {
             if (ev.type == SDL_EVENT_QUIT) quit = true;
-            else if (ev.type == SDL_EVENT_KEY_DOWN && ev.key.scancode == SDL_SCANCODE_ESCAPE && !ev.key.repeat) {
-                // Ask first: Esc sits next to keys used in play, and quitting loses unsaved progress.
-                if (hidden) { quit = true; continue; }
-                const SDL_MessageBoxButtonData buttons[] = {
-                    {SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 0, "Keep playing"},
-                    {SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 1, "Quit"},
-                };
-                const SDL_MessageBoxData box{SDL_MESSAGEBOX_WARNING, window, "PersonaRM",
-                                             "Quit the game? Unsaved progress will be lost.", 2, buttons, nullptr};
-                int choice = 0;
-                if (SDL_ShowMessageBox(&box, &choice) && choice == 1) quit = true;
-                next = SDL_GetTicksNS();  // the dialog paused us: don't race to catch up
-            }
-            else if (ev.type == SDL_EVENT_KEY_DOWN && ev.key.scancode == SDL_SCANCODE_RETURN && (ev.key.mod & SDL_KMOD_ALT) &&
-                     !ev.key.repeat && !hidden) {  // Alt+Enter: leave fullscreen / enter the configured (else borderless) one
-                if (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) window_mode = "windowed";
-                else window_mode = cfg.video.window_mode == "windowed" ? "borderless" : cfg.video.window_mode;
-                apply_mode(window_mode);
-            } else if (ev.type == SDL_EVENT_KEY_DOWN && !ev.key.repeat &&
-                       std::any_of(hotkeys.begin(), hotkeys.end(), [&](const HotkeyBind& b) { return b.code == ev.key.scancode; })) {
+            else if (ev.type == SDL_EVENT_KEY_DOWN && !ev.key.repeat) {
+                const unsigned held = mods_of(ev.key.mod);
                 for (const HotkeyBind& b : hotkeys)
-                    if (b.code == ev.key.scancode) toggle_option(b.action);
-            } else if (ev.type == SDL_EVENT_KEY_DOWN && !ev.key.repeat && ev.key.scancode == SDL_SCANCODE_F5) {
-                save_state();
-            } else if (ev.type == SDL_EVENT_KEY_DOWN && !ev.key.repeat && ev.key.scancode == SDL_SCANCODE_F8) {
-                load_state();
-            } else if (ev.type == SDL_EVENT_KEY_DOWN && (ev.key.scancode == SDL_SCANCODE_F6 || ev.key.scancode == SDL_SCANCODE_F7)) {
-                state_slot = (state_slot + (ev.key.scancode == SDL_SCANCODE_F7 ? 1 : 9)) % 10;
-                notify("slot " + std::to_string(state_slot));
+                    if (b.code == ev.key.scancode && b.mods == held && b.action != "fast_forward") dispatch(b.action);
             } else if (ev.type == SDL_EVENT_WINDOW_FOCUS_LOST && cfg.pause_on_focus_loss) {
                 paused = true;  // never minimize or grab focus back: just stop emulating and go quiet
                 set_gain(true);
@@ -506,20 +548,37 @@ int main(int argc, char** argv) {
 
         if (paused) { SDL_Delay(16); continue; }
 
+        // Gamepad hotkeys: hold the hotkey button + another; those combo buttons never reach the game.
+        uint32_t pad_down = 0;
+        for (SDL_Gamepad* g : gamepads) {
+            for (int id = 0; id <= 20; ++id) pad_down |= uint32_t(SDL_GetGamepadButton(g, SDL_GamepadButton(id))) << id;
+            pad_down |= uint32_t(SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > 16384) << 30;
+            pad_down |= uint32_t(SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > 16384) << 31;
+        }
+        const host::PadHotkeys::Result pad_res = pad_hk.Step(pad_down);
+        for (const std::string& a : pad_res.pressed) dispatch(a);
+        if (quit) break;
         uint16_t mask = 0;  // all 16 digital pad buttons
         const bool* ks = SDL_GetKeyboardState(nullptr);
-        for (const KeyBit& k : keys)
-            if (ks[k.code]) mask |= k.bit;
+        const unsigned held_mods = mods_of(SDL_GetModState());
+        for (const KeyBit& k : keys) {  // a Ctrl+S style hotkey holds S back from the game too
+            bool taken = false;
+            for (const HotkeyBind& b : hotkeys) taken |= b.mods && b.mods == held_mods && b.code == k.code;
+            if (ks[k.code] && !taken) mask |= k.bit;
+        }
         for (SDL_Gamepad* g : gamepads)
             for (const PadBit& p : pad_bits) {
+                const int axis_id = p.axis == SDL_GAMEPAD_AXIS_LEFT_TRIGGER ? 30 : p.axis == SDL_GAMEPAD_AXIS_RIGHT_TRIGGER ? 31 : -1;
+                const int id = p.button != SDL_GAMEPAD_BUTTON_INVALID ? int(p.button) : axis_id;
+                if (id >= 0 && (pad_res.swallow >> id & 1)) continue;
                 if (p.button != SDL_GAMEPAD_BUTTON_INVALID && SDL_GetGamepadButton(g, p.button)) mask |= p.bit;
                 if (p.axis != SDL_GAMEPAD_AXIS_INVALID && SDL_GetGamepadAxis(g, p.axis) > 16384) mask |= p.bit;
             }
         for (SDL_Gamepad* g : gamepads)  // the game reads a digital pad: the left stick drives the d-pad too
             mask |= host::StickToDpad(SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_LEFTX), SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_LEFTY));
         engine.SetPadButtons(mask);
-        bool ff = ks[SDL_SCANCODE_TAB];
-        for (SDL_Gamepad* g : gamepads) ff |= SDL_GetGamepadButton(g, SDL_GAMEPAD_BUTTON_RIGHT_STICK);
+        bool ff = chord_held("fast_forward", ks) || pad_res.fast_forward;
+        if (pad_ff_alone >= 0) ff |= bool(pad_down >> pad_ff_alone & 1);
         if (title_until && SDL_GetTicksNS() > title_until) { SDL_SetWindowTitle(window, "PersonaRM"); title_until = 0; }
         const bool in_battle = scene_mode_addr && IsBattleScene(engine.Read(scene_mode_addr, 4));
         const int speed = host::FrameSpeed(ff, ff_max, in_battle, battle_speed);
@@ -694,6 +753,7 @@ int main(int argc, char** argv) {
                 std::vector<std::string> badges;
                 if (cfg.video.show_status_icons)
                     badges = host::StatusBadges(game.encounter_rate, battle_speed, game.skip_fmv.value_or(false), game.text_speed, ff);
+                if (slot_badge_until > now) badges.push_back("SLOT " + std::to_string(state_slot));
                 const float ta = toast_until > now ? host::ToastAlpha(int64_t((toast_until - now) / 1000000)) : 0.f;
                 if (!badges.empty() || ta > 0.f) {
                     // 8 px debug glyphs, scaled to the window height: x2 at 1080p, x4 at 4K.
