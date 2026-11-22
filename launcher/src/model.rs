@@ -299,9 +299,10 @@ impl GameSettings {
 /// Arguments for `personarm_sdl`. Renderer and scale are CLI-only (the file accepts 1..4 and no renderer).
 pub fn build_args(settings: &str, cue: &str, cfg: &LauncherConfig, s: &GameSettings) -> Vec<String> {
     let mut a: Vec<String> = vec![cue.into(), "--settings".into(), settings.into(), "--renderer".into(), cfg.renderer.clone()];
-    // The host rejects an internal resolution above 1x together with frame interpolation (fps > 60).
-    if s.fps <= 60 {
-        let gpu = cfg.renderer == "gpu";
+    let gpu = cfg.renderer == "gpu";
+    // The host rejects a software internal resolution above 1x with frame interpolation (fps > 60);
+    // the GPU renderer interpolates at any scale, so it keeps its resolution at 90/120 fps.
+    if gpu || s.fps <= 60 {
         let r = match cfg.resolution {
             0 if gpu => "auto".to_string(),
             n => n.clamp(1, if gpu { 9 } else { 4 }).to_string(),
@@ -534,6 +535,9 @@ mod tests {
         assert_eq!(build_args("S", "d", &c, &s)[6], "1");
         let fast = GameSettings { fps: 120, ..Default::default() };
         assert_eq!(build_args("S", "d", &c, &fast), ["d", "--settings", "S", "--renderer", "software"]);
+        c.renderer = "gpu".into();
+        c.resolution = 4;
+        assert_eq!(build_args("S", "d", &c, &fast)[6], "4"); // GPU keeps its scale at 120 fps
     }
 
     #[test]
