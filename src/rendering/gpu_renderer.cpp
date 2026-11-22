@@ -617,7 +617,7 @@ void GpuRenderer::OnGp0(const Ps1Gpu& gpu, const uint32_t* w, size_t n) {
 void GpuRenderer::OnVramWrite(const Ps1Gpu& gpu, uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
     FlushPending();
     if (m_set && x == 0 && y == 0 && w >= PS1_VRAM_WIDTH && h >= PS1_VRAM_HEIGHT) {
-        // The replay's SetVram (the latest game frame's 1x VRAM): the replay target already holds its scaled
+        // The replay's SetVram (the previous flip's 1x VRAM): the replay target already holds its scaled
         // picture (snapshot); only the 1x texture is stale.
         std::memset(m_dirty[1], 1, sizeof m_dirty[1]);
         return;
@@ -627,8 +627,8 @@ void GpuRenderer::OnVramWrite(const Ps1Gpu& gpu, uint32_t x, uint32_t y, uint32_
 
 // ── Frame interpolation ──────────────────────────────────────────────────────────────────────────────
 
-void GpuRenderer::Flip() {
-    if (!m_tex[kSnap0]) return;
+void GpuRenderer::OnFlip(const Ps1Gpu&) {
+    if (!m_tex[kSnap0] || m_set) return;
     FlushPending();
     m_snap = m_snap == kSnap0 ? kSnap1 : kSnap0;
     m_ops.push_back({Op::Whole, kHi, m_snap, 0, 0, 0, 0, 0, 0, 0, 0});
@@ -638,7 +638,7 @@ void GpuRenderer::BeginReplay(Ps1Gpu& scratch) {
     if (!m_tex[kHi2] || m_set) return;
     FlushPending();
     m_live_area = m_area;
-    m_ops.push_back({Op::Whole, m_snap, kHi2, 0, 0, 0, 0, 0, 0, 0, 0});
+    m_ops.push_back({Op::Whole, uint8_t(m_snap == kSnap0 ? kSnap1 : kSnap0), kHi2, 0, 0, 0, 0, 0, 0, 0, 0});
     m_set = 1;
     std::memset(m_dirty[1], 1, sizeof m_dirty[1]);
     m_replay_gpu = &scratch;

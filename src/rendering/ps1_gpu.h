@@ -30,6 +30,8 @@ public:
     /// Widescreen: the polygon / rectangle of the last OnGp0 is drawn squeezed, with these VRAM-space X
     /// coordinates (polygon: one per vertex; rectangle: left edge and right edge + 1).
     virtual void OnSqueeze(const int32_t* /*x*/, int /*n*/) {}
+    /// A display-start change logged as a flip (SetCommandLog on): the next segment starts drawing now.
+    virtual void OnFlip(const Ps1Gpu&) {}
 };
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -115,6 +117,8 @@ public:
     /// (GP1 05h, a double-buffer flip) as [0, x | y << 16] followed by E1h-E6h packets for the current
     /// draw state, so every segment between two flips replays on its own.
     void SetCommandLog(std::vector<uint32_t>* log) { m_cmd_log = log; }
+    /// VRAM at the latest logged flip: the picture it shows, and the state the next segment draws over.
+    const std::vector<uint16_t>& GetFlipVram() const { return m_flip_vram; }
     /// GTE projection tracker for the command log; null = off (default). A polygon with 2 or more GTE
     /// vertices (3D, as Widescreen2D decides) gets a GP0 NOP entry [1, kLog3D] before its packet: the
     /// frame interpolator moves 3D only and leaves 2D (sprites, portraits, text) as drawn.
@@ -207,6 +211,7 @@ private:
     bool m_mask_check = false;
     uint64_t m_polygon_count = 0;
     std::vector<uint32_t>* m_cmd_log = nullptr;
+    std::vector<uint16_t> m_flip_vram;
     VramTextureHook* m_hook = nullptr;
     Widescreen2D* m_ws2d = nullptr;
     const Widescreen2D* m_proj = nullptr;

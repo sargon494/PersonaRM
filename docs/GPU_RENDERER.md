@@ -141,18 +141,23 @@ uses the same 4:3 / W:H rect.
 ## Frame interpolation (`--interp 120`, `fps_target` 120)
 
 The interpolator (`rendering/frame_interp.h`) matches the GP0 packets of the last two game frames and
-replays the latest with lerped vertices on a scratch `Ps1Gpu` that starts from the latest frame's 1x
-VRAM. On the GPU path, at any resolution scale:
+replays the latest segment (the packets drawn between the two flips) with lerped vertices on a scratch
+`Ps1Gpu` that starts from the 1x VRAM of the previous flip, the state that segment was drawn over. Both
+frames are taken at their flip (`Ps1Gpu::GetFlipVram`), not after the emulated frame, when the next
+segment may already have drawn. So an unmoved replay is the latest frame exactly: a still scene gives
+identical pictures, and a blended or partly covered primitive is not drawn twice. On the GPU path, at any
+resolution scale:
 
-- each flip the interpolator sees (`FrameInterpolator::Consume`) snapshots `hi` into `snap0`/`snap1`
-  alternately (one texture copy, `GpuRenderer::Flip`), so the scaled pictures of the last two game frames
-  stay on the GPU;
-- a synthesized picture (0 < t < 1, pair usable): `BeginReplay` copies the latest snapshot to `hi2`,
+- each logged flip (`GpuDrawListener::OnFlip`, during emulation) snapshots `hi` into `snap0`/`snap1`
+  alternately (one texture copy), so the scaled pictures of the last two game frames stay on the GPU;
+- a synthesized picture (0 < t < 1, pair usable): `BeginReplay` copies the older snapshot to `hi2`,
   attaches the renderer to the scratch GPU and switches recording to `hi2` / `vram1x2` (own dirty grid,
   all dirty: textures upload lazily from the scratch's 1x VRAM); the scratch's `SetVram` only marks
-  `vram1x2` stale (`hi2` already holds that frame at s×); the replayed packets draw at s×; `EndReplay`
+  `vram1x2` stale (`hi2` already holds that VRAM at s×); the replayed packets draw at s×; `EndReplay`
   detaches and switches back;
-- t ≤ 0 or an unusable pair presents the older snapshot, t ≥ 1 the newer one, each with its display area.
+- t ≤ 0 presents the older snapshot, t ≥ 1 or an unusable pair the newer one (an unusable pair has
+  nothing to show in between, so holding the older one would only add latency), each with its display
+  area. A picture is never older than the one before it.
 
 The scratch still rasterizes at 1x on the CPU (the interpolator's existing cost, about 3 ms per
 synthesized picture). The `--interp` restriction to scale 1 remains for the software renderer only.

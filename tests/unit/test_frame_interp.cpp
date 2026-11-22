@@ -318,6 +318,90 @@ static void Test2DIsDrawnAsInCur() {
     std::printf("  2D drawn as in cur ok\n");
 }
 
+// Still scenery is never moved by what touches it or by GTE rounding: two floor quads share a vertex with a
+// moving shadow fan (its rim lands on it) and a third floor quad jitters by a pixel; in-between, the floor
+// is exactly cur and the fan slides.
+static void TestStillFloorStaysPut() {
+    std::vector<uint32_t> prev, cur, out;
+    auto floor = [](std::vector<uint32_t>& c, int dy) {
+        Tag(c), Packet(c, {0x28404040, XY(0, 0), XY(50, 0), XY(0, 50), XY(50, 50)});
+        Tag(c), Packet(c, {0x28404040, XY(50, 0), XY(100, 0), XY(50, 50), XY(100, 50)});
+        Tag(c), Packet(c, {0x28404040, XY(0, 60), XY(50, 60), XY(0, 110 + dy), XY(50, 110)});  // 1 px of GTE noise
+    };
+    auto fan = [](std::vector<uint32_t>& c, int dx) {
+        Tag(c), Packet(c, {0x20101010, XY(50 + dx, 50), XY(60 + dx, 40), XY(70 + dx, 50)});
+        Tag(c), Packet(c, {0x20101010, XY(50 + dx, 50), XY(70 + dx, 50), XY(60 + dx, 60)});
+        Tag(c), Packet(c, {0x20101010, XY(50 + dx, 50), XY(60 + dx, 60), XY(45 + dx, 58)});
+    };
+    floor(prev, 1), fan(prev, -8);
+    floor(cur, 0), fan(cur, 0);
+    const Match m = MatchPrimitives(prev, cur, 48);
+    assert(m.prims == 6 && m.matched == 6);
+    LerpCommands(prev, cur, m, 0.25, 48, out);
+    const size_t fan_at = cur.size() - 21;  // the first fan packet
+    for (size_t i = 0; i < fan_at; ++i) assert(out[i] == cur[i]);
+    assert(X0(out, fan_at + 2) == 44);
+    std::printf("  still floor stays put ok\n");
+}
+
+static std::vector<uint16_t> Picture(const std::vector<uint16_t>& vram, const GpuDisplayArea& d) {
+    std::vector<uint16_t> p;
+    for (uint32_t row = 0; row < 240; ++row)
+        for (uint32_t col = 0; col < 320; ++col) p.push_back(vram[((d.y + row) & 511) * 1024 + ((d.x + col) & 1023)]);
+    return p;
+}
+
+// A still scene gives identical pictures at every t, and no picture is older than the one before it. The
+// game blends a quad over its 3D scene, copies part of the previous frame (the other buffer) into the new
+// one, and starts drawing the next frame there before the host sees the flip: a replay over the VRAM after
+// the emulated frame copied that instead. Then a 2D-only frame (no pair to interpolate) is shown at once.
+static void TestStillSceneIsExactAndInOrder() {
+    FrameInterpolator fi;
+    Ps1Gpu g;
+    std::vector<uint32_t> log;
+    g.SetCommandLog(&log);
+    Widescreen2D gte(1, 1);
+    for (uint32_t xy : {XY(20, 20), XY(120, 20), XY(20, 120)}) gte.NoteProjected(xy);
+    g.SetProjectionTracker(&gte);
+    auto area = [&g](uint32_t y) {
+        for (uint32_t w : {0xE3000000u | y << 10, 0xE4000000u | 319 | (y + 239) << 10, 0xE5000000u | y << 11}) g.WriteGP0(w);
+    };
+    uint64_t frame = 0;
+    std::vector<uint16_t> shown;  // the latest frame's picture
+    for (int k = 1; k <= 4; ++k) {
+        const uint32_t y = (k & 1) ? 240 : 0;
+        area(y);
+        g.WriteGP0(0x02102030); g.WriteGP0(XY(0, y)); g.WriteGP0(XY(320, 240));
+        if (k < 4)
+            for (uint32_t w : {0x20406080u, XY(20, 20), XY(120, 20), XY(20, 120)}) g.WriteGP0(w);  // 3D, still
+        g.WriteGP0(0xE1000000u | 1u << 5);                                                        // B + F
+        for (uint32_t w : {0x62303030u, XY(10, 10), XY(200, 150)}) g.WriteGP0(w);                // blended
+        // An echo of the previous frame (the other buffer), as reflections and trails do.
+        for (uint32_t w : {0x80000000u, XY(20, 240 - y + 20), XY(180, y + 100), XY(100, 100)}) g.WriteGP0(w);
+        g.WriteGP1(0x05000000 | y << 10);
+        shown = Picture(g.GetVram(), {0, uint16_t(y)});
+        area(240 - y);  // the next frame starts in the other buffer before the host drains the log
+        g.WriteGP0(0x02FFFFFF); g.WriteGP0(XY(0, 240 - y)); g.WriteGP0(XY(320, 240));
+        frame += 2;
+        assert(fi.Consume(log, g, frame));
+        const std::vector<uint16_t>* vram = nullptr;
+        GpuDisplayArea d;
+        if (k == 3) {  // still pair: every t is the latest frame
+            assert(fi.PairOk());
+            for (double t : {0.0, 0.25, 0.5, 0.75, 1.0}) {
+                fi.Render(t, vram, d);
+                assert(Picture(*vram, d) == shown);
+            }
+        }
+        if (k == 4) {  // 2D only: not interpolable, shown at once, never the older frame
+            assert(!fi.PairOk());
+            fi.Render(0.0, vram, d);
+            assert(d.y == y && Picture(*vram, d) == shown);
+        }
+    }
+    std::printf("  still scene exact, in order ok\n");
+}
+
 int main() {
     std::printf("frame_interp tests\n");
     TestMatchAndLerp();
@@ -327,6 +411,8 @@ int main() {
     TestCaptureIsInvisibleAndComplete();
     TestWidescreenSqueezeReplays();
     Test2DIsDrawnAsInCur();
+    TestStillSceneIsExactAndInOrder();
+    TestStillFloorStaysPut();
     std::printf("PASS\n");
     return 0;
 }

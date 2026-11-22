@@ -124,7 +124,7 @@ void LerpCommands(const std::vector<uint32_t>& prev, const std::vector<uint32_t>
         out[w] = (uint32_t(Sx(cur[w]) - ox) & 0xFFFF) | uint32_t(Sx(cur[w] >> 16) - oy) << 16;
     };
     // Pass 1: the motion (cur - prev) of every vertex of a usable pair, keyed by its position in cur.
-    struct Vote { uint32_t xy; int32_t dx, dy, prim; };
+    struct Vote { uint32_t xy; int32_t dx, dy, prim; size_t w; };  // w: the vertex word in cur
     std::vector<Vote> votes;
     int32_t prims = 0;
     size_t pk = 0;
@@ -136,7 +136,7 @@ void LerpCommands(const std::vector<uint32_t>& prev, const std::vector<uint32_t>
         bool ok = true;
         for (int k = 0; k < nv && ok; ++k) {
             const uint32_t a = prev[p + 1 + slot[k]], b = cur[i + 1 + slot[k]];
-            v[k] = {b & 0x07FF07FF, Sx(b) - Sx(a), Sx(b >> 16) - Sx(a >> 16), prims};
+            v[k] = {b & 0x07FF07FF, Sx(b) - Sx(a), Sx(b >> 16) - Sx(a >> 16), prims, i + 1 + slot[k]};
             ok = std::abs(v[k].dx) <= max_jump && std::abs(v[k].dy) <= max_jump;
         }
         if (ok && nv >= 3) votes.insert(votes.end(), v, v + nv), ++prims;
@@ -149,7 +149,9 @@ void LerpCommands(const std::vector<uint32_t>& prev, const std::vector<uint32_t>
     // (seams opening and closing). Where the votes of a shared vertex disagree, the odd ones out of an
     // agreeing group, else the pair(s) disagreeing at the most shared vertices, are wrong partners: they
     // cast no vote and are carried by their neighbours (pass 2). The (lower) median of the remaining
-    // votes moves each vertex once for all.
+    // votes moves each vertex once for all; votes there that disagree by more than a pixel with every other
+    // group are another object meeting it by chance (a shadow fan's rim on a floor vertex) and keep their
+    // own motion, so neither drags the other.
     std::sort(votes.begin(), votes.end(), [](const Vote& x, const Vote& y) { return x.xy < y.xy; });
     auto group = [&votes](size_t a) { size_t b = a; while (b < votes.size() && votes[b].xy == votes[a].xy) ++b; return b; };
     std::vector<uint8_t> same(votes.size());               // the vote agrees (1 px) with another one at its vertex
@@ -175,18 +177,43 @@ void LerpCommands(const std::vector<uint32_t>& prev, const std::vector<uint32_t>
     }
     struct Field { int32_t dx, dy, root; };
     std::vector<Field> field;
-    std::unordered_map<uint32_t, int32_t> at;  // vertex position in cur -> field entry
-    std::vector<int32_t> xs, ys;
+    std::unordered_map<uint32_t, int32_t> at;   // vertex position in cur -> field entry (its largest group)
+    std::unordered_map<size_t, int32_t> own;    // vertex word of a voting pair -> the entry of its group
+    std::vector<int32_t> xs, ys, grp;
+    std::vector<size_t> idx;
     for (size_t a = 0, b; a < votes.size(); a = b) {
-        xs.clear(), ys.clear();
+        idx.clear();
         for (b = a; b < votes.size() && votes[b].xy == votes[a].xy; ++b)
-            if (!wrong[size_t(votes[b].prim)]) xs.push_back(votes[b].dx), ys.push_back(votes[b].dy);
-        if (xs.empty()) continue;
-        std::nth_element(xs.begin(), xs.begin() + (xs.size() - 1) / 2, xs.end());
-        std::nth_element(ys.begin(), ys.begin() + (ys.size() - 1) / 2, ys.end());
-        at[votes[a].xy] = int32_t(field.size());
-        field.push_back({xs[(xs.size() - 1) / 2], ys[(ys.size() - 1) / 2], int32_t(field.size())});
+            if (!wrong[size_t(votes[b].prim)]) idx.push_back(b);
+        grp.assign(idx.size(), -1);
+        int32_t groups = 0, best = -1;
+        size_t best_n = 0;
+        for (size_t u = 0; u < idx.size(); ++u) {
+            if (grp[u] >= 0) continue;
+            grp[u] = groups++;  // single linkage within a pixel
+            for (bool grew = true; grew;) {
+                grew = false;
+                for (size_t v = 0; v < idx.size(); ++v)
+                    for (size_t x = 0; x < idx.size() && grp[v] < 0; ++x)
+                        if (grp[x] == grp[u] && std::abs(votes[idx[v]].dx - votes[idx[x]].dx) <= 1 &&
+                            std::abs(votes[idx[v]].dy - votes[idx[x]].dy) <= 1)
+                            grp[v] = grp[u], grew = true;
+            }
+            xs.clear(), ys.clear();
+            for (size_t v = 0; v < idx.size(); ++v)
+                if (grp[v] == grp[u]) xs.push_back(votes[idx[v]].dx), ys.push_back(votes[idx[v]].dy), own[votes[idx[v]].w] = int32_t(field.size());
+            std::nth_element(xs.begin(), xs.begin() + (xs.size() - 1) / 2, xs.end());
+            std::nth_element(ys.begin(), ys.begin() + (ys.size() - 1) / 2, ys.end());
+            if (xs.size() > best_n) best_n = xs.size(), best = int32_t(field.size());
+            field.push_back({xs[(xs.size() - 1) / 2], ys[(ys.size() - 1) / 2], int32_t(field.size())});
+        }
+        if (best >= 0) at[votes[a].xy] = best;
     }
+    auto entry = [&](size_t w) {  // the field entry moving vertex word w of cur, or -1
+        if (auto it = own.find(w); it != own.end()) return it->second;
+        const auto it = at.find(cur[w] & 0x07FF07FF);
+        return it == at.end() ? -1 : it->second;
+    };
     // A polygon without a usable pair (entering the view, a silhouette strip turning visible, a wrong
     // partner) follows the vertices it shares with moved ones, its others by their mean motion, instead
     // of tearing away from them (repeated: it may share them with another such polygon); one sharing none
@@ -216,8 +243,8 @@ void LerpCommands(const std::vector<uint32_t>& prev, const std::vector<uint32_t>
     };
     for (size_t i : polys) {
         const int nv = Slots(&cur[i], slot);
-        auto it = at.find(cur[i + 1 + slot[0]] & 0x07FF07FF);
-        for (int k = 1; k < nv && it != at.end(); ++k) field[size_t(root(at[cur[i + 1 + slot[k]] & 0x07FF07FF]))].root = root(it->second);
+        const int32_t e0 = entry(i + 1 + slot[0]);
+        for (int k = 1; k < nv && e0 >= 0; ++k) field[size_t(root(entry(i + 1 + slot[k])))].root = root(e0);
     }
     // Each mesh's median motion (its slide).
     std::vector<int32_t> by_mesh(field.size()), base_x(field.size()), base_y(field.size());
@@ -238,9 +265,12 @@ void LerpCommands(const std::vector<uint32_t>& prev, const std::vector<uint32_t>
     // until the slide reaches it; a faster one (up to kStep px more: perspective, GTE rounding) switches
     // its extra once, at t = 0.5, as a real game frame would. Every vertex then moves one way only and
     // every edge between them changes one way only. Other motions (a limb swinging, the other way) are
-    // real and lerped per vertex.
+    // real and lerped per vertex. A mesh that moves at most a pixel (GTE rounding on still scenery: its
+    // vertices disagree by a pixel between frames, and a shared one takes a neighbour's motion) is drawn as
+    // in cur: a pixel cannot be split at 1x, and lerped it is drawn where it never was (edges jitter).
     constexpr int32_t kStep = 2;
     auto offset = [&](int32_t d, int32_t b) {
+        if (std::abs(b) <= 1 && std::abs(d) <= 1) return 0;
         const int32_t sign = b < 0 || (b == 0 && d < 0) ? -1 : 1;  // mirrored so the slide is >= 0
         d *= sign, b *= sign;
         const int32_t slide = Round(b * (1 - t));
@@ -250,10 +280,10 @@ void LerpCommands(const std::vector<uint32_t>& prev, const std::vector<uint32_t>
     for (size_t i : polys) {
         const int nv = Slots(&cur[i], slot);
         for (int k = 0; k < nv; ++k) {
-            auto it = at.find(cur[i + 1 + slot[k]] & 0x07FF07FF);
-            if (it == at.end()) break;  // no vertex moved (all or none are in the field)
-            const Field& f = field[size_t(it->second)];
-            const size_t r = size_t(root(it->second));
+            const int32_t e = entry(i + 1 + slot[k]);
+            if (e < 0) break;  // no vertex moved (all or none are in the field)
+            const Field& f = field[size_t(e)];
+            const size_t r = size_t(root(e));
             put(i + 1 + slot[k], offset(f.dx, base_x[r]), offset(f.dy, base_y[r]));
         }
     }
@@ -303,7 +333,9 @@ bool FrameInterpolator::Consume(std::vector<uint32_t>& log, const Ps1Gpu& gpu, u
     }
     log.clear();
     if (!flipped) return false;
-    m_cur.vram = gpu.GetVram();
+    // At the flip, not after the emulated frame: the next segment may already have drawn over it, and the
+    // replay of a segment must start from the VRAM it was drawn over (the previous flip's).
+    m_cur.vram = gpu.GetFlipVram();
     if (m_prev.vram.empty()) m_prev.vram = m_cur.vram;
     m_match = MatchPrimitives(m_prev.cmds, m_cur.cmds, kMaxJump);
     const GpuDisplayArea &a = m_prev.disp, &b = m_cur.disp;
@@ -318,10 +350,13 @@ double FrameInterpolator::Fraction(double time) const {
 }
 
 void FrameInterpolator::Render(double t, const std::vector<uint16_t>*& out, GpuDisplayArea& disp) {
-    if (t >= 1) { out = &m_cur.vram; disp = m_cur.disp; return; }
-    if (t <= 0 || !m_pair_ok) { out = &m_prev.vram; disp = m_prev.disp; return; }
+    // Not interpolable: the latest frame at once (holding the previous one only adds latency).
+    if (t >= 1 || !m_pair_ok) { out = &m_cur.vram; disp = m_cur.disp; return; }
+    if (t <= 0) { out = &m_prev.vram; disp = m_prev.disp; return; }
     LerpCommands(m_prev.cmds, m_cur.cmds, m_match, t, kMaxJump, m_lerped);
-    m_scratch.SetVram(m_cur.vram);
+    // Replayed over the VRAM cur's segment was drawn over: unmoved, it redraws cur exactly (replayed over cur
+    // itself, blended and partly covered primitives drew twice: brighter, seams, stale pixels).
+    m_scratch.SetVram(m_prev.vram);
     m_scratch.WriteGP1(0x01000000);  // reset the command buffer: replay starts on a packet boundary
     Replay(m_scratch, m_lerped);
     out = &m_scratch.GetVram();
