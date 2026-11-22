@@ -155,6 +155,17 @@ int main() {
         CHECK(InputRecorder().Script(5).empty());
     }
 
+    // Status badges and toast fade.
+    CHECK(StatusBadges("normal", 1, false, "normal", false).empty());
+    CHECK(StatusBadges("", 0, false, "", false).empty());
+    {
+        const auto b = StatusBadges("none", 3, true, "instant", true);
+        CHECK(b.size() == 5 && b[0] == "ENC OFF" && b[1] == "BTL x3" && b[2] == "FMV >>" && b[3] == "TXT >>>" && b[4] == "FF >>");
+        const auto c = StatusBadges("reduced", 2, false, "fast", false);
+        CHECK(c.size() == 3 && c[0] == "ENC 1/2" && c[1] == "BTL x2" && c[2] == "TXT >>");
+    }
+    CHECK(ToastAlpha(2000) == 1.f && ToastAlpha(500) == 1.f && ToastAlpha(250) == 0.5f && ToastAlpha(0) == 0.f && ToastAlpha(-5) == 0.f);
+
     std::puts("test_host_logic: OK");
     return 0;
 }

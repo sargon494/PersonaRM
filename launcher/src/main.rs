@@ -3,6 +3,7 @@
 
 mod disc;
 mod model;
+mod playtime;
 mod update;
 
 use eframe::egui::{self, Color32, FontFamily, RichText, ViewportCommand};
@@ -144,6 +145,11 @@ struct App {
     scanning: bool,
     found: Vec<disc::Found>,
     scan_secs: Option<f32>,
+    /// Playtime stats (playtime.json), local UTC offset, and the game page's reset confirmation / full session list toggles.
+    play: playtime::Playtime,
+    tz: i64,
+    confirm_reset: bool,
+    all_sessions: bool,
 }
 
 impl App {
@@ -222,7 +228,7 @@ impl App {
                 }
             });
         }
-        let mut app = Self { page, sel: 0, covers: HashMap::new(), cfg, settings, doc, capture: None, dirty: false, error, logo, upd: Upd::None, tx, rx, t0: -10.0, dir: 1.0, shot: arg("--shot"), frames: 0, focus_first: std::env::args().any(|a| a == "--focus"), native: None, scanning: false, found: Vec::new(), scan_secs: None };
+        let mut app = Self { page, sel: 0, covers: HashMap::new(), cfg, settings, doc, capture: None, dirty: false, error, logo, upd: Upd::None, tx, rx, t0: -10.0, dir: 1.0, shot: arg("--shot"), frames: 0, focus_first: std::env::args().any(|a| a == "--focus"), native: None, scanning: false, found: Vec::new(), scan_secs: None, play: playtime::load(), tz: playtime::tz_offset(), confirm_reset: false, all_sessions: false };
         // First launch, no disc set anywhere: look for the discs once (hidden `--find` forces it).
         let no_disc = !app.cfg.games.iter().any(|g| g.discs.values().any(|d| path_state(d, false) == PathState::Found));
         if (!app.cfg.scanned && no_disc) || std::env::args().any(|a| a == "--find") {
@@ -499,7 +505,7 @@ fn load_cover(ctx: &egui::Context, path: &str) -> Option<egui::TextureHandle> {
     Some(ctx.load_texture(path, egui::ColorImage::from_rgba_unmultiplied([tw, th], &px), egui::TextureOptions::LINEAR))
 }
 
-const CARD: egui::Vec2 = egui::vec2(250.0, 330.0);
+const CARD: egui::Vec2 = egui::vec2(250.0, 348.0);
 
 #[derive(PartialEq)]
 enum Act {
@@ -509,7 +515,7 @@ enum Act {
 }
 
 /// One library card: click opens the game page; PLAY / SET UP acts directly; Enter on a focused card plays.
-fn card(ui: &mut egui::Ui, i: usize, g: &Game, st: Status, cover: Option<&egui::TextureHandle>, grab_focus: bool) -> Act {
+fn card(ui: &mut egui::Ui, i: usize, g: &Game, st: Status, cover: Option<&egui::TextureHandle>, grab_focus: bool, played: &str) -> Act {
     let ctx = ui.ctx().clone();
     let (rect, resp) = ui.allocate_exact_size(CARD, egui::Sense::click());
     if grab_focus {
@@ -519,7 +525,7 @@ fn card(ui: &mut egui::Ui, i: usize, g: &Game, st: Status, cover: Option<&egui::
     let rect = rect.translate(egui::vec2(0.0, -3.0 * t)); // slight lift
     let p = ui.painter_at(rect.expand(6.0));
     p.rect_filled(rect, 0.0, mix(INK_2, Color32::from_rgb(0x13, 0x13, 0x1c), t));
-    let band = 82.0;
+    let band = 100.0;
     let art = egui::Rect::from_min_max(rect.min, egui::pos2(rect.max.x, rect.max.y - band));
     let title = |size: f32, wrap: f32| p.layout(g.name.clone(), egui::FontId::new(size, cond()), PAPER, wrap);
     if let Some(tx) = cover {
@@ -558,6 +564,9 @@ fn card(ui: &mut egui::Ui, i: usize, g: &Game, st: Status, cover: Option<&egui::
     let sw = sg.size().x;
     p.galley(egui::pos2(rect.max.x - 12.0 - sw, y1 - sg.size().y / 2.0), sg, col);
     icon(&p, egui::pos2(rect.max.x - 12.0 - sw - 11.0, y1), ic, col);
+    // Footer row 1b: playtime, muted.
+    let pg = p.layout_no_wrap(played.into(), egui::FontId::proportional(13.0), MUTED);
+    p.galley(egui::pos2(rect.min.x + 12.0, y1 + 14.0), pg, MUTED);
     p.rect_stroke(rect, 0.0, egui::Stroke::new(1.0, mix(LINE, RED_HI, t)), egui::StrokeKind::Inside);
     if resp.has_focus() {
         ring(&p, rect);
@@ -689,6 +698,7 @@ fn audio_general(ui: &mut egui::Ui, s: &mut GameSettings, c: &mut LauncherConfig
             dirty |= path_row(ui, &mut c.game_exe, false, auto, "auto: next to the launcher", || rfd::FileDialog::new().pick_file());
         });
         grid_row(ui, "", |ui| dirty |= ui.checkbox(&mut s.pause_on_focus_loss, "Pause when unfocused").changed());
+        grid_row(ui, "", |ui| dirty |= ui.checkbox(&mut s.show_status_icons, "Show status icons (F1-F4, fast-forward)").changed());
         grid_row(ui, "", |ui| {
             dirty |= ui.checkbox(&mut s.native, "Native code (recompiled)").on_hover_text(
                 "Built from your own disc on this PC the first time you play (about a minute at most), then cached. Off = interpreter.").changed()
@@ -697,6 +707,75 @@ fn audio_general(ui: &mut egui::Ui, s: &mut GameSettings, c: &mut LauncherConfig
         grid_row(ui, "", |ui| dirty |= ui.checkbox(&mut c.reduce_motion, "Reduce motion").changed());
     });
     dirty
+}
+
+/// Game page: totals, per-version split and the latest sessions; reset asks first.
+fn playtime_section(ui: &mut egui::Ui, pt: Option<&playtime::GameStats>, now: u64, tz: i64, confirm: &mut bool, all: &mut bool, reset: &mut bool) {
+    use playtime::{clock, fmt_dur, rel_date};
+    heading(ui, "PLAYTIME");
+    let Some(p) = pt.filter(|p| !p.recent.is_empty()) else {
+        hint(ui, "No sessions yet. Time is counted while the game is open.");
+        return;
+    };
+    let t = &p.total;
+    let when = |ts: u64| if ts == 0 { "-".to_string() } else { rel_date(ts, now, tz) };
+    grid("pt").show(ui, |ui| {
+        let avg = if t.sessions > 0 { t.secs / t.sessions as u64 } else { 0 };
+        for (k, v) in [
+            ("Total time", fmt_dur(t.secs)),
+            ("Sessions", t.sessions.to_string()),
+            ("Average session", fmt_dur(avg)),
+            ("Longest session", fmt_dur(t.longest)),
+            ("First played", when(t.first)),
+            ("Last played", when(t.last)),
+        ] {
+            grid_row(ui, k, |ui| {
+                ui.label(v);
+            });
+        }
+        for (serial, s) in p.discs.iter().filter(|(_, s)| s.sessions > 0) {
+            let region = crate::disc::Region::of(serial).label();
+            let label = if serial.is_empty() { "Unknown disc".to_string() } else { format!("{region} ({serial})") };
+            grid_row(ui, &label, |ui| {
+                ui.label(format!("{} \u{b7} {} session{}", fmt_dur(s.secs), s.sessions, if s.sessions == 1 { "" } else { "s" }));
+            });
+        }
+    });
+    if t.short > 0 {
+        hint(ui, &format!("{} quick quit{} under {} s not counted.", t.short, if t.short == 1 { "" } else { "s" }, playtime::MIN_SECS));
+    }
+    ui.add_space(2.0);
+    ui.label(RichText::new("Recent sessions").color(MUTED));
+    let shown = if *all { p.recent.len() } else { 8 };
+    egui::Grid::new("recent").num_columns(3).spacing([16.0, 3.0]).show(ui, |ui| {
+        for s in p.recent.iter().rev().take(shown) {
+            ui.label(format!("{} \u{b7} {}", rel_date(s.start, now, tz), clock(s.start, tz)));
+            ui.label(fmt_dur(s.secs));
+            let tag = playtime::tag(&s.serial);
+            let note = match (s.secs < playtime::MIN_SECS, s.ok) {
+                (true, _) => "quick quit",
+                (_, false) => "ended with an error",
+                _ => "",
+            };
+            ui.label(RichText::new(format!("{tag} {note}").trim()).size(13.0).color(if s.ok { MUTED } else { RED_HI }));
+            ui.end_row();
+        }
+    });
+    if p.recent.len() > 8 && ui.button(if *all { "Show fewer" } else { "Show all" }).clicked() {
+        *all = !*all;
+    }
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        if !*confirm {
+            *confirm = ui.button("Reset playtime...").clicked();
+        } else {
+            ui.label(RichText::new("Erase all playtime for this game?").color(RED_HI));
+            *reset = ui.button("Yes, reset").clicked();
+            if ui.button("Cancel").clicked() {
+                *confirm = false;
+            }
+        }
+    });
 }
 
 impl App {
@@ -712,6 +791,7 @@ impl App {
         let cols = (((ui.available_width() + gap) / (CARD.x + gap)) as usize).max(1);
         let ctx = ui.ctx().clone();
         let mut out = None;
+        let (now, tz) = (playtime::now(), self.tz);
         ui.add_space(3.0);
         egui::Grid::new("lib").spacing([gap, gap]).show(ui, |ui| {
             for (i, g) in self.cfg.games.iter().enumerate() {
@@ -719,7 +799,8 @@ impl App {
                     self.covers.entry(g.cover.clone()).or_insert_with(|| load_cover(&ctx, &g.cover));
                 }
                 let tex = self.covers.get(&g.cover).and_then(Option::as_ref);
-                let a = card(ui, i, g, status(&self.cfg, g), tex, i == 0 && std::mem::take(&mut self.focus_first));
+                let line = playtime::card_line(self.play.games.get(&g.name), now, tz);
+                let a = card(ui, i, g, status(&self.cfg, g), tex, i == 0 && std::mem::take(&mut self.focus_first), &line);
                 if a != Act::None {
                     out = Some((i, a));
                 }
@@ -738,6 +819,7 @@ impl App {
         let s = &mut self.settings;
         (s.text_speed, s.encounter_rate, s.battle_speed, s.skip_fmv) = (g.text_speed, g.encounter_rate, g.battle_speed, g.skip_fmv);
         self.capture = None;
+        self.confirm_reset = false;
     }
 
     fn go(&mut self, ctx: &egui::Context, page: Page) {
@@ -755,6 +837,9 @@ impl App {
         let (ctx, scanning, found, secs) = (ui.ctx().clone(), self.scanning, &self.found, self.scan_secs);
         let (mut find, mut folder) = (false, None);
         let name = g.name.clone();
+        let (pt, now, tz) = (self.play.games.get(&name), playtime::now(), self.tz);
+        let (confirm, all) = (&mut self.confirm_reset, &mut self.all_sessions);
+        let mut reset = false;
         ui.horizontal(|ui| {
             ui.label(RichText::new(name.clone()).family(cond()).size(26.0).extra_letter_spacing(2.0));
             ui.add_space(6.0);
@@ -869,6 +954,7 @@ impl App {
                     }
                 }
             }
+            playtime_section(ui, pt, now, tz, confirm, all, &mut reset);
         });
         ui.add_space(4.0);
         let r = ui.allocate_space(egui::vec2(ui.available_width(), 46.0)).1;
@@ -883,6 +969,13 @@ impl App {
         }
         if find {
             self.start_scan(&ctx);
+        }
+        if reset {
+            self.play.games.remove(&name);
+            self.confirm_reset = false;
+            if let Err(e) = playtime::save(&self.play) {
+                self.error = Some(format!("Could not save playtime: {e}"));
+            }
         }
         (dirty, play)
     }
@@ -1076,6 +1169,21 @@ impl eframe::App for App {
     }
 }
 
+/// Add this session to playtime.json: the disc (args[0]) gives the serial, the serial gives the library game.
+/// Never fails the watcher; an unknown disc is simply not tracked.
+fn record_session(args: &[String], start: u64, secs: u64, ok: bool) {
+    let cue = args.first().map(String::as_str).unwrap_or("");
+    let serial = disc::identify(std::path::Path::new(cue)).map(|d| d.serial).unwrap_or_default();
+    let cfg = load_launcher();
+    let game = cfg.games.iter().find(|g| !serial.is_empty() && g.serials.contains(&serial))
+        .or_else(|| cfg.games.iter().find(|g| g.discs.values().any(|d| d.trim().trim_matches('"') == cue)));
+    if let Some(g) = game {
+        let mut p = playtime::load();
+        p.record(&g.name, playtime::Session { start, secs, serial, ok });
+        let _ = playtime::save(&p);
+    }
+}
+
 /// `--run <exe> <args...>`: start the game, wait for it, record a failure for the UI, reopen the UI.
 fn run_watcher(exe: &str, args: &[String]) {
     let log_path = log_dir().join("personarm_sdl.log");
@@ -1090,7 +1198,10 @@ fn run_watcher(exe: &str, args: &[String]) {
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW: personarm_sdl is a console app; no cmd window
     }
+    let start = playtime::now();
+    let t0 = std::time::Instant::now();
     let status = cmd.status();
+    record_session(args, start, t0.elapsed().as_secs(), status.as_ref().is_ok_and(|s| s.success()));
     if !status.as_ref().is_ok_and(|s| s.success()) {
         let code = status.map_or("?".into(), |s| s.code().map_or("signal".into(), |c| c.to_string()));
         let tail = std::fs::read_to_string(&log_path).unwrap_or_default();

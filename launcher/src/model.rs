@@ -177,6 +177,7 @@ pub struct GameSettings {
     pub hotkeys: BTreeMap<String, String>,
     pub save_dir: String,
     pub pause_on_focus_loss: bool,
+    pub show_status_icons: bool,
     /// Native (recompiled) code: per-game `recomp` key, on unless set to false.
     pub native: bool,
 }
@@ -197,6 +198,7 @@ impl Default for GameSettings {
             hotkeys: HOTKEYS.iter().map(|h| (h.0.to_string(), h.1.to_string())).collect(),
             save_dir: String::new(),
             pause_on_focus_loss: true,
+            show_status_icons: true,
             native: true,
         }
     }
@@ -256,6 +258,7 @@ impl GameSettings {
             text_speed,
             save_dir: s(&["general", "save_dir"], ""),
             pause_on_focus_loss: b(&["general", "pause_on_focus_loss"], d.pause_on_focus_loss),
+            show_status_icons: b(&["video", "show_status_icons"], d.show_status_icons),
         }
     }
 
@@ -271,6 +274,7 @@ impl GameSettings {
         set(doc, &["general", "language"], json!(self.language));
         set(doc, &["general", "save_dir"], json!(self.save_dir));
         set(doc, &["general", "pause_on_focus_loss"], json!(self.pause_on_focus_loss));
+        set(doc, &["video", "show_status_icons"], json!(self.show_status_icons));
         set(doc, &["video", "fps_target"], json!(self.fps));
         set(doc, &["video", "window_mode"], json!(self.window_mode));
         set(doc, &["video", "widescreen"], json!(self.widescreen));
@@ -375,13 +379,13 @@ pub fn parse_native_line(line: &str) -> Option<NativeLine> {
 // ── io ──
 
 /// Hand-edited files (Windows PowerShell, Notepad) often start with a UTF-8 BOM.
-fn strip_bom(t: &str) -> &str { t.strip_prefix('\u{feff}').unwrap_or(t) }
+pub(crate) fn strip_bom(t: &str) -> &str { t.strip_prefix('\u{feff}').unwrap_or(t) }
 
 pub fn load_launcher()-> LauncherConfig {
     std::fs::read_to_string(launcher_json()).ok().and_then(|t| serde_json::from_str(strip_bom(&t)).ok()).unwrap_or_default()
 }
 
-fn write_atomic(path: &std::path::Path, text: &str) -> std::io::Result<()> {
+pub(crate) fn write_atomic(path: &std::path::Path, text: &str) -> std::io::Result<()> {
     if let Some(d) = path.parent() {
         std::fs::create_dir_all(d)?;
     }

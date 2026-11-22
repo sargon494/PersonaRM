@@ -26,6 +26,7 @@ can read and write the same file. Implementation: `src/host/settings.{h,cpp}`.
     "window_mode": "windowed",
     "window_scale": 3,
     "integer_scaling": false,
+    "show_status_icons": true,
     "aspect": "4:3",
     "vsync": false,
     "fps_target": 60,
@@ -60,6 +61,7 @@ as-is, unknown ones preserved) with a warning.
 | `window_mode` | `windowed`, `fullscreen` (exclusive, desktop resolution), `borderless` (desktop-sized) | `windowed` | honoured; Alt+Enter toggles windowed and the configured mode (borderless if the configured one is windowed) |
 | `window_scale` | integer 1..8; window = 320x240 x scale | 3 (960x720) | honoured |
 | `integer_scaling` | bool; largest whole multiple of the picture that fits, else plain fit | false | honoured |
+| `show_status_icons` | bool | true | small semi-transparent badges in the top-right corner of the window while a gameplay trick is active (`ENC OFF`/`ENC 1/2`, `BTL x2`/`x3`, `FMV >>`, `TXT >>`/`>>>`) and `FF >>` while fast-forward is held. Host overlay only: never in `--screenshot`, `--dump-dir` or the interpolator. The short message shown for 2 s when F1-F4 change an option is always on |
 | `aspect` | `4:3`, `stretch` (fill the window) | `4:3` | honoured |
 | `vsync` | bool | false | honoured; ignored while interpolation or `--unthrottled` is on (it would slow the game down) |
 | `fps_target` | `30`, `60`, `90`, `120` | 60 | the pictures presented per second; the game always runs at 60 Hz (game speed and audio never change). `60` = native; `30` = every other frame is presented (low-end PCs, battery; the skipped frame's host conversion is skipped too); `90` = frame interpolation, 3 pictures per 2 game frames (interpolation phases 0, 2/3, 1/3); `120` = interpolation, 2 per frame. Same as `--interp N` (`--interp 0` = 60). Interpolation is display only and one game frame late |

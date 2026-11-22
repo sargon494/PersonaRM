@@ -33,6 +33,13 @@ bool ParseWidescreen(const std::string& s, int& aw, int& ah);
 void DisplayToRgba(const std::vector<uint16_t>& vram, uint32_t x, uint32_t y, uint32_t w, uint32_t h,
                    bool is_24bit, std::vector<uint32_t>& out, uint32_t scale = 1);
 
+/// Top-right status badges, fixed order: encounters (ENC OFF / ENC 1/2), battle speed (BTL x2/x3), skip movies
+/// (FMV >>), text speed (TXT >> fast, TXT >>> instant), fast-forward held (FF >>). Defaults show nothing.
+std::vector<std::string> StatusBadges(const std::string& encounter_rate, int battle_speed, bool skip_fmv,
+                                      const std::string& text_speed, bool fast_forward);
+/// Toast opacity 0..1 for `remaining_ms` left of its life: full until the last 500 ms, then a linear fade; 0 when over.
+float ToastAlpha(int64_t remaining_ms);
+
 struct NamedBit { const char* name; uint16_t bit; };
 /// Digital pad bit (psx-spx "Controllers", bit set = pressed) per SDL key name (SDL_GetScancodeName
 /// spelling, e.g. "Return") and per SDL gamepad button/axis name (SDL_GetGamepadStringForButton/Axis
