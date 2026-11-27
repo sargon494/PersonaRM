@@ -7,6 +7,7 @@
 #include <exception>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <map>
 #include <set>
 #include <unordered_map>
@@ -184,6 +185,39 @@ BaseGuess InferOverlayBase(const uint8_t* data, size_t size, uint32_t lo, uint32
     return best;
 }
 
+bool AddGnuStackHeader(std::vector<uint8_t>& elf) {
+    auto get = [&](size_t off, int n) { uint64_t v = 0; for (int i = n - 1; i >= 0; --i) v = v << 8 | elf[off + i]; return v; };
+    auto put = [&](size_t off, int n, uint64_t v) { for (int i = 0; i < n; ++i) elf[off + i] = static_cast<uint8_t>(v >> (8 * i)); };
+    constexpr uint32_t kPtGnuStack = 0x6474E551u, kPfR = 4, kPfW = 2;
+    if (elf.size() < 64 || elf[0] != 0x7F || elf[1] != 'E' || elf[2] != 'L' || elf[3] != 'F' || elf[4] != 2 || elf[5] != 1) return false;
+    const uint64_t phoff = get(32, 8), shoff = get(40, 8), phent = get(54, 2), phnum = get(56, 2);
+    const uint64_t shent = get(58, 2), shnum = get(60, 2);
+    if (phent != 56 || phoff + phnum * phent > elf.size() || (shnum && (shent != 64 || shoff + shnum * shent > elf.size()))) return false;
+    for (uint64_t i = 0; i < phnum; ++i)
+        if (get(phoff + i * phent, 4) == kPtGnuStack) return true;
+    const uint64_t new_end = phoff + (phnum + 1) * phent;
+    // Nothing but the section header table may sit in the bytes the new entry takes.
+    uint64_t first_data = elf.size();
+    for (uint64_t i = 1; i < shnum; ++i) {
+        const size_t s = shoff + i * shent;
+        if (get(s + 4, 4) != 8 /*NOBITS*/ && get(s + 32, 8)) first_data = std::min<uint64_t>(first_data, get(s + 24, 8));
+    }
+    if (new_end > first_data) return false;
+    if (shnum && shoff < new_end && shoff + shnum * shent > phoff + phnum * phent) {   // move the section headers to the end of the file (8-aligned)
+        const std::vector<uint8_t> sh(elf.begin() + shoff, elf.begin() + shoff + shnum * shent);
+        elf.resize((elf.size() + 7) & ~size_t{7});
+        put(40, 8, elf.size());
+        elf.insert(elf.end(), sh.begin(), sh.end());
+    }
+    const size_t p = phoff + phnum * phent;
+    std::fill(elf.begin() + p, elf.begin() + p + phent, 0);
+    put(p, 4, kPtGnuStack);
+    put(p + 4, 4, kPfR | kPfW);
+    put(p + 48, 8, 16);
+    put(56, 2, phnum + 1);
+    return true;
+}
+
 std::string CompilerName() {
 #ifdef PRM_HAVE_TCC
     return std::string("tcc ") + PRM_TCC_VERSION;
@@ -278,6 +312,19 @@ PrepResult Prepare(const PrepOptions& opt) {
             res.error = "cannot link " + lib + ": " + errors.text;
             return res;
         }
+#ifndef _WIN32
+        {
+            std::ifstream in(lib, std::ios::binary);
+            std::vector<uint8_t> image((std::istreambuf_iterator<char>(in)), {});
+            in.close();
+            bool ok = AddGnuStackHeader(image);
+            if (ok) {
+                std::ofstream out(lib, std::ios::binary | std::ios::trunc);
+                ok = static_cast<bool>(out.write(reinterpret_cast<const char*>(image.data()), static_cast<std::streamsize>(image.size())));
+            }
+            if (!ok) { res.error = "cannot mark " + lib + " as needing no executable stack"; return res; }
+        }
+#endif
         compile += secs(c0, std::chrono::steady_clock::now());
         res.compile_seconds = compile;
         res.library_bytes = static_cast<size_t>(fs::file_size(lib, ec));

@@ -127,7 +127,7 @@ background thread makes one request to `https://api.github.com/repos/sargon494/P
 launcher's version, a banner "Update available vA to vB" with an **Update** button appears. The UI never
 polls: nothing runs until the request returns or you click.
 
-**Update** downloads `PersonaRM-<tag>-windows-x64.zip` and its `.sha256`, only from `https://github.com` or
+**Update** downloads `PersonaRM-<tag>-windows-x64.zip` (Linux: `PersonaRM-<tag>-linux-x64.tar.gz`) and its `.sha256`, only from `https://github.com` or
 GitHub's release CDN (`objects.githubusercontent.com`, `release-assets.githubusercontent.com`), using the URLs
 from the API answer; every redirect hop is checked against the same list. The zip is refused unless its SHA-256
 matches the `.sha256` file. It is extracted to `.prm-update/` next to the launcher (entries that would leave
@@ -136,7 +136,8 @@ file is renamed to `<name>.old` (Windows lets a running exe be renamed, not over
 in, and if any step fails everything is rolled back. The launcher then restarts itself; on the next start the
 `.old` files are deleted (the list is in `.prm-update-old.txt`, so no other file is ever deleted). Only files
 that are inside the zip are replaced: `launcher.json`, settings, saves and memory cards are never touched.
-Self-update is Windows only; the check is skipped when the zip asset of the platform does not exist.
+On Linux the `.tar.gz` is unpacked the same way (plain files and folders only, links refused) and keeps the
+executable bits. The check is skipped when the release has no archive for the platform.
 
 Test it without GitHub (debug builds only; release builds ignore these variables):
 `PRM_UPDATE_API=http://127.0.0.1:<port>/release.json` points the check at a local server whose JSON uses
@@ -146,16 +147,22 @@ Test it without GitHub (debug builds only; release builds ignore these variables
 
 1. Make sure `main` is green and the version you want is not already released.
 2. Tag and push: `git tag v0.2.0 && git push origin v0.2.0` (tags must look like `vX.Y.Z`).
-3. `.github/workflows/release.yml` builds on Windows (`personarm`, `personarm_sdl` with SDL3, the launcher with
-   the tag baked in as its version), runs the launcher tests, packages with `scripts/package-release.ps1` and
-   creates the GitHub Release with the zip and its `.sha256`. A manual run (Actions, Release, Run workflow, with a
+3. `.github/workflows/release.yml` builds on Windows and on Ubuntu 22.04 (`personarm_sdl` with SDL3,
+   `personarm_native` with TinyCC, the launcher with the tag baked in as its version), runs the launcher tests,
+   packages with `scripts/package-release.ps1` / `scripts/package-release.sh` and creates the GitHub Release with
+   both archives and their `.sha256`. A manual run (Actions, Release, Run workflow, with a
    tag name) creates a **draft** release instead: review it and publish it by hand.
 
 The zip `PersonaRM-vX.Y.Z-windows-x64.zip` contains `PersonaRM.exe` (and `launcher.exe`, see below), `personarm_sdl.exe`, `SDL3.dll`,
 `personarm_native.exe`, `libtcc.dll` (TinyCC, LGPL; licence and source offer in `licenses/`),
 `README.md`, `LICENSE`, `docs/LAUNCHER.md`, `docs/SETTINGS.md` and `docs/NATIVE_CODE.md`. It never contains game data,
 BIOS files or recompiled game code (the release build does not set `PRM_RECOMP_GENERATED_DIR`; `scripts/check-release-files.ps1`
-fails the release on any file outside that list). Only a
+fails the release on any file outside that list).
+
+The Linux archive `PersonaRM-vX.Y.Z-linux-x64.tar.gz` (flat, no top folder: unpack it into a folder of its
+own) contains `PersonaRM`, `personarm_sdl`, `personarm_native`, `libSDL3.so.0`, `libtcc.so`, the same docs and
+`licenses/`, and is checked by `scripts/check-release-files.sh`. The programs find the two libraries next to
+themselves (RUNPATH `$ORIGIN`). Built on Ubuntu 22.04, so it needs glibc 2.35 or newer. Only a
 published (non-draft, non-pre-release) release counts as "latest" for the updater.
 
 ### Rename: `launcher.exe` -> `PersonaRM.exe`

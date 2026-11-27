@@ -63,6 +63,13 @@ PrepResult Prepare(const PrepOptions& opt);
 /// Whether the cache for `disc` is ready (`dir` and `why` filled either way). False on an unreadable disc too.
 bool CacheReady(const std::string& disc, const std::string& cache_root, std::string& dir, std::string& why);
 
+/// Linux: TinyCC writes no PT_GNU_STACK header, so glibc assumes the library needs an executable
+/// stack and (2.41+) refuses to dlopen it. Adds a non-executable PT_GNU_STACK to an ELF64 image,
+/// moving the section headers to the end when they sit right after the program headers (TinyCC's
+/// layout). True if the image has one afterwards; false (image unchanged) if it is not ELF64 or
+/// there is no room.
+bool AddGnuStackHeader(std::vector<uint8_t>& elf);
+
 /// "tcc <version>" when this build carries TinyCC, else empty (no on-device compile possible).
 std::string CompilerName();
 

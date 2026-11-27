@@ -1,9 +1,10 @@
 name: Release
 
-# Push a tag `vX.Y.Z` (or run manually with a tag name) to publish a Windows zip + .sha256 on GitHub
-# Releases. The launcher's self-updater reads that release. No game data, BIOS or recompiled game
-# code is ever built or shipped (PRM_RECOMP_GENERATED_DIR is deliberately not set): players build the
-# native code from their own disc with personarm_native + libtcc.dll, which the zip carries instead.
+# Push a tag `vX.Y.Z` (or run manually with a tag name) to publish a Windows zip and a Linux .tar.gz
+# (each with its .sha256) on GitHub Releases. The launcher's self-updater reads that release. No game
+# data, BIOS or recompiled game code is ever built or shipped (PRM_RECOMP_GENERATED_DIR is deliberately
+# not set): players build the native code from their own disc with personarm_native + libtcc, which the
+# archives carry instead. Both builds upload their archive; the publish job creates the release once.
 
 on:
   push:
@@ -59,6 +60,75 @@ jobs:
       - name: Check the zip holds no generated game code
         shell: pwsh
         run: ./scripts/check-release-files.ps1 -Zip (Get-ChildItem dist -Filter "PersonaRM-*.zip" | Select-Object -First 1).FullName
+
+      - name: Upload archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: dist/PersonaRM-*
+          retention-days: 7
+
+  linux:
+    name: Release - Linux
+    # The oldest supported runner: the binaries then run on any distribution with glibc 2.35 or newer.
+    runs-on: ubuntu-22.04
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check tag
+        run: |
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Tag '$TAG' must look like v1.2.3"; exit 1; }
+
+      # SDL3 picks its video/audio backends at configure time: without these headers it would ship
+      # without X11, Wayland, PulseAudio or PipeWire support (it loads the libraries at run time).
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libgtk-3-dev libasound2-dev libpulse-dev libpipewire-0.3-dev             libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxtst-dev             libxkbcommon-dev libdrm-dev libgbm-dev libgl1-mesa-dev libegl1-mesa-dev libdbus-1-dev             libibus-1.0-dev libudev-dev libwayland-dev wayland-protocols libdecor-0-dev
+
+      - name: Build game (SDL3 host, personarm_native + TinyCC, no recompiled code)
+        run: |
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPRM_WITH_SDL3=ON
+          cmake --build build --target personarm_sdl personarm_native
+
+      - name: Test launcher
+        working-directory: launcher
+        run: cargo test --release
+
+      - name: Build launcher (version baked in from the tag)
+        working-directory: launcher
+        run: PRM_VERSION="${TAG#v}" cargo build --release
+
+      - name: Package
+        run: ./scripts/package-release.sh "$TAG" build/Release launcher/target/release/PersonaRM dist
+
+      - name: Check the archive holds no generated game code
+        run: ./scripts/check-release-files.sh --archive "dist/PersonaRM-$TAG-linux-x64.tar.gz"
+
+      - name: Upload archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-linux
+          path: dist/PersonaRM-*
+          retention-days: 7
+
+  publish:
+    name: Publish release
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Download archives
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: dist
 
       - name: Publish release
         shell: pwsh

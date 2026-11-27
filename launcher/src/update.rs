@@ -1,9 +1,10 @@
 //! Self-update from GitHub Releases. No UI code, so everything here is unit-testable.
 //!
-//! Security model: the only trusted input is the release JSON from the fixed API URL. The zip and
-//! its `.sha256` are fetched only from github.com / githubusercontent.com HTTPS URLs found in that
-//! JSON (every redirect hop is checked too), the zip is refused unless its SHA-256 matches, and
-//! extraction refuses paths that escape the staging folder.
+//! Security model: the only trusted input is the release JSON from the fixed API URL. The archive
+//! (a zip on Windows, a .tar.gz on Linux) and its `.sha256` are fetched only from github.com /
+//! githubusercontent.com HTTPS URLs found in that JSON (every redirect hop is checked too), the
+//! archive is refused unless its SHA-256 matches, and extraction refuses paths that escape the
+//! staging folder.
 
 use sha2::{Digest, Sha256};
 use std::io::{Cursor, Read, Write};
@@ -28,6 +29,7 @@ const MANIFEST: &str = ".prm-update-old.txt";
 #[derive(Clone, Debug, PartialEq)]
 pub struct Release {
     pub tag: String,
+    /// The release archive for this platform (`ARCHIVE_SUFFIX`).
     pub zip_url: String,
     pub sha_url: String,
 }
@@ -99,10 +101,13 @@ fn fetch(url: &str, ok: fn(&str) -> bool, limit: u64, timeout: Duration) -> Resu
     Err("too many redirects".into())
 }
 
+/// End of this platform's release asset name (`PersonaRM-vX.Y.Z-<suffix>`).
+pub const ARCHIVE_SUFFIX: &str = if cfg!(windows) { "windows-x64.zip" } else { "linux-x64.tar.gz" };
+
 pub fn parse_release(json: &[u8]) -> Option<Release> {
     let v: serde_json::Value = serde_json::from_slice(json).ok()?;
     let tag = v["tag_name"].as_str()?.to_string();
-    let suffix = if cfg!(windows) { "windows-x64.zip" } else { "linux-x64.zip" };
+    let suffix = ARCHIVE_SUFFIX;
     let url_of = |end: &str| {
         v["assets"].as_array()?.iter().find_map(|a| {
             let n = a["name"].as_str()?;
@@ -168,7 +173,8 @@ fn walk(dir: &Path, base: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> 
     Ok(())
 }
 
-/// Extract `zip` next to the install and swap the files in. `launcher_exe` must be in the zip.
+/// Extract the release archive `zip` (zip or .tar.gz) next to the install and swap the files in.
+/// `launcher_exe` must be in it.
 /// Only files present in the zip are touched (never launcher.json, settings, saves).
 pub fn apply_zip(zip: &[u8], install: &Path, launcher_exe: &str) -> Result<(), String> {
     let stage = install.join(STAGE);
@@ -180,17 +186,21 @@ pub fn apply_zip(zip: &[u8], install: &Path, launcher_exe: &str) -> Result<(), S
 
 fn extract_and_swap(zip: &[u8], install: &Path, stage: &Path, launcher_exe: &str) -> Result<(), String> {
     let e = |x: &dyn std::fmt::Display| x.to_string();
-    let mut ar = zip::ZipArchive::new(Cursor::new(zip)).map_err(|x| e(&x))?;
-    for i in 0..ar.len() {
-        let mut f = ar.by_index(i).map_err(|x| e(&x))?;
-        let rel = f.enclosed_name().ok_or("unsafe path in update zip")?;
-        let dest = stage.join(&rel);
-        if f.is_dir() {
-            std::fs::create_dir_all(&dest).map_err(|x| e(&x))?;
-        } else {
-            std::fs::create_dir_all(dest.parent().unwrap()).map_err(|x| e(&x))?;
-            let mut out = std::fs::File::create(&dest).map_err(|x| e(&x))?;
-            std::io::copy(&mut f.by_ref().take(MAX_ZIP), &mut out).map_err(|x| e(&x))?;
+    if zip.starts_with(&[0x1f, 0x8b]) {
+        unpack_tar_gz(zip, stage)?;
+    } else {
+        let mut ar = zip::ZipArchive::new(Cursor::new(zip)).map_err(|x| e(&x))?;
+        for i in 0..ar.len() {
+            let mut f = ar.by_index(i).map_err(|x| e(&x))?;
+            let rel = f.enclosed_name().ok_or("unsafe path in update zip")?;
+            let dest = stage.join(&rel);
+            if f.is_dir() {
+                std::fs::create_dir_all(&dest).map_err(|x| e(&x))?;
+            } else {
+                std::fs::create_dir_all(dest.parent().unwrap()).map_err(|x| e(&x))?;
+                let mut out = std::fs::File::create(&dest).map_err(|x| e(&x))?;
+                std::io::copy(&mut f.by_ref().take(MAX_ZIP), &mut out).map_err(|x| e(&x))?;
+            }
         }
     }
     let mut files = Vec::new();
@@ -241,6 +251,25 @@ fn extract_and_swap(zip: &[u8], install: &Path, stage: &Path, launcher_exe: &str
         }
         let _ = std::fs::remove_file(install.join(MANIFEST));
         return Err(format!("could not install the update: {msg}"));
+    }
+    Ok(())
+}
+
+/// Linux release archive: plain files and folders only (no links), unpacked inside `stage` with their
+/// mode bits, so the executables stay executable.
+fn unpack_tar_gz(data: &[u8], stage: &Path) -> Result<(), String> {
+    let e = |x: &dyn std::fmt::Display| x.to_string();
+    std::fs::create_dir_all(stage).map_err(|x| e(&x))?;
+    let mut ar = tar::Archive::new(flate2::read::GzDecoder::new(data));
+    for ent in ar.entries().map_err(|x| e(&x))? {
+        let mut ent = ent.map_err(|x| e(&x))?;
+        let kind = ent.header().entry_type();
+        if !(kind.is_file() || kind.is_dir()) || ent.size() > MAX_ZIP {
+            return Err("unexpected entry in update archive".into());
+        }
+        if !ent.unpack_in(stage).map_err(|x| e(&x))? {
+            return Err("unsafe path in update archive".into());
+        }
     }
     Ok(())
 }
@@ -296,6 +325,50 @@ mod tests {
         w.finish().unwrap().into_inner()
     }
 
+    /// `.tar.gz` with raw names (the tar crate's builder refuses `..`, which a test needs).
+    fn make_tar_gz(files: &[(&str, &[u8], u32)]) -> Vec<u8> {
+        let mut b = tar::Builder::new(flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast()));
+        for (n, d, mode) in files {
+            let mut h = tar::Header::new_ustar();
+            h.as_ustar_mut().unwrap().name[..n.len()].copy_from_slice(n.as_bytes());
+            h.set_size(d.len() as u64);
+            h.set_mode(*mode);
+            h.set_entry_type(tar::EntryType::Regular);
+            h.set_cksum();
+            b.append(&h, *d).unwrap();
+        }
+        b.into_inner().unwrap().finish().unwrap()
+    }
+
+    #[test]
+    fn tar_gz_update_keeps_exec_bits_and_refuses_escapes() {
+        let d = tmp("tgz");
+        write_file(&d.join("PersonaRM"), b"old");
+        write_file(&d.join("launcher.json"), b"cfg");
+        let t = make_tar_gz(&[("PersonaRM", b"new", 0o755), ("docs/LAUNCHER.md", b"doc", 0o644)]);
+        apply_zip(&t, &d, "PersonaRM").unwrap();
+        assert_eq!(std::fs::read(d.join("PersonaRM")).unwrap(), b"new");
+        assert_eq!(std::fs::read(d.join("docs/LAUNCHER.md")).unwrap(), b"doc");
+        assert_eq!(std::fs::read(d.join("launcher.json")).unwrap(), b"cfg");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(d.join("PersonaRM")).unwrap().permissions().mode() & 0o111, 0o111);
+        }
+        let evil = make_tar_gz(&[("../evil.txt", b"x", 0o644), ("PersonaRM", b"n", 0o755)]);
+        assert!(apply_zip(&evil, &d, "PersonaRM").is_err());
+        assert!(!d.parent().unwrap().join("evil.txt").exists());
+        assert!(apply_zip(&make_tar_gz(&[("other", b"x", 0o644)]), &d, "PersonaRM").is_err());
+        // Links are refused, even under the launcher's own name.
+        let mut b = tar::Builder::new(flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast()));
+        let mut h = tar::Header::new_ustar();
+        h.set_entry_type(tar::EntryType::Symlink);
+        h.set_size(0);
+        b.append_link(&mut h, "PersonaRM", "/etc/passwd").unwrap();
+        assert!(apply_zip(&b.into_inner().unwrap().finish().unwrap(), &d, "PersonaRM").is_err());
+        assert_eq!(std::fs::read(d.join("PersonaRM")).unwrap(), b"new");
+    }
+
     #[test]
     fn versions() {
         assert_eq!(parse_version("v1.2.3"), Some((1, 2, 3)));
@@ -333,13 +406,19 @@ mod tests {
 
     #[test]
     fn release_json() {
-        let sfx = if cfg!(windows) { "windows-x64.zip" } else { "linux-x64.zip" };
+        let sfx = ARCHIVE_SUFFIX;
         let j = format!(
             r#"{{"tag_name":"v1.2.3","assets":[{{"name":"a-{sfx}.sha256","browser_download_url":"https://github.com/s"}},{{"name":"a-{sfx}","browser_download_url":"https://github.com/z"}}]}}"#
         );
         let r = parse_release(j.as_bytes()).unwrap();
         assert_eq!((r.zip_url.as_str(), r.sha_url.as_str()), ("https://github.com/z", "https://github.com/s"));
         assert!(parse_release(br#"{"tag_name":"v1","assets":[]}"#).is_none());
+        // The other platform's archive is never picked.
+        let other = if cfg!(windows) { "linux-x64.tar.gz" } else { "windows-x64.zip" };
+        let j = format!(
+            r#"{{"tag_name":"v1.2.3","assets":[{{"name":"a-{other}","browser_download_url":"https://github.com/z"}},{{"name":"a-{other}.sha256","browser_download_url":"https://github.com/s"}}]}}"#
+        );
+        assert!(parse_release(j.as_bytes()).is_none());
     }
 
     #[test]
