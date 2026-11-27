@@ -19,14 +19,19 @@ fn canon(p: &str) -> String {
     std::fs::canonicalize(p).map_or_else(|_| p.to_string(), |c| c.to_string_lossy().trim_start_matches(r"\\?\").to_string())
 }
 
-/// From "<lnk>\t<target>" lines: the shortcut files whose target is `old`.
-pub fn matching_lnks(listing: &str, old: &str) -> Vec<String> {
+/// From "<lnk>	<target>[	<icon>]" lines: the shortcuts whose target is `old`, each with whether its
+/// icon also comes from `old` (compared by real path, so 8.3 short names and case don't matter).
+pub fn matching_lnks(listing: &str, old: &str) -> Vec<(String, bool)> {
     let old = canon(old);
+    let is_old = |p: &str| same_path(&canon(p), &old);
     listing
         .lines()
-        .filter_map(|l| l.split_once('\t'))
-        .filter(|(_, t)| same_path(&canon(t), &old))
-        .map(|(p, _)| p.to_string())
+        .filter_map(|l| {
+            let mut f = l.trim_end_matches('\r').split('\t');
+            let (lnk, target, icon) = (f.next()?, f.next()?, f.next().unwrap_or(""));
+            let icon_file = icon.rsplit_once(',').map_or(icon, |(p, _)| p);
+            is_old(target).then(|| (lnk.to_string(), !icon_file.is_empty() && is_old(icon_file)))
+        })
         .collect()
 }
 
@@ -44,11 +49,11 @@ fn ps(script: &str, env: &[(&str, &str)]) -> Option<String> {
 const LIST: &str = "[Console]::OutputEncoding=[Text.Encoding]::UTF8; $sh=New-Object -ComObject WScript.Shell; \
 foreach($d in $env:PRM_DIRS.Split('|')){ if(Test-Path -LiteralPath $d){ \
 Get-ChildItem -LiteralPath $d -Recurse -Filter *.lnk -File -ErrorAction SilentlyContinue | ForEach-Object { \
-try { $l=$sh.CreateShortcut($_.FullName); $_.FullName + [char]9 + $l.TargetPath } catch {} } } }";
+try { $l=$sh.CreateShortcut($_.FullName); $_.FullName + [char]9 + $l.TargetPath + [char]9 + $l.IconLocation } catch {} } } }";
 
-const SET: &str = "$ErrorActionPreference='Stop'; $sh=New-Object -ComObject WScript.Shell; $o=$env:PRM_OLD; $n=$env:PRM_NEW; \
-foreach($p in $env:PRM_LNKS.Split('|')){ $l=$sh.CreateShortcut($p); $l.TargetPath=$n; $i=$l.IconLocation; \
-if($i.StartsWith($o,[StringComparison]::OrdinalIgnoreCase)){ $l.IconLocation=$n+$i.Substring($o.Length) }; $l.Save() }";
+const SET: &str = "$ErrorActionPreference='Stop'; $sh=New-Object -ComObject WScript.Shell; $n=$env:PRM_NEW; \
+foreach($e in $env:PRM_LNKS.Split('|')){ $p,$f=$e.Split('*'); $l=$sh.CreateShortcut($p); $l.TargetPath=$n; \
+if($f -eq '1'){ $i=$l.IconLocation; $k=$i.LastIndexOf(','); $l.IconLocation=$n+$(if($k -ge 0){$i.Substring($k)}else{',0'}) }; $l.Save() }";
 
 /// Point every shortcut under `dirs` that targets `old` at `new` (arguments and working dir are kept;
 /// the icon follows when it came from `old`). None if PowerShell failed or a shortcut could not be
@@ -60,8 +65,9 @@ pub fn fix_shortcuts(old: &Path, new: &Path, dirs: &[PathBuf]) -> Option<usize> 
     if hits.is_empty() {
         return Some(0);
     }
-    let (old, new) = (canon(&old.to_string_lossy()), canon(&new.to_string_lossy()));
-    ps(SET, &[("PRM_OLD", &old), ("PRM_NEW", &new), ("PRM_LNKS", &hits.join("|"))])?;
+    // '*' cannot appear in a Windows path, so it separates each shortcut from its move-the-icon flag.
+    let list = hits.iter().map(|(p, icon)| format!("{p}*{}", u8::from(*icon))).collect::<Vec<_>>().join("|");
+    ps(SET, &[("PRM_NEW", &canon(&new.to_string_lossy())), ("PRM_LNKS", &list)])?;
     Some(hits.len())
 }
 
@@ -112,8 +118,9 @@ mod tests {
 
     #[test]
     fn listing_filter() {
-        let l = "C:\\d\\A.lnk\tC:\\Games\\PRM\\launcher.exe\r\nC:\\d\\B.lnk\tC:\\Other\\launcher.exe\nC:\\d\\C.lnk\t\nC:\\d\\D.lnk\tc:\\games\\prm\\Launcher.exe\r\n";
-        assert_eq!(matching_lnks(l, r"C:\Games\PRM\launcher.exe"), vec!["C:\\d\\A.lnk", "C:\\d\\D.lnk"]);
+        let l = "C:\\d\\A.lnk\tC:\\Games\\PRM\\launcher.exe\tC:\\Games\\PRM\\launcher.exe,0\r\nC:\\d\\B.lnk\tC:\\Other\\launcher.exe\nC:\\d\\C.lnk\t\nC:\\d\\D.lnk\tc:\\games\\prm\\Launcher.exe\tC:\\icons\\x.ico,2\r\n";
+        let want = vec![("C:\\d\\A.lnk".to_string(), true), ("C:\\d\\D.lnk".to_string(), false)];
+        assert_eq!(matching_lnks(l, r"C:\Games\PRM\launcher.exe"), want);
     }
 
     fn mk_lnk(lnk: &Path, target: &Path, icon: &Path) {
