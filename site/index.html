@@ -72,7 +72,7 @@
                 </p>
                 <div class="actions">
                     <div class="dl">
-                        <a class="btn btn-primary" href="https://github.com/sargon494/PersonaRM/releases/latest">Download v0.2.6</a>
+                        <a class="btn btn-primary" href="https://github.com/sargon494/PersonaRM/releases/latest">Download v0.2.7</a>
                         <small>Windows and Linux · bring your own disc · experimental</small>
                     </div>
                     <a class="btn" href="https://github.com/sargon494/PersonaRM">View source</a>
@@ -118,7 +118,7 @@
             <ul class="today reveal">
                 <li>Intro, title screen, new game, story scenes, free movement and the first battles.</li>
                 <li>Saving and loading memory cards, and save states.</li>
-                <li>Linux x64 from v0.2.6: tested on Ubuntu; the GPU renderer is not yet tested there.</li>
+                <li>Linux x64 from v0.2.6: tested on Ubuntu. Since v0.2.7 the GPU renderer also runs on Linux (Vulkan), tested so far only on a software Vulkan driver.</li>
                 <li>Native code (recompiled, Windows and Linux): about 2x faster than the interpreter, with identical results on JP disc 1.</li>
                 <li>30, 60, 90 and 120 fps, and internal resolution up to 4K with the GPU renderer.</li>
                 <li>A game-library launcher that updates itself, with per-game gameplay options (encounter rate, skip movies, battle speed, text speed).</li>
@@ -147,7 +147,7 @@
                     <p><strong>Widescreen</strong> Available, but rough: characters no longer split apart (party members running close together no longer break apart or slide off their shadows), full-screen fades, tints and shadows cover the whole wide picture, and scenes it can't handle safely fall back to 4:3 automatically. 4:3 is the recommended mode.</p>
                 </li>
                 <li><span class="chip experimental">Experimental</span>
-                    <p><strong>Linux</strong> x64 build since v0.2.6, tested on Ubuntu (needs glibc 2.35 or newer). The software renderer works there; the GPU renderer is not yet tested.</p>
+                    <p><strong>Linux</strong> x64 build since v0.2.6, tested on Ubuntu (needs glibc 2.35 or newer). The software renderer works there. Since v0.2.7 the GPU renderer also runs on Vulkan, tested so far only on a software Vulkan driver (Mesa lavapipe). Reports from hardware Vulkan drivers are welcome. Without a Vulkan driver, the game uses the software renderer.</p>
                 </li>
             </ul>
             <p class="fine reveal"><a class="link" href="https://github.com/sargon494/PersonaRM#readme">Full technical
@@ -168,7 +168,7 @@
                 <li class="reveal">
                     <h3>Download PersonaRM</h3>
                     <p>Get the Windows zip (or the Linux x64 tar.gz) from the <a href="https://github.com/sargon494/PersonaRM/releases/latest">latest
-                            release</a> (v0.2.6), unzip it and run <code>PersonaRM.exe</code>. On Linux, unpack the tar.gz with <code>tar xzf</code> and run <code>./PersonaRM</code>.</p>
+                            release</a> (v0.2.7), unzip it and run <code>PersonaRM.exe</code>. On Linux, unpack the tar.gz with <code>tar xzf</code> and run <code>./PersonaRM</code>.</p>
                 </li>
                 <li class="reveal">
                     <h3>Set your disc and press PLAY</h3>
@@ -282,7 +282,7 @@ personarm_sdl "/path/to/disc1.cue" --recomp --memcard1 "/path/to/card1.mcd"</cod
             <h2>Ready to <em>descend</em>?</h2>
             <p>Download the launcher, point it at your own disc and press PLAY.</p>
             <div class="dl">
-                <a class="btn btn-primary" href="https://github.com/sargon494/PersonaRM/releases/latest">Download v0.2.6</a>
+                <a class="btn btn-primary" href="https://github.com/sargon494/PersonaRM/releases/latest">Download v0.2.7</a>
                 <small>Windows and Linux · bring your own disc · experimental</small>
             </div>
             <p class="dev-note">Developer? <a href="https://github.com/sargon494/PersonaRM">Clone and build from source</a>.</p>
