@@ -39,7 +39,12 @@ endif()
 # personarm_native: first-run native code for the player's disc (shipped; docs/NATIVE_CODE.md).
 # The compiler is TinyCC (cmake/TinyCC.cmake, fetched at a pinned commit, LGPL, linked as libtcc.dll).
 # Without it the tool still emits C for developers (--emit-c) but cannot build a library.
-option(PRM_WITH_TCC "Build personarm_native with TinyCC (fetched at configure time)" ${WIN32})
+if(WIN32 OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(_prm_tcc_default ON)
+else()
+    set(_prm_tcc_default OFF)
+endif()
+option(PRM_WITH_TCC "Build personarm_native with TinyCC (fetched at configure time)" ${_prm_tcc_default})
 file(READ ${PROJECT_SOURCE_DIR}/src/recomp/runtime/prm_abi.h _prm_abi_text)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/src/recomp/runtime/prm_abi.h)
 file(CONFIGURE OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/prm_abi_text.cpp CONTENT

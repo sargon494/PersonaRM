@@ -27,6 +27,9 @@ endif()
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/Release)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/Release)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/Release)
+# Linux: binaries find libSDL3.so / libtcc.so next to themselves ($ORIGIN), so the release folder
+# runs from wherever it is unpacked.
+set(CMAKE_BUILD_RPATH_USE_ORIGIN ON)
 
 # ───────────────────────────────────────────────────────────────────────
 # Build options

@@ -25,7 +25,7 @@ produces the same frames and RAM as the interpreter, only faster where the CPU i
 | Overlay discovery: each FILEPOS file is tried as code; its load address is the base that puts the most of its own `jal` targets on its function starts (docs/research/OVERLAY_MAP.md, method step 4). A wrong guess costs nothing: a module only runs while RAM holds exactly the code it was built from (code hash) | `native_prep.cpp` |
 | C ABI between the game and the generated code: `prm_cpu`, `prm_module`, export `prm_modules` (version `PRM_ABI_VERSION`) | `src/recomp/runtime/prm_abi.h` |
 | Loading the DLL at run time | `src/recomp/runtime/module_loader.*` |
-| Cache: `%LOCALAPPDATA%\PersonaRM\native\<boot exe>-<FNV-1a 64 of the exe>\modules.dll` + `manifest.json` | `src/recomp/runtime/native_cache.*` |
+| Cache: `%LOCALAPPDATA%\PersonaRM\native\<boot exe>-<FNV-1a 64 of the exe>\modules.dll` + `manifest.json`; Linux: `$XDG_CACHE_HOME/personarm/native/.../modules.so` (default `~/.cache`) | `src/recomp/runtime/native_cache.*` |
 
 The cache is rebuilt when the module ABI, the generator version (`kGeneratorVersion`), the PersonaRM
 build or the executable changes. `PRM_NATIVE_CACHE` overrides the cache folder. Delete the folder to
@@ -38,8 +38,11 @@ the cache is ready and 3 when it is not.
 ### Compiler choice
 
 TinyCC (libtcc, LGPL-2.1) is fetched at a pinned commit by `cmake/TinyCC.cmake`, built as `libtcc.dll`
-with its predefined macros compiled in, and the generated code is built `-nostdlib`: the DLL is the
-whole compiler runtime (no include or lib folders). Its licence and source offer ship in `licenses/`.
+(Linux: `libtcc.so`) with its predefined macros compiled in, and the generated code is built
+`-nostdlib`: the library is the whole compiler runtime (no include or lib folders). Its licence and
+source offer ship in `licenses/`. On Linux, TinyCC writes no `PT_GNU_STACK` header, and glibc 2.41+
+refuses to load a library without one (it would need an executable stack); `personarm_native` adds a
+non-executable one after linking (`AddGnuStackHeader`).
 
 Measured on JP disc 1 (new game to the first field, `docs/examples/disc1_new_game_to_field.txt`,
 19 000 frames, headless `personarm --boot`, 107 modules / 11 750 functions):
