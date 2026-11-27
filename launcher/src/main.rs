@@ -4,6 +4,8 @@
 mod disc;
 mod model;
 mod playtime;
+#[cfg(windows)]
+mod retire;
 mod update;
 
 use eframe::egui::{self, Color32, FontFamily, RichText, ViewportCommand};
@@ -1273,6 +1275,13 @@ fn main() -> eframe::Result {
                     }
                 }
             });
+        }
+    }
+    // After the update/shim steps above: fix shortcuts that still use launcher.exe, then delete it.
+    #[cfg(windows)]
+    if let Ok(me) = std::env::current_exe() {
+        if let Some(dir) = me.parent().map(|d| d.to_path_buf()) {
+            std::thread::spawn(move || retire::retire_launcher(&dir, &me, &retire::default_dirs()));
         }
     }
     let icon = load_logo().map(|i| egui::IconData {

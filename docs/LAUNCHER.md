@@ -166,6 +166,9 @@ binary is started as `launcher.exe` and `PersonaRM.exe` is next to it, it starts
 arguments and exits, so users land on the new name (old shortcuts keep working). The game watcher (`--run`) and the
 restart after an update use `PersonaRM.exe` whenever it exists.
 
+The zip still carries `launcher.exe` so that installs from v0.2.2 and earlier can update. On start (Windows) `PersonaRM.exe` points
+Desktop, Public Desktop (if writable) and Start Menu shortcuts that target that `launcher.exe` at itself, then deletes it (retried on the next start if it is in use).
+
 `launcher.exe` can be dropped from the zip (and from `scripts/check-release-files.ps1`) once nobody is still on a
 pre-rename version: ship at least two releases with both names, so every install gets one update that carries
 `PersonaRM.exe` and runs under it from then on, and drop it in a later one. An old install that skips straight over
