@@ -84,10 +84,11 @@ jobs:
 
       # SDL3 picks its video/audio backends at configure time: without these headers it would ship
       # without X11, Wayland, PulseAudio or PipeWire support (it loads the libraries at run time).
+      # glslang-tools: the GPU renderer's SPIR-V shaders (Vulkan); without it --renderer gpu falls back to software.
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build libgtk-3-dev libasound2-dev libpulse-dev libpipewire-0.3-dev             libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxtst-dev             libxkbcommon-dev libdrm-dev libgbm-dev libgl1-mesa-dev libegl1-mesa-dev libdbus-1-dev             libibus-1.0-dev libudev-dev libwayland-dev wayland-protocols libdecor-0-dev
+          sudo apt-get install -y ninja-build libgtk-3-dev libasound2-dev libpulse-dev libpipewire-0.3-dev             libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxtst-dev             libxkbcommon-dev libdrm-dev libgbm-dev libgl1-mesa-dev libegl1-mesa-dev libdbus-1-dev             libibus-1.0-dev libudev-dev libwayland-dev wayland-protocols libdecor-0-dev glslang-tools
 
       - name: Build game (SDL3 host, personarm_native + TinyCC, no recompiled code)
         run: |

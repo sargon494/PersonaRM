@@ -15,6 +15,7 @@ struct SDL_GPUSampler;
 struct SDL_GPUBuffer;
 struct SDL_GPUTransferBuffer;
 struct SDL_GPUGraphicsPipeline;
+struct SDL_GPUFence;
 struct SDL_Renderer;
 struct SDL_Texture;
 
@@ -123,6 +124,7 @@ private:
     SDL_GPUBuffer* m_vbuf = nullptr;
     uint32_t m_vbuf_size = 0;
     SDL_GPUTransferBuffer *m_up = nullptr, *m_down = nullptr;
+    SDL_GPUFence* m_inflight = nullptr;  // the last direct picture's submission (Present)
     uint32_t m_up_size = 0, m_down_size = 0;
 
     std::vector<Vtx> m_vtx;

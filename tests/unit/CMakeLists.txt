@@ -213,6 +213,9 @@ set_tests_properties(unit_test_frame_interp PROPERTIES LABELS "unit" TIMEOUT 120
 if(TARGET SDL3::SDL3)  # host GPU renderer (-DPRM_WITH_SDL3=ON); skips itself without a GPU device
     add_executable(unit_test_gpu_renderer test_gpu_renderer.cpp ${PROJECT_SOURCE_DIR}/src/rendering/gpu_renderer.cpp)
     target_link_libraries(unit_test_gpu_renderer PRIVATE personarm_core SDL3::SDL3)
+    if(TARGET prm_gpu_shaders)
+        target_link_libraries(unit_test_gpu_renderer PRIVATE prm_gpu_shaders)
+    endif()
     target_compile_features(unit_test_gpu_renderer PRIVATE cxx_std_17)
     if(WIN32)
         add_custom_command(TARGET unit_test_gpu_renderer POST_BUILD
