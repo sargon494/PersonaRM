@@ -15,6 +15,8 @@
 #endif
 #include <windows.h>
 #include <d3dcompiler.h>
+#elif defined(PRM_GPU_SPIRV)
+#include "gpu_spirv.h"
 #endif
 
 namespace personarm {
@@ -160,6 +162,12 @@ float4 main(VOut i) : SV_Target {
 }
 )";
 
+#ifdef _WIN32
+constexpr SDL_GPUShaderFormat kShaderFormat = SDL_GPU_SHADERFORMAT_DXBC;
+#else
+constexpr SDL_GPUShaderFormat kShaderFormat = SDL_GPU_SHADERFORMAT_SPIRV;
+#endif
+
 SDL_GPUShader* CompileShader(SDL_GPUDevice* dev, const char* src, bool vertex, uint32_t samplers, std::string* err) {
 #ifdef _WIN32
     static pD3DCompile compile = [] {
@@ -186,8 +194,21 @@ SDL_GPUShader* CompileShader(SDL_GPUDevice* dev, const char* src, bool vertex, u
     code->Release();
     if (!sh) *err = SDL_GetError();
     return sh;
+#elif defined(PRM_GPU_SPIRV)
+    // The same HLSL, compiled to SPIR-V at build time (cmake/gpu_spirv.cmake) for Vulkan.
+    SDL_GPUShaderCreateInfo info{};
+    const uint32_t* code = src == kShaderVs ? kShaderVs_spv : src == kShaderPs ? kShaderPs_spv : kShaderDisplay_spv;
+    info.code_size = src == kShaderVs ? sizeof kShaderVs_spv : src == kShaderPs ? sizeof kShaderPs_spv : sizeof kShaderDisplay_spv;
+    info.code = reinterpret_cast<const Uint8*>(code);
+    info.entrypoint = "main";
+    info.format = SDL_GPU_SHADERFORMAT_SPIRV;
+    info.stage = vertex ? SDL_GPU_SHADERSTAGE_VERTEX : SDL_GPU_SHADERSTAGE_FRAGMENT;
+    info.num_samplers = samplers;
+    SDL_GPUShader* sh = SDL_CreateGPUShader(dev, &info);
+    if (!sh) *err = SDL_GetError();
+    return sh;
 #else
-    // shortcut: shaders are runtime-compiled HLSL (D3D12 only); Vulkan/Metal need SPIR-V/MSL builds (docs/GPU_RENDERER.md)
+    // shortcut: no glslangValidator at build time = no SPIR-V; Metal needs MSL (docs/GPU_RENDERER.md)
     (void)dev, (void)src, (void)vertex, (void)samplers;
     *err = "no shader compiler on this platform";
     return nullptr;
@@ -210,8 +231,8 @@ SDL_GPUTexture* MakeTexture(SDL_GPUDevice* dev, SDL_GPUTextureFormat f, uint32_t
 
 bool GpuRenderer::Init(Ps1Gpu& gpu, uint32_t scale, std::string* err, SDL_GPUDevice* device) {
     m_s = std::clamp<uint32_t>(scale, 1, 9);  // 9 x 240 = 2160 lines (4K)
-    m_shared = device && (SDL_GetGPUShaderFormats(device) & SDL_GPU_SHADERFORMAT_DXBC);
-    m_dev = m_shared ? device : SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_DXBC, false, nullptr);
+    m_shared = device && (SDL_GetGPUShaderFormats(device) & kShaderFormat);
+    m_dev = m_shared ? device : SDL_CreateGPUDevice(kShaderFormat, false, nullptr);
     if (!m_dev) { *err = std::string("SDL_CreateGPUDevice: ") + SDL_GetError(); return false; }
     SDL_GPUShader* vs = CompileShader(m_dev, kShaderVs, true, 0, err);
     SDL_GPUShader* ps = vs ? CompileShader(m_dev, kShaderPs, false, 3, err) : nullptr;
@@ -310,6 +331,7 @@ bool GpuRenderer::EnableInterp(std::string* err) {
 void GpuRenderer::Shutdown() {
     if (m_attached) m_attached->SetDrawListener(nullptr), m_attached = nullptr;
     if (!m_dev) return;
+    if (m_inflight) SDL_ReleaseGPUFence(m_dev, m_inflight), m_inflight = nullptr;
     if (m_out_tex) SDL_DestroyTexture(m_out_tex), m_out_tex = nullptr;
     for (auto*& p : m_pipe) if (p) SDL_ReleaseGPUGraphicsPipeline(m_dev, p), p = nullptr;
     if (m_display) SDL_ReleaseGPUGraphicsPipeline(m_dev, m_display), m_display = nullptr;
@@ -836,7 +858,10 @@ bool GpuRenderer::Present(const GpuDisplayArea& d, bool show, std::vector<uint32
     }
     m_vtx.clear(), m_staging.clear(), m_ops.clear();
     m_last_draws = draws;
-    if (!rgba) return SDL_SubmitGPUCommandBuffer(cb);  // no fence wait: the presenter's command buffer comes after
+    // At most one picture in flight: without a swapchain wait (--hidden) a GPU slower than the emulation
+    // (lavapipe) would queue pictures without end, SDL cycling a new upload buffer for each.
+    if (m_inflight) SDL_WaitForGPUFences(m_dev, true, &m_inflight, 1), SDL_ReleaseGPUFence(m_dev, m_inflight), m_inflight = nullptr;
+    if (!rgba) return (m_inflight = SDL_SubmitGPUCommandBufferAndAcquireFence(cb)) != nullptr;  // the presenter's command buffer comes after
     cp = SDL_BeginGPUCopyPass(cb);
     const SDL_GPUTextureRegion oreg{m_out, 0, 0, 0, 0, 0, ow, oh, 1};
     const SDL_GPUTextureTransferInfo odst{m_down, 0, ow, oh};

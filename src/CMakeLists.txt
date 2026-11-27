@@ -250,6 +250,29 @@ if(PRM_WITH_SDL3)
         rendering/gpu_renderer.h
     )
     target_link_libraries(personarm_sdl PRIVATE personarm_core personarm_recomp_modules SDL3::SDL3)
+
+    # GPU renderer on Vulkan: its HLSL compiled to SPIR-V at build time (Windows compiles it at run time for
+    # D3D12). Without glslangValidator (apt: glslang-tools) --renderer gpu falls back to software here.
+    if(NOT WIN32)
+        find_program(GLSLANG_VALIDATOR glslangValidator)
+        if(GLSLANG_VALIDATOR)
+            set(spirv_dir ${CMAKE_BINARY_DIR}/generated/gpu_spirv)
+            add_custom_command(OUTPUT ${spirv_dir}/gpu_spirv.h
+                COMMAND ${CMAKE_COMMAND} -E make_directory ${spirv_dir}
+                COMMAND ${CMAKE_COMMAND} -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/rendering/gpu_renderer.cpp -DOUT=${spirv_dir}
+                        -DGLSLANG=${GLSLANG_VALIDATOR} -P ${PROJECT_SOURCE_DIR}/cmake/gpu_spirv.cmake
+                DEPENDS rendering/gpu_renderer.cpp ${PROJECT_SOURCE_DIR}/cmake/gpu_spirv.cmake
+                COMMENT "GPU renderer shaders: HLSL -> SPIR-V")
+            add_custom_target(prm_gpu_spirv DEPENDS ${spirv_dir}/gpu_spirv.h)
+            add_library(prm_gpu_shaders INTERFACE)
+            target_include_directories(prm_gpu_shaders INTERFACE ${spirv_dir})
+            target_compile_definitions(prm_gpu_shaders INTERFACE PRM_GPU_SPIRV)
+            add_dependencies(prm_gpu_shaders prm_gpu_spirv)
+            target_link_libraries(personarm_sdl PRIVATE prm_gpu_shaders)
+        else()
+            message(STATUS "glslangValidator not found: no Vulkan shaders, --renderer gpu falls back to software")
+        endif()
+    endif()
     if(MSVC)
         target_compile_options(personarm_sdl PRIVATE /W4)
     else()

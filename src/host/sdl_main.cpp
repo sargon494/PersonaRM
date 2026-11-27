@@ -49,7 +49,7 @@ static void Usage() {
                          "  --resolution-scale N internal resolution N x 320x240 (1-4, default 1 = native; gpu 1-9\n"
                          "                       or auto); display only, the game still sees the native VRAM\n"
                          "  --renderer R         software (default) or gpu (video.renderer): draw the scaled picture on the host GPU\n"
-                         "                       (SDL_gpu, D3D12; docs/GPU_RENDERER.md); then --resolution-scale 1-9 or auto\n"
+                         "                       (SDL_gpu: D3D12, Vulkan; docs/GPU_RENDERER.md); then --resolution-scale 1-9 or auto\n"
                          "  --widescreen A       off (default), 16:9, 21:9 or W:H: wider 3D view, shown at that aspect\n"
                          "                       (2D-only and FMV frames stay 4:3; docs/WIDESCREEN.md)\n"
                          "  --dump-dir D --dump-from F --dump-to G   every presented picture of frames F..G as PNG\n"

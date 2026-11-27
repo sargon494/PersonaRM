@@ -1,7 +1,7 @@
 # GPU renderer (`--renderer gpu`)
 
-Status: ready to be the players' default on Windows (D3D12); the build default is still `software`, so
-a launcher or settings file picks it (`video.renderer`, [SETTINGS.md](SETTINGS.md)). The software GPU
+Status: ready to be the players' default on Windows (D3D12) and Linux (Vulkan); the build default is
+still `software`, so a launcher or settings file picks it (`video.renderer`, [SETTINGS.md](SETTINGS.md)). The software GPU
 (`src/rendering/ps1_gpu.*`) stays the emulation's source of truth; without the GPU renderer nothing
 changes (byte-identical output). The GPU renderer is display only: it redraws the game's primitives at
 s× on the host GPU, so high internal resolutions run at the cost of 1x. Code: `src/rendering/gpu_renderer.*`
@@ -25,10 +25,16 @@ SDL3's GPU API (D3D12 / Vulkan / Metal) over OpenGL 3.3:
 - SDL 3.4's GPU renderer (`SDL_CreateGPURenderer`) shares the device and wraps an `SDL_GPUTexture` as an
   `SDL_Texture` (`SDL_PROP_TEXTURE_CREATE_GPU_TEXTURE_POINTER`): the zero-copy present path.
 
-Shaders: SDL_gpu takes backend bytecode (DXBC/DXIL, SPIR-V, MSL), not source. The renderer compiles its
-HLSL at run time with `d3dcompiler_47.dll` (shipped with Windows) to DXBC SM5.1, so it runs on D3D12 with
-no build-time tool. Other platforms log `[gpu] renderer unavailable (...)` and use the software renderer;
-see [Vulkan / Metal](#vulkan--metal).
+Shaders: SDL_gpu takes backend bytecode (DXBC/DXIL, SPIR-V, MSL), not source. One HLSL source per shader
+(`kShaderVs`, `kShaderPs`, `kShaderDisplay` in `gpu_renderer.cpp`):
+
+- Windows (D3D12): compiled at run time with `d3dcompiler_47.dll` (shipped with Windows) to DXBC SM5.1.
+- Linux (Vulkan): compiled at build time to SPIR-V by `glslangValidator` (apt `glslang-tools`):
+  `cmake/gpu_spirv.cmake` extracts the same strings and writes `build/generated/gpu_spirv/gpu_spirv.h`
+  (never committed). Without the tool CMake says so and the GPU renderer is unavailable.
+
+Without shaders or a GPU device the host logs `[gpu] renderer unavailable (...): software renderer` and
+uses the software renderer. macOS (Metal) needs MSL: see [Metal](#metal).
 
 ## Present
 
@@ -204,21 +210,10 @@ interpolated sub-texel position (alpha < 0.5 = transparent, black kept opaque as
 upload rect keep the original. Limit: one upload per primitive (the CPU path decides per texel); a
 primitive spanning two replaced uploads shows the texels of the other one unreplaced.
 
-## Vulkan / Metal
+## Metal
 
-SDL_gpu runs on Vulkan and Metal, but needs SPIR-V / MSL. Producing them takes a compiler that is not in
-this build: DXC with SPIR-V codegen (the Windows SDK's `dxc.exe` is built without it: "SPIR-V CodeGen not
-available") or SDL_shadercross (DXC + SPIRV-Cross). Neither is added: they are heavy build dependencies.
-Plan, without a build dependency:
-
-1. Offline, once per shader change: `shadercross` (or a DXC release with SPIR-V) compiles the three HLSL
-   sources (`kShaderVs`, `kShaderPs`, `kShaderDisplay`; SDL_gpu's register spaces are already used) to
-   SPIR-V, and SPIRV-Cross to MSL.
-2. Commit the bytes as `src/rendering/gpu_shaders_spirv.h` / `_msl.h` (byte arrays) next to the HLSL.
-3. `CompileShader` picks by `SDL_GetGPUShaderFormats`: DXBC at run time on Windows, the committed SPIR-V /
-   MSL elsewhere; `SDL_CreateGPUDevice` asks for all three.
-
-Until then the GPU renderer is Windows-only and other platforms keep the software renderer.
+SDL_gpu runs on Metal, but needs MSL. SPIRV-Cross (or SDL_shadercross) can turn the build's SPIR-V into
+MSL the same way; not added, since there is no macOS build yet.
 
 ## Measured cost
 
@@ -261,6 +256,7 @@ looked at.
 | office walking, `--interp 120` + 16:9 and `--interp 90`, 4x | f18900-18915, 32 / 24 presents | no picture far from both neighbours (flicker score 0.01 / 0) | |
 | map tour areas 33, 35, 36, 37, 58 (`--sdl` states), live and replayed in both display buffers | f19451-19490 | 0% / 0% | every frame identical to software 4x; was 20k-95k pixels off by one step and 1-2 pixels differing between the buffers |
 | shrine, `--mods` | f6700 | 6.7% / 3.9% | test pack (every dumped texture 4x with a red hatch): floor, walls, the shrine and Tatsuya's legs replaced as in software; his torso and the old woman stay original (one upload per primitive, see HD textures) |
+| Linux, Vulkan (WSL2, Mesa lavapipe): JP shrine, JP office, US shrine; JP shrine and office `--interp 120` | f6700-6703, f18899-18901, f6799-6801 | 0% / 0% | byte-identical to software 4x on Linux and to D3D12 GPU 4x on Windows (default settings, new memory cards) |
 
 Software 4x of this build against the build before: byte-identical (f6700, f18900, SHA-256), so the
 software path is unchanged. Not exercised by these scenes: the mask-check pipelines (no mask-checked
@@ -268,7 +264,7 @@ primitive in the new-game script: the prototype's fallback log never reported on
 
 ## Next steps
 
-1. Vulkan / Metal shaders (above).
+1. Metal shaders (above).
 2. HD textures: split a primitive per replaced upload instead of one per primitive.
 3. Widescreen without anamorphic 320-px frames: draw the wider view into extra `hi` columns (the GPU is
    not bound to the 1x VRAM layout), so the sides get full horizontal resolution.
