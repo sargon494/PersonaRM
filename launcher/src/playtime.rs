@@ -12,9 +12,7 @@ pub const MIN_SECS: u64 = 10;
 /// Recent sessions kept per game.
 pub const KEEP: usize = 50;
 
-pub fn playtime_json() -> PathBuf {
-    launcher_dir().join("playtime.json")
-}
+pub fn playtime_json() -> PathBuf { launcher_dir().join("playtime.json") }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 #[serde(default)]
@@ -90,9 +88,7 @@ impl Playtime {
 /// Missing file = empty. A file that does not parse is moved to `.corrupt` (kept for the user) and
 /// the stats start over; it is never an error and never touches `launcher.json`.
 pub fn load_from(path: &Path) -> Playtime {
-    let Ok(t) = std::fs::read_to_string(path) else {
-        return Playtime::default();
-    };
+    let Ok(t) = std::fs::read_to_string(path) else { return Playtime::default() };
     serde_json::from_str(strip_bom(&t)).unwrap_or_else(|_| {
         let _ = std::fs::rename(path, path.with_extension("json.corrupt"));
         Playtime::default()
@@ -103,19 +99,13 @@ pub fn save_to(path: &Path, p: &Playtime) -> std::io::Result<()> {
     write_atomic(path, &serde_json::to_string_pretty(p).unwrap())
 }
 
-pub fn load() -> Playtime {
-    load_from(&playtime_json())
-}
-pub fn save(p: &Playtime) -> std::io::Result<()> {
-    save_to(&playtime_json(), p)
-}
+pub fn load() -> Playtime { load_from(&playtime_json()) }
+pub fn save(p: &Playtime) -> std::io::Result<()> { save_to(&playtime_json(), p) }
 
 // ── time ──
 
 pub fn now() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs())
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs())
 }
 
 /// Seconds east of UTC for the local zone (Windows API; elsewhere UTC, shortcut: day names off by the offset).
@@ -138,12 +128,7 @@ pub fn tz_offset() -> i64 {
         // SAFETY: plain C struct of integers, filled by the call.
         let mut t: Tzi = unsafe { std::mem::zeroed() };
         let r = unsafe { GetTimeZoneInformation(&mut t) };
-        let b = t.bias
-            + match r {
-                1 => t.std_bias,
-                2 => t.dst_bias,
-                _ => 0,
-            };
+        let b = t.bias + match r { 1 => t.std_bias, 2 => t.dst_bias, _ => 0 };
         return -(b as i64) * 60;
     }
     #[allow(unreachable_code)]
@@ -160,9 +145,7 @@ pub fn fmt_dur(s: u64) -> String {
     }
 }
 
-const MONTHS: [&str; 12] = [
-    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-];
+const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 /// (year, month, day) of a day count since 1970-01-01.
 fn civil(days: i64) -> (i64, usize, i64) {
@@ -201,11 +184,7 @@ pub fn clock(ts: u64, tz: i64) -> String {
 /// Muted line of a library card.
 pub fn card_line(g: Option<&GameStats>, now: u64, tz: i64) -> String {
     match g.filter(|g| g.total.sessions > 0) {
-        Some(g) => format!(
-            "{} \u{b7} last played {}",
-            fmt_dur(g.total.secs),
-            rel_date(g.total.last, now, tz)
-        ),
+        Some(g) => format!("{} \u{b7} last played {}", fmt_dur(g.total.secs), rel_date(g.total.last, now, tz)),
         None => "Not played yet".into(),
     }
 }
@@ -224,14 +203,7 @@ pub fn tag(serial: &str) -> &'static str {
 mod tests {
     use super::*;
 
-    fn s(start: u64, secs: u64, serial: &str) -> Session {
-        Session {
-            start,
-            secs,
-            serial: serial.into(),
-            ok: true,
-        }
-    }
+    fn s(start: u64, secs: u64, serial: &str) -> Session { Session { start, secs, serial: serial.into(), ok: true } }
 
     #[test]
     fn durations() {
@@ -267,21 +239,10 @@ mod tests {
         p.record("G", s(5000, 1200, "SLUS-01158"));
         p.record("G", s(9000, 3, "SLUS-01158")); // quick quit
         let g = &p.games["G"];
-        assert_eq!(
-            (
-                g.total.secs,
-                g.total.sessions,
-                g.total.short,
-                g.total.longest
-            ),
-            (1800, 2, 1, 1200)
-        );
+        assert_eq!((g.total.secs, g.total.sessions, g.total.short, g.total.longest), (1800, 2, 1, 1200));
         assert_eq!((g.total.first, g.total.last), (1000, 6200));
         assert_eq!(g.discs["SLPS-02785"].secs, 600);
-        assert_eq!(
-            (g.discs["SLUS-01158"].secs, g.discs["SLUS-01158"].short),
-            (1200, 1)
-        );
+        assert_eq!((g.discs["SLUS-01158"].secs, g.discs["SLUS-01158"].short), (1200, 1));
         assert_eq!(g.recent.len(), 3); // the short one is still listed
         let mut crash = s(20_000, 90, "SLPS-02785");
         crash.ok = false;
@@ -297,10 +258,7 @@ mod tests {
             p.record("G", s(1000 + i * 100, 60, "A"));
         }
         let g = &p.games["G"];
-        assert_eq!(
-            (g.recent.len(), g.recent[0].start, g.total.sessions),
-            (KEEP, 1000 + 20 * 100, 70)
-        );
+        assert_eq!((g.recent.len(), g.recent[0].start, g.total.sessions), (KEEP, 1000 + 20 * 100, 70));
     }
 
     #[test]
@@ -308,10 +266,7 @@ mod tests {
         let mut p = Playtime::default();
         assert_eq!(card_line(p.games.get("G"), 0, 0), "Not played yet");
         p.record("G", s(1_700_000_000 - 86_400, 45_000, "A"));
-        assert_eq!(
-            card_line(p.games.get("G"), 1_700_000_000 + 45_000, 0),
-            "12 h 30 min \u{b7} last played yesterday"
-        );
+        assert_eq!(card_line(p.games.get("G"), 1_700_000_000 + 45_000, 0), "12 h 30 min \u{b7} last played yesterday");
     }
 
     #[test]

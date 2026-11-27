@@ -31,9 +31,7 @@ pub struct Game {
     pub args: Vec<String>,
 }
 
-fn default_platform() -> String {
-    "PS1".into()
-}
+fn default_platform() -> String { "PS1".into() }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Status {
@@ -66,21 +64,13 @@ pub fn path_state(p: &str, dir: bool) -> PathState {
         return PathState::NotSet;
     }
     let path = std::path::Path::new(p);
-    if if dir { path.is_dir() } else { path.is_file() } {
-        PathState::Found
-    } else {
-        PathState::Missing
-    }
+    if if dir { path.is_dir() } else { path.is_file() } { PathState::Found } else { PathState::Missing }
 }
 
 pub fn status(cfg: &LauncherConfig, g: &Game) -> Status {
     if game_exe_for(cfg, g).is_none() {
         Status::NotPlayable
-    } else if g
-        .discs
-        .values()
-        .any(|d| path_state(d, false) == PathState::Found)
-    {
+    } else if g.discs.values().any(|d| path_state(d, false) == PathState::Found) {
         Status::Ready
     } else {
         Status::NeedsDisc
@@ -122,9 +112,7 @@ impl Default for LauncherConfig {
             disc_cache: Default::default(),
             games: vec![Game {
                 name: "Persona 2: Eternal Punishment".into(),
-                serials: ["SLPS-02785", "SLPS-02786", "SLUS-01158", "SLUS-01339"]
-                    .map(String::from)
-                    .to_vec(),
+                serials: ["SLPS-02785", "SLPS-02786", "SLUS-01158", "SLUS-01339"].map(String::from).to_vec(),
                 discs: BTreeMap::new(),
                 platform: default_platform(),
                 cover: String::new(),
@@ -153,53 +141,20 @@ pub const HOST_ACTIONS: [(&str, &str, &str, &str); 11] = [
 
 /// Gamepad buttons offered, SDL names: (name, label).
 pub const PAD_BUTTONS: [(&str, &str); 19] = [
-    ("a", "Cross (A)"),
-    ("b", "Circle (B)"),
-    ("x", "Square (X)"),
-    ("y", "Triangle (Y)"),
-    ("leftshoulder", "L1"),
-    ("rightshoulder", "R1"),
-    ("lefttrigger", "L2"),
-    ("righttrigger", "R2"),
-    ("leftstick", "L3"),
-    ("rightstick", "R3"),
-    ("dpup", "D-pad up"),
-    ("dpdown", "D-pad down"),
-    ("dpleft", "D-pad left"),
-    ("dpright", "D-pad right"),
-    ("start", "Start"),
-    ("back", "Select / Back"),
-    ("guide", "Guide / PS button"),
-    ("touchpad", "Touchpad click"),
-    ("misc1", "Share / Mic"),
+    ("a", "Cross (A)"), ("b", "Circle (B)"), ("x", "Square (X)"), ("y", "Triangle (Y)"),
+    ("leftshoulder", "L1"), ("rightshoulder", "R1"), ("lefttrigger", "L2"), ("righttrigger", "R2"),
+    ("leftstick", "L3"), ("rightstick", "R3"), ("dpup", "D-pad up"), ("dpdown", "D-pad down"),
+    ("dpleft", "D-pad left"), ("dpright", "D-pad right"), ("start", "Start"), ("back", "Select / Back"),
+    ("guide", "Guide / PS button"), ("touchpad", "Touchpad click"), ("misc1", "Share / Mic"),
 ];
 /// Buttons that make sense as the hotkey button (held, never a trigger on its own).
 pub const PAD_MODIFIERS: [&str; 6] = ["guide", "touchpad", "back", "start", "leftstick", "misc1"];
 
 /// The game's own keyboard map (`KeyboardMap()` in src/host/host_logic.cpp): the keys a bare hotkey may not take.
-const GAME_KEYS: [&str; 15] = [
-    "Up",
-    "Down",
-    "Left",
-    "Right",
-    "X",
-    "Z",
-    "S",
-    "A",
-    "Return",
-    "Backspace",
-    "Right Shift",
-    "Q",
-    "W",
-    "1",
-    "2",
-];
+const GAME_KEYS: [&str; 15] = ["Up", "Down", "Left", "Right", "X", "Z", "S", "A", "Return", "Backspace", "Right Shift", "Q", "W", "1", "2"];
 
 pub fn pad_label(name: &str) -> &str {
-    PAD_BUTTONS
-        .iter()
-        .find(|b| b.0 == name)
-        .map_or(name, |b| b.1)
+    PAD_BUTTONS.iter().find(|b| b.0 == name).map_or(name, |b| b.1)
 }
 
 /// "Ctrl+Shift+Alt+Key" -> (mods bitset 1 ctrl, 2 shift, 4 alt, 8 gui, key). Modifier prefixes are case-insensitive;
@@ -220,20 +175,8 @@ pub fn split_chord(text: &str) -> Option<(u8, String)> {
 }
 
 pub fn join_chord(mods: u8, key: &str) -> String {
-    let p = |bit: u8, n: &str| {
-        if mods & bit != 0 {
-            format!("{n}+")
-        } else {
-            String::new()
-        }
-    };
-    format!(
-        "{}{}{}{}{key}",
-        p(1, "Ctrl"),
-        p(2, "Shift"),
-        p(4, "Alt"),
-        p(8, "Gui")
-    )
+    let p = |bit: u8, n: &str| if mods & bit != 0 { format!("{n}+") } else { String::new() };
+    format!("{}{}{}{}{key}", p(1, "Ctrl"), p(2, "Shift"), p(4, "Alt"), p(8, "Gui"))
 }
 
 /// SDL scancode name for the name egui gives a key (`Key::name`), or None when SDL has no such key.
@@ -254,23 +197,8 @@ pub fn sdl_key_name(egui_name: &str) -> Option<String> {
         "OpenBracket" => "[".into(),
         "CloseBracket" => "]".into(),
         n if n.len() == 1 && n.chars().all(|c| c.is_ascii_alphanumeric()) => n.to_ascii_uppercase(),
-        n if [
-            "Space",
-            "Backspace",
-            "Delete",
-            "Insert",
-            "Home",
-            "End",
-            "PageUp",
-            "PageDown",
-        ]
-        .contains(&n) =>
-        {
-            n.into()
-        }
-        n if n.starts_with('F') && n[1..].parse::<u32>().is_ok_and(|k| (1..=12).contains(&k)) => {
-            n.into()
-        }
+        n if ["Space", "Backspace", "Delete", "Insert", "Home", "End", "PageUp", "PageDown"].contains(&n) => n.into(),
+        n if n.starts_with('F') && n[1..].parse::<u32>().is_ok_and(|k| (1..=12).contains(&k)) => n.into(),
         _ => return None,
     })
 }
@@ -318,14 +246,8 @@ impl Default for GameSettings {
             encounter_rate: "normal".into(),
             battle_speed: 1,
             skip_fmv: false,
-            hotkeys: HOST_ACTIONS
-                .iter()
-                .map(|h| (h.0.to_string(), h.2.to_string()))
-                .collect(),
-            pad_hotkeys: HOST_ACTIONS
-                .iter()
-                .map(|h| (h.0.to_string(), h.3.to_string()))
-                .collect(),
+            hotkeys: HOST_ACTIONS.iter().map(|h| (h.0.to_string(), h.2.to_string())).collect(),
+            pad_hotkeys: HOST_ACTIONS.iter().map(|h| (h.0.to_string(), h.3.to_string())).collect(),
             pad_modifier: "guide".into(),
             game_keys: GAME_KEYS.map(String::from).to_vec(),
             save_dir: String::new(),
@@ -347,124 +269,58 @@ fn set(doc: &mut Value, path: &[&str], val: Value) {
         if !cur.is_object() {
             *cur = Value::Object(Map::new());
         }
-        cur = cur
-            .as_object_mut()
-            .unwrap()
-            .entry(*k)
-            .or_insert_with(|| Value::Object(Map::new()));
+        cur = cur.as_object_mut().unwrap().entry(*k).or_insert_with(|| Value::Object(Map::new()));
     }
     if !cur.is_object() {
         *cur = Value::Object(Map::new());
     }
-    cur.as_object_mut()
-        .unwrap()
-        .insert(path[path.len() - 1].into(), val);
+    cur.as_object_mut().unwrap().insert(path[path.len() - 1].into(), val);
 }
 
 impl GameSettings {
     /// Read the known keys; anything missing or of the wrong type keeps its default.
     pub fn from_value(doc: &Value, serials: &[String]) -> Self {
         let d = Self::default();
-        let s = |p: &[&str], def: &str| {
-            get(doc, p)
-                .and_then(Value::as_str)
-                .unwrap_or(def)
-                .to_string()
-        };
-        let u = |p: &[&str], def: u32| {
-            get(doc, p)
-                .and_then(Value::as_u64)
-                .map_or(def, |n| n as u32)
-        };
+        let s = |p: &[&str], def: &str| get(doc, p).and_then(Value::as_str).unwrap_or(def).to_string();
+        let u = |p: &[&str], def: u32| get(doc, p).and_then(Value::as_u64).map_or(def, |n| n as u32);
         let b = |p: &[&str], def: bool| get(doc, p).and_then(Value::as_bool).unwrap_or(def);
         let text_speed = serials
             .iter()
             .find_map(|id| get(doc, &["game", id, "text_speed"]).and_then(Value::as_str))
             .unwrap_or(&d.text_speed)
             .to_string();
-        let native = serials
-            .iter()
-            .find_map(|id| get(doc, &["game", id, "recomp"]).and_then(Value::as_bool))
-            .unwrap_or(d.native);
+        let native = serials.iter().find_map(|id| get(doc, &["game", id, "recomp"]).and_then(Value::as_bool)).unwrap_or(d.native);
         let game = |k: &str| serials.iter().find_map(|id| get(doc, &["game", id, k]));
         let mut hotkeys = d.hotkeys.clone();
         for (action, key) in hotkeys.iter_mut() {
-            if let Some(k) = get(doc, &["input", "hotkeys", action])
-                .and_then(Value::as_str)
-                .filter(|k| split_chord(k).is_some())
-            {
+            if let Some(k) = get(doc, &["input", "hotkeys", action]).and_then(Value::as_str).filter(|k| split_chord(k).is_some()) {
                 *key = k.to_string();
             }
         }
         let mut pad_hotkeys = d.pad_hotkeys.clone();
         for (action, b) in pad_hotkeys.iter_mut() {
-            if let Some(k) = get(doc, &["input", "gamepad_hotkeys", action])
-                .and_then(Value::as_str)
-                .filter(|k| k.is_empty() || PAD_BUTTONS.iter().any(|p| p.0 == *k))
-            {
+            if let Some(k) = get(doc, &["input", "gamepad_hotkeys", action]).and_then(Value::as_str).filter(|k| k.is_empty() || PAD_BUTTONS.iter().any(|p| p.0 == *k)) {
                 *b = k.to_string();
             }
         }
-        let pad_modifier = get(doc, &["input", "gamepad_hotkeys", "modifier"])
-            .and_then(Value::as_str)
-            .filter(|k| PAD_BUTTONS.iter().any(|p| p.0 == *k))
-            .unwrap_or(&d.pad_modifier)
-            .to_string();
+        let pad_modifier = get(doc, &["input", "gamepad_hotkeys", "modifier"]).and_then(Value::as_str).filter(|k| PAD_BUTTONS.iter().any(|p| p.0 == *k)).unwrap_or(&d.pad_modifier).to_string();
         // the game's keys: each action of input.keyboard replaces its default list
         let mut game_keys = d.game_keys.clone();
         if let Some(kb) = get(doc, &["input", "keyboard"]).and_then(Value::as_object) {
             let mut per: BTreeMap<&str, Vec<String>> = BTreeMap::new();
             for (act, names) in kb {
-                per.insert(
-                    act,
-                    names
-                        .as_array()
-                        .map(|l| {
-                            l.iter()
-                                .filter_map(|n| n.as_str().map(String::from))
-                                .collect()
-                        })
-                        .unwrap_or_default(),
-                );
+                per.insert(act, names.as_array().map(|l| l.iter().filter_map(|n| n.as_str().map(String::from)).collect()).unwrap_or_default());
             }
             if !per.is_empty() {
                 let overridden: Vec<&str> = per.keys().copied().collect();
-                let defaults: [(&str, &[&str]); 14] = [
-                    ("up", &["Up"]),
-                    ("down", &["Down"]),
-                    ("left", &["Left"]),
-                    ("right", &["Right"]),
-                    ("cross", &["X"]),
-                    ("circle", &["Z"]),
-                    ("square", &["S"]),
-                    ("triangle", &["A"]),
-                    ("start", &["Return"]),
-                    ("select", &["Backspace", "Right Shift"]),
-                    ("l1", &["Q"]),
-                    ("r1", &["W"]),
-                    ("l2", &["1"]),
-                    ("r2", &["2"]),
-                ];
-                game_keys = defaults
-                    .iter()
-                    .filter(|(a, _)| !overridden.contains(a))
-                    .flat_map(|(_, k)| k.iter().map(|k| k.to_string()))
-                    .chain(per.into_values().flatten())
-                    .collect();
+                let defaults: [(&str, &[&str]); 14] = [("up", &["Up"]), ("down", &["Down"]), ("left", &["Left"]), ("right", &["Right"]), ("cross", &["X"]), ("circle", &["Z"]), ("square", &["S"]), ("triangle", &["A"]), ("start", &["Return"]), ("select", &["Backspace", "Right Shift"]), ("l1", &["Q"]), ("r1", &["W"]), ("l2", &["1"]), ("r2", &["2"])];
+                game_keys = defaults.iter().filter(|(a, _)| !overridden.contains(a)).flat_map(|(_, k)| k.iter().map(|k| k.to_string())).chain(per.into_values().flatten()).collect();
             }
         }
         Self {
-            encounter_rate: game("encounter_rate")
-                .and_then(Value::as_str)
-                .unwrap_or(&d.encounter_rate)
-                .to_string(),
-            battle_speed: game("battle_speed")
-                .and_then(Value::as_u64)
-                .filter(|n| (1..=3).contains(n))
-                .map_or(d.battle_speed, |n| n as u32),
-            skip_fmv: game("skip_fmv")
-                .and_then(Value::as_bool)
-                .unwrap_or(d.skip_fmv),
+            encounter_rate: game("encounter_rate").and_then(Value::as_str).unwrap_or(&d.encounter_rate).to_string(),
+            battle_speed: game("battle_speed").and_then(Value::as_u64).filter(|n| (1..=3).contains(n)).map_or(d.battle_speed, |n| n as u32),
+            skip_fmv: game("skip_fmv").and_then(Value::as_bool).unwrap_or(d.skip_fmv),
             hotkeys,
             pad_hotkeys,
             pad_modifier,
@@ -494,16 +350,8 @@ impl GameSettings {
         }
         set(doc, &["general", "language"], json!(self.language));
         set(doc, &["general", "save_dir"], json!(self.save_dir));
-        set(
-            doc,
-            &["general", "pause_on_focus_loss"],
-            json!(self.pause_on_focus_loss),
-        );
-        set(
-            doc,
-            &["video", "show_status_icons"],
-            json!(self.show_status_icons),
-        );
+        set(doc, &["general", "pause_on_focus_loss"], json!(self.pause_on_focus_loss));
+        set(doc, &["video", "show_status_icons"], json!(self.show_status_icons));
         set(doc, &["video", "fps_target"], json!(self.fps));
         set(doc, &["video", "window_mode"], json!(self.window_mode));
         set(doc, &["video", "widescreen"], json!(self.widescreen));
@@ -515,11 +363,7 @@ impl GameSettings {
         for id in serials {
             set(doc, &["game", id, "text_speed"], json!(self.text_speed));
             set(doc, &["game", id, "recomp"], json!(self.native));
-            set(
-                doc,
-                &["game", id, "encounter_rate"],
-                json!(self.encounter_rate),
-            );
+            set(doc, &["game", id, "encounter_rate"], json!(self.encounter_rate));
             set(doc, &["game", id, "battle_speed"], json!(self.battle_speed));
             set(doc, &["game", id, "skip_fmv"], json!(self.skip_fmv));
         }
@@ -529,11 +373,7 @@ impl GameSettings {
         for (action, b) in &self.pad_hotkeys {
             set(doc, &["input", "gamepad_hotkeys", action], json!(b));
         }
-        set(
-            doc,
-            &["input", "gamepad_hotkeys", "modifier"],
-            json!(self.pad_modifier),
-        );
+        set(doc, &["input", "gamepad_hotkeys", "modifier"], json!(self.pad_modifier));
     }
 
     /// Bind `action` to a key chord. Refuses a bare key the game uses; a chord already on another action swaps
@@ -541,18 +381,11 @@ impl GameSettings {
     pub fn bind_key(&mut self, action: &str, chord: &str) -> Result<(), String> {
         let (mods, key) = split_chord(chord).ok_or("not a key")?;
         if mods == 0 && self.game_keys.contains(&key) {
-            return Err(format!(
-                "{key} is a game button; add Ctrl, Shift or Alt (e.g. Ctrl+{key})"
-            ));
+            return Err(format!("{key} is a game button; add Ctrl, Shift or Alt (e.g. Ctrl+{key})"));
         }
         let chord = join_chord(mods, &key);
         let old = self.hotkeys.get(action).cloned().ok_or("unknown action")?;
-        if let Some(other) = self
-            .hotkeys
-            .iter()
-            .find(|(a, v)| **v == chord && *a != action)
-            .map(|(a, _)| a.clone())
-        {
+        if let Some(other) = self.hotkeys.iter().find(|(a, v)| **v == chord && *a != action).map(|(a, _)| a.clone()) {
             self.hotkeys.insert(other, old);
         }
         self.hotkeys.insert(action.into(), chord);
@@ -562,21 +395,12 @@ impl GameSettings {
     /// Bind `action` to a gamepad button ("" = none). Not the hotkey button itself; a button already used by another
     /// action swaps places.
     pub fn bind_pad(&mut self, action: &str, button: &str) -> Result<(), String> {
-        let old = self
-            .pad_hotkeys
-            .get(action)
-            .cloned()
-            .ok_or("unknown action")?;
+        let old = self.pad_hotkeys.get(action).cloned().ok_or("unknown action")?;
         if !button.is_empty() && button == self.pad_modifier {
             return Err(format!("{} is the hotkey button", pad_label(button)));
         }
         if !button.is_empty() {
-            if let Some(other) = self
-                .pad_hotkeys
-                .iter()
-                .find(|(a, v)| v.as_str() == button && *a != action)
-                .map(|(a, _)| a.clone())
-            {
+            if let Some(other) = self.pad_hotkeys.iter().find(|(a, v)| v.as_str() == button && *a != action).map(|(a, _)| a.clone()) {
                 self.pad_hotkeys.insert(other, old);
             }
         }
@@ -587,14 +411,8 @@ impl GameSettings {
     /// Choose the hotkey button; refused while an action uses it.
     pub fn set_modifier(&mut self, button: &str) -> Result<(), String> {
         if let Some((a, _)) = self.pad_hotkeys.iter().find(|(_, v)| v.as_str() == button) {
-            let label = HOST_ACTIONS
-                .iter()
-                .find(|h| h.0 == a)
-                .map_or(a.as_str(), |h| h.1);
-            return Err(format!(
-                "{} is bound to {label}; change that first",
-                pad_label(button)
-            ));
+            let label = HOST_ACTIONS.iter().find(|h| h.0 == a).map_or(a.as_str(), |h| h.1);
+            return Err(format!("{} is bound to {label}; change that first", pad_label(button)));
         }
         self.pad_modifier = button.into();
         Ok(())
@@ -603,25 +421,13 @@ impl GameSettings {
     /// Every hotkey (keyboard, gamepad and the hotkey button) back to its default.
     pub fn reset_hotkeys(&mut self) {
         let d = Self::default();
-        (self.hotkeys, self.pad_hotkeys, self.pad_modifier) =
-            (d.hotkeys, d.pad_hotkeys, d.pad_modifier);
+        (self.hotkeys, self.pad_hotkeys, self.pad_modifier) = (d.hotkeys, d.pad_hotkeys, d.pad_modifier);
     }
 }
 
 /// Arguments for `personarm_sdl`. Renderer and scale are CLI-only (the file accepts 1..4 and no renderer).
-pub fn build_args(
-    settings: &str,
-    cue: &str,
-    cfg: &LauncherConfig,
-    s: &GameSettings,
-) -> Vec<String> {
-    let mut a: Vec<String> = vec![
-        cue.into(),
-        "--settings".into(),
-        settings.into(),
-        "--renderer".into(),
-        cfg.renderer.clone(),
-    ];
+pub fn build_args(settings: &str, cue: &str, cfg: &LauncherConfig, s: &GameSettings) -> Vec<String> {
+    let mut a: Vec<String> = vec![cue.into(), "--settings".into(), settings.into(), "--renderer".into(), cfg.renderer.clone()];
     let gpu = cfg.renderer == "gpu";
     // The host rejects a software internal resolution above 1x with frame interpolation (fps > 60);
     // the GPU renderer interpolates at any scale, so it keeps its resolution at 90/120 fps.
@@ -637,10 +443,7 @@ pub fn build_args(
 
 /// Disc for the selected language, if the user set one.
 pub fn disc_for<'a>(g: &'a Game, language: &str) -> Option<&'a str> {
-    g.discs
-        .get(language)
-        .map(|p| p.trim().trim_matches('"'))
-        .filter(|p| !p.is_empty())
+    g.discs.get(language).map(|p| p.trim().trim_matches('"')).filter(|p| !p.is_empty())
 }
 
 // ── paths ──
@@ -653,35 +456,19 @@ fn data_root() -> PathBuf {
     } else if let Some(x) = var("XDG_DATA_HOME") {
         x
     } else if cfg!(target_os = "macos") {
-        var("HOME")
-            .unwrap_or_default()
-            .join("Library/Application Support")
+        var("HOME").unwrap_or_default().join("Library/Application Support")
     } else {
         var("HOME").unwrap_or_default().join(".local/share")
     }
 }
 
-pub fn launcher_dir() -> PathBuf {
-    data_root().join("PersonaRM")
-}
-pub fn launcher_json() -> PathBuf {
-    launcher_dir().join("launcher.json")
-}
-pub fn log_dir() -> PathBuf {
-    launcher_dir().join("logs")
-}
+pub fn launcher_dir() -> PathBuf { data_root().join("PersonaRM") }
+pub fn launcher_json() -> PathBuf { launcher_dir().join("launcher.json") }
+pub fn log_dir() -> PathBuf { launcher_dir().join("logs") }
 /// Same file as `SDL_GetPrefPath("PersonaRM","PersonaRM")/settings.json`.
-pub fn game_settings_json() -> PathBuf {
-    launcher_dir().join("PersonaRM").join("settings.json")
-}
+pub fn game_settings_json() -> PathBuf { launcher_dir().join("PersonaRM").join("settings.json") }
 
-pub fn exe_name() -> &'static str {
-    if cfg!(windows) {
-        "personarm_sdl.exe"
-    } else {
-        "personarm_sdl"
-    }
-}
+pub fn exe_name() -> &'static str { if cfg!(windows) { "personarm_sdl.exe" } else { "personarm_sdl" } }
 
 /// `game_exe` if it exists, else `personarm_sdl` next to the launcher.
 pub fn find_game_exe(cfg: &LauncherConfig) -> Option<PathBuf> {
@@ -695,11 +482,7 @@ pub fn find_game_exe(cfg: &LauncherConfig) -> Option<PathBuf> {
 
 /// `personarm_native` next to the game executable: prepares the native code for a disc.
 pub fn native_tool_for(game_exe: &std::path::Path) -> PathBuf {
-    game_exe.with_file_name(if cfg!(windows) {
-        "personarm_native.exe"
-    } else {
-        "personarm_native"
-    })
+    game_exe.with_file_name(if cfg!(windows) { "personarm_native.exe" } else { "personarm_native" })
 }
 
 /// One `personarm_native --json` progress line.
@@ -716,15 +499,8 @@ pub fn parse_native_line(line: &str) -> Option<NativeLine> {
     let v: Value = serde_json::from_str(line.trim()).ok()?;
     let stage = v.get("stage")?.as_str()?.to_string();
     Some(NativeLine {
-        progress: v
-            .get("progress")
-            .and_then(Value::as_f64)
-            .unwrap_or(if stage == "done" { 1.0 } else { 0.0 }) as f32,
-        message: v
-            .get("message")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string(),
+        progress: v.get("progress").and_then(Value::as_f64).unwrap_or(if stage == "done" { 1.0 } else { 0.0 }) as f32,
+        message: v.get("message").and_then(Value::as_str).unwrap_or("").to_string(),
         ok: v.get("ok").and_then(Value::as_bool),
         stage,
     })
@@ -733,15 +509,10 @@ pub fn parse_native_line(line: &str) -> Option<NativeLine> {
 // ── io ──
 
 /// Hand-edited files (Windows PowerShell, Notepad) often start with a UTF-8 BOM.
-pub(crate) fn strip_bom(t: &str) -> &str {
-    t.strip_prefix('\u{feff}').unwrap_or(t)
-}
+pub(crate) fn strip_bom(t: &str) -> &str { t.strip_prefix('\u{feff}').unwrap_or(t) }
 
-pub fn load_launcher() -> LauncherConfig {
-    std::fs::read_to_string(launcher_json())
-        .ok()
-        .and_then(|t| serde_json::from_str(strip_bom(&t)).ok())
-        .unwrap_or_default()
+pub fn load_launcher()-> LauncherConfig {
+    std::fs::read_to_string(launcher_json()).ok().and_then(|t| serde_json::from_str(strip_bom(&t)).ok()).unwrap_or_default()
 }
 
 pub(crate) fn write_atomic(path: &std::path::Path, text: &str) -> std::io::Result<()> {
@@ -767,19 +538,14 @@ pub fn load_game_doc() -> Value {
 }
 
 pub fn save_game_doc(doc: &Value) -> std::io::Result<()> {
-    write_atomic(
-        &game_settings_json(),
-        &serde_json::to_string_pretty(doc).unwrap(),
-    )
+    write_atomic(&game_settings_json(), &serde_json::to_string_pretty(doc).unwrap())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn serials() -> Vec<String> {
-        vec!["SLPS-02785".into(), "SLUS-01158".into()]
-    }
+    fn serials() -> Vec<String> { vec!["SLPS-02785".into(), "SLUS-01158".into()] }
 
     #[test]
     fn native_setting_defaults_on_and_roundtrips() {
@@ -795,24 +561,14 @@ mod tests {
 
     #[test]
     fn native_progress_lines() {
-        let l = parse_native_line(
-            r#"{"stage":"compile","progress":0.5,"message":"Compiling resident"}"#,
-        )
-        .unwrap();
-        assert_eq!(
-            (l.stage.as_str(), l.progress, l.message.as_str(), l.ok),
-            ("compile", 0.5, "Compiling resident", None)
-        );
+        let l = parse_native_line(r#"{"stage":"compile","progress":0.5,"message":"Compiling resident"}"#).unwrap();
+        assert_eq!((l.stage.as_str(), l.progress, l.message.as_str(), l.ok), ("compile", 0.5, "Compiling resident", None));
         let d = parse_native_line(r#"{"stage":"done","ok":true,"cached":true,"dir":"x"}"#).unwrap();
         assert_eq!((d.progress, d.ok), (1.0, Some(true)));
-        let e = parse_native_line(r#"{"stage":"error","ok":false,"message":"no FILEPOS.DAT"}"#)
-            .unwrap();
+        let e = parse_native_line(r#"{"stage":"error","ok":false,"message":"no FILEPOS.DAT"}"#).unwrap();
         assert_eq!((e.ok, e.message.as_str()), (Some(false), "no FILEPOS.DAT"));
         assert!(parse_native_line("garbage").is_none());
-        assert_eq!(
-            native_tool_for(std::path::Path::new("a/personarm_sdl.exe")).parent(),
-            Some(std::path::Path::new("a"))
-        );
+        assert_eq!(native_tool_for(std::path::Path::new("a/personarm_sdl.exe")).parent(), Some(std::path::Path::new("a")));
     }
 
     #[test]
@@ -824,14 +580,7 @@ mod tests {
             "input": {"keyboard": {"cross": ["X"]}},
             "game": {"SLPS-02785": {"memcard1": "a.mcd", "text_speed": "fast"}, "OTHER": {"a": 1}}
         });
-        let s = GameSettings {
-            fps: 120,
-            language: "en".into(),
-            text_speed: "instant".into(),
-            mute: true,
-            volume: 40,
-            ..Default::default()
-        };
+        let s = GameSettings { fps: 120, language: "en".into(), text_speed: "instant".into(), mute: true, volume: 40, ..Default::default() };
         s.apply(&mut doc, &serials(), 3);
         assert_eq!(doc["launcher"]["x"], 1);
         assert_eq!(doc["video"]["window_scale"], 5);
@@ -855,10 +604,7 @@ mod tests {
             "game": {"SLPS-02785": {"note": "keep", "encounter_rate": "reduced", "battle_speed": 3, "skip_fmv": true}}
         });
         let mut s = GameSettings::from_value(&doc, &serials());
-        assert_eq!(
-            (s.encounter_rate.as_str(), s.battle_speed, s.skip_fmv),
-            ("reduced", 3, true)
-        );
+        assert_eq!((s.encounter_rate.as_str(), s.battle_speed, s.skip_fmv), ("reduced", 3, true));
         assert_eq!(s.hotkeys["skip_fmv"], "F9");
         assert_eq!(s.hotkeys["text_speed"], "F4");
         s.encounter_rate = "none".into();
@@ -875,24 +621,14 @@ mod tests {
         // a bad value falls back to the default
         let bad = json!({"game": {"SLPS-02785": {"battle_speed": 9, "encounter_rate": 4}}});
         assert_eq!(GameSettings::from_value(&bad, &serials()).battle_speed, 1);
-        assert_eq!(
-            GameSettings::from_value(&bad, &serials()).encounter_rate,
-            "normal"
-        );
+        assert_eq!(GameSettings::from_value(&bad, &serials()).encounter_rate, "normal");
     }
 
     #[test]
     fn hotkey_bindings_conflicts_and_roundtrip() {
         let mut s = GameSettings::default();
         assert_eq!(s.hotkeys.len(), 11);
-        assert_eq!(
-            (
-                s.hotkeys["save_state"].as_str(),
-                s.pad_hotkeys["save_state"].as_str(),
-                s.pad_modifier.as_str()
-            ),
-            ("F5", "rightshoulder", "guide")
-        );
+        assert_eq!((s.hotkeys["save_state"].as_str(), s.pad_hotkeys["save_state"].as_str(), s.pad_modifier.as_str()), ("F5", "rightshoulder", "guide"));
         // chords
         assert_eq!(split_chord("Ctrl+Shift+S"), Some((3, "S".into())));
         assert_eq!(split_chord("Keypad +"), Some((0, "Keypad +".into())));
@@ -905,90 +641,40 @@ mod tests {
         assert_eq!(s.hotkeys["save_state"], "Ctrl+Z");
         // an already used chord swaps
         assert!(s.bind_key("load_state", "F1").is_ok());
-        assert_eq!(
-            (
-                s.hotkeys["load_state"].as_str(),
-                s.hotkeys["encounter_rate"].as_str()
-            ),
-            ("F1", "F8")
-        );
+        assert_eq!((s.hotkeys["load_state"].as_str(), s.hotkeys["encounter_rate"].as_str()), ("F1", "F8"));
         // pad: the hotkey button is refused, a used button swaps, "" unbinds
         assert!(s.bind_pad("quit", "guide").is_err());
         assert!(s.bind_pad("quit", "rightshoulder").is_ok());
-        assert_eq!(
-            (
-                s.pad_hotkeys["quit"].as_str(),
-                s.pad_hotkeys["save_state"].as_str()
-            ),
-            ("rightshoulder", "")
-        );
+        assert_eq!((s.pad_hotkeys["quit"].as_str(), s.pad_hotkeys["save_state"].as_str()), ("rightshoulder", ""));
         assert!(s.bind_pad("quit", "").is_ok());
         // the hotkey button cannot be one an action uses
         assert!(s.set_modifier("a").is_err() && s.pad_modifier == "guide");
         assert!(s.set_modifier("touchpad").is_ok() && s.bind_pad("quit", "touchpad").is_err());
         // write + read back, unknown keys kept
-        let mut doc =
-            json!({"input": {"gamepad_hotkeys": {"future": "x"}, "keyboard": {"cross": ["K"]}}});
+        let mut doc = json!({"input": {"gamepad_hotkeys": {"future": "x"}, "keyboard": {"cross": ["K"]}}});
         s.apply(&mut doc, &serials(), 0);
         assert_eq!(doc["input"]["gamepad_hotkeys"]["modifier"], "touchpad");
         assert_eq!(doc["input"]["gamepad_hotkeys"]["quit"], "");
         assert_eq!(doc["input"]["gamepad_hotkeys"]["future"], "x");
         assert_eq!(doc["input"]["hotkeys"]["save_state"], "Ctrl+Z");
         let back = GameSettings::from_value(&doc, &serials());
-        assert_eq!(
-            (
-                back.hotkeys.clone(),
-                back.pad_hotkeys.clone(),
-                back.pad_modifier.clone()
-            ),
-            (
-                s.hotkeys.clone(),
-                s.pad_hotkeys.clone(),
-                "touchpad".to_string()
-            )
-        );
+        assert_eq!((back.hotkeys.clone(), back.pad_hotkeys.clone(), back.pad_modifier.clone()), (s.hotkeys.clone(), s.pad_hotkeys.clone(), "touchpad".to_string()));
         // the game's keys follow input.keyboard: cross is K now (X free), the other actions keep their defaults
-        assert!(
-            back.game_keys.contains(&"K".to_string())
-                && !back.game_keys.contains(&"X".to_string())
-                && back.game_keys.contains(&"Z".to_string())
-        );
+        assert!(back.game_keys.contains(&"K".to_string()) && !back.game_keys.contains(&"X".to_string()) && back.game_keys.contains(&"Z".to_string()));
         let mut back = back;
         assert!(back.bind_key("quit", "X").is_ok());
         // bad values in the file fall back to the defaults
         let bad = json!({"input": {"hotkeys": {"quit": "Ctrl+"}, "gamepad_hotkeys": {"modifier": "nope", "quit": "nope"}}});
         let b = GameSettings::from_value(&bad, &serials());
-        assert_eq!(
-            (
-                b.hotkeys["quit"].as_str(),
-                b.pad_modifier.as_str(),
-                b.pad_hotkeys["quit"].as_str()
-            ),
-            ("Escape", "guide", "")
-        );
+        assert_eq!((b.hotkeys["quit"].as_str(), b.pad_modifier.as_str(), b.pad_hotkeys["quit"].as_str()), ("Escape", "guide", ""));
         // reset
         s.reset_hotkeys();
-        assert_eq!(
-            (s.hotkeys, s.pad_hotkeys, s.pad_modifier),
-            (
-                GameSettings::default().hotkeys,
-                GameSettings::default().pad_hotkeys,
-                "guide".to_string()
-            )
-        );
+        assert_eq!((s.hotkeys, s.pad_hotkeys, s.pad_modifier), (GameSettings::default().hotkeys, GameSettings::default().pad_hotkeys, "guide".to_string()));
     }
 
     #[test]
     fn egui_key_names_map_to_sdl() {
-        for (e, sdl) in [
-            ("F1", "F1"),
-            ("Enter", "Return"),
-            ("a", "A"),
-            ("A", "A"),
-            ("5", "5"),
-            ("ArrowLeft", "Left"),
-            ("Space", "Space"),
-        ] {
+        for (e, sdl) in [("F1", "F1"), ("Enter", "Return"), ("a", "A"), ("A", "A"), ("5", "5"), ("ArrowLeft", "Left"), ("Space", "Space")] {
             assert_eq!(sdl_key_name(e).as_deref(), Some(sdl), "{e}");
         }
         assert_eq!(sdl_key_name("F13"), None);
@@ -998,17 +684,10 @@ mod tests {
     #[test]
     fn apply_to_empty_or_garbage_and_roundtrip() {
         for mut doc in [json!({}), json!(null), json!([1]), json!({"video": 7})] {
-            let s = GameSettings {
-                widescreen: "21:9".into(),
-                window_mode: "borderless".into(),
-                ..Default::default()
-            };
+            let s = GameSettings { widescreen: "21:9".into(), window_mode: "borderless".into(), ..Default::default() };
             s.apply(&mut doc, &serials(), 0);
             assert_eq!(doc["version"], 1);
-            assert!(
-                doc["video"].get("resolution_scale").is_none(),
-                "auto/>4 is CLI-only"
-            );
+            assert!(doc["video"].get("resolution_scale").is_none(), "auto/>4 is CLI-only");
             assert_eq!(GameSettings::from_value(&doc, &serials()), s);
         }
     }
@@ -1022,38 +701,17 @@ mod tests {
 
     #[test]
     fn args() {
-        let mut c = LauncherConfig {
-            renderer: "gpu".into(),
-            resolution: 0,
-            ..Default::default()
-        };
+        let mut c = LauncherConfig { renderer: "gpu".into(), resolution: 0, ..Default::default() };
         let s = GameSettings::default();
-        assert_eq!(
-            build_args("S.json", "d.cue", &c, &s),
-            [
-                "d.cue",
-                "--settings",
-                "S.json",
-                "--renderer",
-                "gpu",
-                "--resolution-scale",
-                "auto"
-            ]
-        );
+        assert_eq!(build_args("S.json", "d.cue", &c, &s), ["d.cue", "--settings", "S.json", "--renderer", "gpu", "--resolution-scale", "auto"]);
         c.resolution = 9;
         assert_eq!(build_args("S", "d", &c, &s)[6], "9");
         c.renderer = "software".into();
         assert_eq!(build_args("S", "d", &c, &s)[6], "4"); // software caps at 4x
         c.resolution = 0;
         assert_eq!(build_args("S", "d", &c, &s)[6], "1");
-        let fast = GameSettings {
-            fps: 120,
-            ..Default::default()
-        };
-        assert_eq!(
-            build_args("S", "d", &c, &fast),
-            ["d", "--settings", "S", "--renderer", "software"]
-        );
+        let fast = GameSettings { fps: 120, ..Default::default() };
+        assert_eq!(build_args("S", "d", &c, &fast), ["d", "--settings", "S", "--renderer", "software"]);
         c.renderer = "gpu".into();
         c.resolution = 4;
         assert_eq!(build_args("S", "d", &c, &fast)[6], "4"); // GPU keeps its scale at 120 fps
@@ -1065,10 +723,7 @@ mod tests {
             "games":[{"name":"P2","serials":["SLPS-02785"],"discs":{"ja":"a.cue"}}]}"#;
         let c: LauncherConfig = serde_json::from_str(old).unwrap();
         let g = &c.games[0];
-        assert_eq!(
-            (g.platform.as_str(), g.cover.as_str(), g.exe.as_str()),
-            ("PS1", "", "")
-        );
+        assert_eq!((g.platform.as_str(), g.cover.as_str(), g.exe.as_str()), ("PS1", "", ""));
         assert!(g.args.is_empty());
         assert_eq!(disc_for(g, "ja"), Some("a.cue"));
         assert_eq!(c.renderer, "gpu");
@@ -1080,10 +735,7 @@ mod tests {
         let mut g = c.games.remove(0);
         g.exe = "does/not/exist".into();
         assert_eq!(status(&c, &g), Status::NotPlayable);
-        g.exe = std::env::current_exe()
-            .unwrap()
-            .to_string_lossy()
-            .into_owned();
+        g.exe = std::env::current_exe().unwrap().to_string_lossy().into_owned();
         assert_eq!(status(&c, &g), Status::NeedsDisc);
         g.discs.insert("ja".into(), "missing.cue".into());
         assert_eq!(status(&c, &g), Status::NeedsDisc); // a path that does not exist is not a disc
@@ -1094,10 +746,7 @@ mod tests {
     #[test]
     fn path_states() {
         let exe = std::env::current_exe().unwrap();
-        let (f, d) = (
-            exe.to_string_lossy().into_owned(),
-            exe.parent().unwrap().to_string_lossy().into_owned(),
-        );
+        let (f, d) = (exe.to_string_lossy().into_owned(), exe.parent().unwrap().to_string_lossy().into_owned());
         assert_eq!(path_state("", false), PathState::NotSet);
         assert_eq!(path_state("  ", true), PathState::NotSet);
         assert_eq!(path_state(&f, false), PathState::Found);

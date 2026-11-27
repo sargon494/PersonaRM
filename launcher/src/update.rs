@@ -20,11 +20,7 @@ const API: &str = "https://api.github.com/repos/sargon494/PersonaRM/releases/lat
 const MAX_ZIP: u64 = 256 << 20;
 /// Executable name since the rename. Old installs run `launcher.exe`, which the zip still ships (same
 /// binary) so their updater keeps accepting it; see docs/LAUNCHER.md for when it can go.
-pub const NEW_EXE: &str = if cfg!(windows) {
-    "PersonaRM.exe"
-} else {
-    "PersonaRM"
-};
+pub const NEW_EXE: &str = if cfg!(windows) { "PersonaRM.exe" } else { "PersonaRM" };
 const OLD_EXE: &str = "launcher.exe";
 const STAGE: &str = ".prm-update";
 const MANIFEST: &str = ".prm-update-old.txt";
@@ -50,11 +46,7 @@ pub fn is_newer(tag: &str, current: &str) -> bool {
 
 /// Debug builds only: `PRM_UPDATE_API` points the check at a local fake server (127.0.0.1).
 fn local_override() -> Option<String> {
-    if cfg!(debug_assertions) {
-        std::env::var("PRM_UPDATE_API").ok()
-    } else {
-        None
-    }
+    if cfg!(debug_assertions) { std::env::var("PRM_UPDATE_API").ok() } else { None }
 }
 
 fn host_of(url: &str) -> Option<(&str, &str)> {
@@ -64,21 +56,13 @@ fn host_of(url: &str) -> Option<(&str, &str)> {
 }
 
 fn local_ok(url: &str) -> bool {
-    local_override().is_some()
-        && host_of(url)
-            .is_some_and(|(s, a)| s == "http" && a.starts_with("127.0.0.1:") && !a.contains('@'))
+    local_override().is_some() && host_of(url).is_some_and(|(s, a)| s == "http" && a.starts_with("127.0.0.1:") && !a.contains('@'))
 }
 
 /// Download URLs must be https on github.com or GitHub's release CDN (no port, no userinfo).
 pub fn asset_url_ok(url: &str) -> bool {
     let https = host_of(url).is_some_and(|(s, a)| {
-        s == "https"
-            && matches!(
-                a,
-                "github.com"
-                    | "objects.githubusercontent.com"
-                    | "release-assets.githubusercontent.com"
-            )
+        s == "https" && matches!(a, "github.com" | "objects.githubusercontent.com" | "release-assets.githubusercontent.com")
     });
     https || local_ok(url)
 }
@@ -88,12 +72,7 @@ fn api_url_ok(url: &str) -> bool {
 }
 
 /// GET with the redirects followed by hand so every hop passes `ok`.
-fn fetch(
-    url: &str,
-    ok: fn(&str) -> bool,
-    limit: u64,
-    timeout: Duration,
-) -> Result<Vec<u8>, String> {
+fn fetch(url: &str, ok: fn(&str) -> bool, limit: u64, timeout: Duration) -> Result<Vec<u8>, String> {
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .timeout_global(Some(timeout))
         .max_redirects(0)
@@ -106,30 +85,16 @@ fn fetch(
         if !ok(&url) {
             return Err(format!("refused URL {url}"));
         }
-        let mut resp = agent
-            .get(&url)
-            .header("Accept", "application/vnd.github+json")
-            .call()
-            .map_err(|e| e.to_string())?;
+        let mut resp = agent.get(&url).header("Accept", "application/vnd.github+json").call().map_err(|e| e.to_string())?;
         let st = resp.status().as_u16();
         if (300..400).contains(&st) {
-            url = resp
-                .headers()
-                .get("location")
-                .and_then(|v| v.to_str().ok())
-                .ok_or("redirect without location")?
-                .to_string();
+            url = resp.headers().get("location").and_then(|v| v.to_str().ok()).ok_or("redirect without location")?.to_string();
             continue;
         }
         if st != 200 {
             return Err(format!("HTTP {st}"));
         }
-        return resp
-            .body_mut()
-            .with_config()
-            .limit(limit)
-            .read_to_vec()
-            .map_err(|e| e.to_string());
+        return resp.body_mut().with_config().limit(limit).read_to_vec().map_err(|e| e.to_string());
     }
     Err("too many redirects".into())
 }
@@ -137,24 +102,14 @@ fn fetch(
 pub fn parse_release(json: &[u8]) -> Option<Release> {
     let v: serde_json::Value = serde_json::from_slice(json).ok()?;
     let tag = v["tag_name"].as_str()?.to_string();
-    let suffix = if cfg!(windows) {
-        "windows-x64.zip"
-    } else {
-        "linux-x64.zip"
-    };
+    let suffix = if cfg!(windows) { "windows-x64.zip" } else { "linux-x64.zip" };
     let url_of = |end: &str| {
         v["assets"].as_array()?.iter().find_map(|a| {
             let n = a["name"].as_str()?;
-            n.ends_with(end)
-                .then(|| a["browser_download_url"].as_str().map(String::from))
-                .flatten()
+            n.ends_with(end).then(|| a["browser_download_url"].as_str().map(String::from)).flatten()
         })
     };
-    Some(Release {
-        tag,
-        zip_url: url_of(suffix)?,
-        sha_url: url_of(&format!("{suffix}.sha256"))?,
-    })
+    Some(Release { tag, zip_url: url_of(suffix)?, sha_url: url_of(&format!("{suffix}.sha256"))? })
 }
 
 /// Newer release than this build, or None (up to date, offline, or any error: all silent).
@@ -169,15 +124,8 @@ pub fn check() -> Option<Release> {
 
 /// `sha256sum`-style text ("<hex>  name") against the downloaded bytes.
 pub fn verify_sha256(data: &[u8], sha_text: &str) -> bool {
-    let want = sha_text
-        .split_whitespace()
-        .next()
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    let got: String = Sha256::digest(data)
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect();
+    let want = sha_text.split_whitespace().next().unwrap_or("").to_ascii_lowercase();
+    let got: String = Sha256::digest(data).iter().map(|b| format!("{b:02x}")).collect();
     want.len() == 64 && want == got
 }
 
@@ -190,11 +138,7 @@ pub fn download_and_apply(r: &Release) -> Result<(), String> {
     }
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let dir = exe.parent().ok_or("no install folder")?;
-    apply_zip(
-        &zip,
-        dir,
-        exe.file_name().and_then(|n| n.to_str()).unwrap_or(NEW_EXE),
-    )
+    apply_zip(&zip, dir, exe.file_name().and_then(|n| n.to_str()).unwrap_or(NEW_EXE))
 }
 
 /// Started as the old `launcher.exe` with `PersonaRM.exe` beside it: the exe to start instead.
@@ -209,9 +153,7 @@ pub fn shim_target(me: &Path) -> Option<PathBuf> {
 /// What to start to reopen the launcher: the new exe if it is installed, else this one.
 pub fn relaunch_exe() -> Option<PathBuf> {
     let me = std::env::current_exe().ok()?;
-    Some(me.with_file_name(NEW_EXE))
-        .filter(|p| p.is_file())
-        .or(Some(me))
+    Some(me.with_file_name(NEW_EXE)).filter(|p| p.is_file()).or(Some(me))
 }
 
 fn walk(dir: &Path, base: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
@@ -236,12 +178,7 @@ pub fn apply_zip(zip: &[u8], install: &Path, launcher_exe: &str) -> Result<(), S
     r
 }
 
-fn extract_and_swap(
-    zip: &[u8],
-    install: &Path,
-    stage: &Path,
-    launcher_exe: &str,
-) -> Result<(), String> {
+fn extract_and_swap(zip: &[u8], install: &Path, stage: &Path, launcher_exe: &str) -> Result<(), String> {
     let e = |x: &dyn std::fmt::Display| x.to_string();
     let mut ar = zip::ZipArchive::new(Cursor::new(zip)).map_err(|x| e(&x))?;
     for i in 0..ar.len() {
@@ -264,15 +201,8 @@ fn extract_and_swap(
     }
     // Windows cannot overwrite a running exe but can rename it: old files become `<name>.old`,
     // listed in a manifest so the next start deletes exactly those and nothing else.
-    let olds: Vec<PathBuf> = files
-        .iter()
-        .filter(|f| install.join(f).exists())
-        .map(|f| with_old(f))
-        .collect();
-    let list: Vec<String> = olds
-        .iter()
-        .map(|p| p.to_string_lossy().into_owned())
-        .collect();
+    let olds: Vec<PathBuf> = files.iter().filter(|f| install.join(f).exists()).map(|f| with_old(f)).collect();
+    let list: Vec<String> = olds.iter().map(|p| p.to_string_lossy().into_owned()).collect();
     std::fs::write(install.join(MANIFEST), list.join("\n")).map_err(|x| e(&x))?;
     let mut done: Vec<&PathBuf> = Vec::new();
     let mut fail = None;
@@ -326,9 +256,7 @@ fn with_old(rel: &Path) -> PathBuf {
 pub fn cleanup_old(install: &Path) -> bool {
     let _ = std::fs::remove_dir_all(install.join(STAGE));
     let m = install.join(MANIFEST);
-    let Ok(text) = std::fs::read_to_string(&m) else {
-        return false;
-    };
+    let Ok(text) = std::fs::read_to_string(&m) else { return false };
     let mut left = false;
     for l in text.lines().filter(|l| !l.is_empty()) {
         let p = install.join(l);
@@ -362,8 +290,7 @@ mod tests {
     fn make_zip(files: &[(&str, &[u8])]) -> Vec<u8> {
         let mut w = zip::ZipWriter::new(Cursor::new(Vec::new()));
         for (n, d) in files {
-            w.start_file(*n, zip::write::SimpleFileOptions::default())
-                .unwrap();
+            w.start_file(*n, zip::write::SimpleFileOptions::default()).unwrap();
             w.write_all(d).unwrap();
         }
         w.finish().unwrap().into_inner()
@@ -394,9 +321,7 @@ mod tests {
 
     #[test]
     fn urls() {
-        assert!(asset_url_ok(
-            "https://github.com/sargon494/PersonaRM/releases/download/v1/a.zip"
-        ));
+        assert!(asset_url_ok("https://github.com/sargon494/PersonaRM/releases/download/v1/a.zip"));
         assert!(asset_url_ok("https://objects.githubusercontent.com/x"));
         assert!(!asset_url_ok("http://github.com/x"));
         assert!(!asset_url_ok("https://github.com.evil.com/x"));
@@ -408,19 +333,12 @@ mod tests {
 
     #[test]
     fn release_json() {
-        let sfx = if cfg!(windows) {
-            "windows-x64.zip"
-        } else {
-            "linux-x64.zip"
-        };
+        let sfx = if cfg!(windows) { "windows-x64.zip" } else { "linux-x64.zip" };
         let j = format!(
             r#"{{"tag_name":"v1.2.3","assets":[{{"name":"a-{sfx}.sha256","browser_download_url":"https://github.com/s"}},{{"name":"a-{sfx}","browser_download_url":"https://github.com/z"}}]}}"#
         );
         let r = parse_release(j.as_bytes()).unwrap();
-        assert_eq!(
-            (r.zip_url.as_str(), r.sha_url.as_str()),
-            ("https://github.com/z", "https://github.com/s")
-        );
+        assert_eq!((r.zip_url.as_str(), r.sha_url.as_str()), ("https://github.com/z", "https://github.com/s"));
         assert!(parse_release(br#"{"tag_name":"v1","assets":[]}"#).is_none());
     }
 
@@ -432,33 +350,17 @@ mod tests {
         write_file(&d.join("SDL3.dll"), b"old-sdl");
         write_file(&d.join("launcher.json"), b"user-config");
         write_file(&d.join("notes.old"), b"user-file");
-        let z = make_zip(&[
-            ("launcher.exe", b"new-launcher"),
-            ("SDL3.dll", b"new-sdl"),
-            ("docs/LAUNCHER.md", b"doc"),
-        ]);
+        let z = make_zip(&[("launcher.exe", b"new-launcher"), ("SDL3.dll", b"new-sdl"), ("docs/LAUNCHER.md", b"doc")]);
         apply_zip(&z, &d, "launcher.exe").unwrap();
-        assert_eq!(
-            std::fs::read(d.join("launcher.exe")).unwrap(),
-            b"new-launcher"
-        );
-        assert_eq!(
-            std::fs::read(d.join("launcher.exe.old")).unwrap(),
-            b"old-launcher"
-        );
+        assert_eq!(std::fs::read(d.join("launcher.exe")).unwrap(), b"new-launcher");
+        assert_eq!(std::fs::read(d.join("launcher.exe.old")).unwrap(), b"old-launcher");
         assert_eq!(std::fs::read(d.join("docs/LAUNCHER.md")).unwrap(), b"doc");
-        assert_eq!(
-            std::fs::read(d.join("launcher.json")).unwrap(),
-            b"user-config"
-        );
+        assert_eq!(std::fs::read(d.join("launcher.json")).unwrap(), b"user-config");
         assert!(!d.join(STAGE).exists());
         cleanup_old(&d);
         assert!(!d.join("launcher.exe.old").exists() && !d.join(MANIFEST).exists());
         assert_eq!(std::fs::read(d.join("notes.old")).unwrap(), b"user-file");
-        assert_eq!(
-            std::fs::read(d.join("launcher.exe")).unwrap(),
-            b"new-launcher"
-        );
+        assert_eq!(std::fs::read(d.join("launcher.exe")).unwrap(), b"new-launcher");
     }
 
     #[test]
@@ -468,11 +370,7 @@ mod tests {
         let d = tmp("rename");
         write_file(&d.join("launcher.exe"), b"v0.2.2");
         write_file(&d.join("launcher.json"), b"cfg");
-        let z = make_zip(&[
-            ("PersonaRM.exe", b"v0.3.0"),
-            ("launcher.exe", b"v0.3.0"),
-            ("SDL3.dll", b"s"),
-        ]);
+        let z = make_zip(&[("PersonaRM.exe", b"v0.3.0"), ("launcher.exe", b"v0.3.0"), ("SDL3.dll", b"s")]);
         apply_zip(&z, &d, "launcher.exe").unwrap();
         assert_eq!(std::fs::read(d.join("launcher.exe")).unwrap(), b"v0.3.0");
         assert_eq!(std::fs::read(d.join("PersonaRM.exe")).unwrap(), b"v0.3.0");
@@ -486,12 +384,7 @@ mod tests {
         assert_eq!(shim_target(&d.join("launcher.exe")), None);
         // An install already on the new name updates with a zip that no longer ships launcher.exe.
         write_file(&d.join("PersonaRM.exe"), b"v0.3.0");
-        apply_zip(
-            &make_zip(&[("PersonaRM.exe", b"v0.4.0")]),
-            &d,
-            "PersonaRM.exe",
-        )
-        .unwrap();
+        apply_zip(&make_zip(&[("PersonaRM.exe", b"v0.4.0")]), &d, "PersonaRM.exe").unwrap();
         assert_eq!(std::fs::read(d.join("PersonaRM.exe")).unwrap(), b"v0.4.0");
         assert!(apply_zip(&make_zip(&[("launcher.exe", b"x")]), &d, "PersonaRM.exe").is_err());
     }
@@ -501,14 +394,7 @@ mod tests {
         let d = tmp("bad");
         write_file(&d.join("launcher.exe"), b"old");
         write_file(&d.join("a.bin"), b"old-a");
-        assert!(
-            apply_zip(
-                &make_zip(&[("../evil.txt", b"x"), ("launcher.exe", b"n")]),
-                &d,
-                "launcher.exe"
-            )
-            .is_err()
-        );
+        assert!(apply_zip(&make_zip(&[("../evil.txt", b"x"), ("launcher.exe", b"n")]), &d, "launcher.exe").is_err());
         assert!(!d.parent().unwrap().join("evil.txt").exists());
         assert!(apply_zip(&make_zip(&[("a.bin", b"n")]), &d, "launcher.exe").is_err());
         assert!(apply_zip(b"not a zip", &d, "launcher.exe").is_err());
@@ -517,11 +403,7 @@ mod tests {
         write_file(&d.join("z.bin"), b"old-z");
         std::fs::create_dir_all(d.join("z.bin.old/sub")).unwrap();
         write_file(&d.join("z.bin.old/sub/x"), b"x");
-        let z = make_zip(&[
-            ("a.bin", b"new-a"),
-            ("launcher.exe", b"new"),
-            ("z.bin", b"z"),
-        ]);
+        let z = make_zip(&[("a.bin", b"new-a"), ("launcher.exe", b"new"), ("z.bin", b"z")]);
         assert!(apply_zip(&z, &d, "launcher.exe").is_err());
         assert_eq!(std::fs::read(d.join("a.bin")).unwrap(), b"old-a");
         assert_eq!(std::fs::read(d.join("launcher.exe")).unwrap(), b"old");
