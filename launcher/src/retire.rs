@@ -168,7 +168,7 @@ $l.WorkingDirectory=Split-Path $env:T; $l.IconLocation=$env:I+',0'; $l.Save()";
             assert_eq!(f[0], n);
             assert_eq!(f[1], "--x");
             assert!(f[2].starts_with(&n), "icon: {}", f[2]);
-            assert!(same_path(f[3], &canon(&install.to_string_lossy())), "dir: {}", f[3]);
+            assert!(same_path(&canon(f[3]), &canon(&install.to_string_lossy())), "dir: {}", f[3]);
         }
         assert_eq!(read_lnk(&c), c_before);
         let _ = std::fs::remove_dir_all(&root);
