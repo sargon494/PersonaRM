@@ -76,7 +76,7 @@
                 </p>
                 <div class="actions">
                     <div class="dl">
-                        <a class="btn btn-primary" href="https://github.com/sargon494/PersonaRM/releases/latest">v0.2.3 をダウンロード</a>
+                        <a class="btn btn-primary" href="https://github.com/sargon494/PersonaRM/releases/latest">v0.2.5 をダウンロード</a>
                         <small>Windows · ディスクはご自身で用意 · 実験的</small>
                     </div>
                     <a class="btn" href="https://github.com/sargon494/PersonaRM">ソースを見る</a>
@@ -134,16 +134,16 @@
                     <p><strong>セーブ</strong> メモリーカードとステートセーブ。</p>
                 </li>
                 <li><span class="chip works">動作</span>
-                    <p><strong>フレームレートと解像度</strong> 30/60/90/120 fps(90 と 120 では 3D の背景だけを補間するため、テクスチャのちらつきはありません)、GPU レンダラーで 4K まで。高解像度での細い線やタイルの継ぎ目は修正済みです。GPU レンダラーでメニューのポートレートとテキストがちらつく問題も修正済みです。</p>
+                    <p><strong>フレームレートと解像度</strong> 30/60/90/120 fps(90 と 120 では 3D の背景だけを補間するため、テクスチャのちらつきはありません)、GPU レンダラーで 4K まで。高解像度での細い線やタイルの継ぎ目は修正済みです。GPU レンダラーでメニューのポートレートとテキストがちらつく問題も修正済みです。 4x では GPU レンダラーの画像がソフトウェアレンダラーと完全に一致し、静止した場面やメニューに残っていたちらつきもなくなりました。</p>
                 </li>
                 <li><span class="chip works">動作</span>
-                    <p><strong>ランチャー</strong> 自動更新付きのゲームライブラリ。初回の PLAY で、お使いの PC 上でディスクからネイティブコードを準備します(約 10〜15 秒、以降はキャッシュ)。「Find my discs」で日本版・米国版・ディスク 2 のプロモーション版を検出して項目を自動入力し、ダンプが完全かも確認します。画面上の小さなバッジで F1〜F4 のゲームプレイ設定と早送りが分かり、「Show status icons」でオフにできます。<code>launcher.exe</code> の旧バージョンは自動更新され、<code>PersonaRM.exe</code> に移行します。</p>
+                    <p><strong>ランチャー</strong> 自動更新付きのゲームライブラリ。初回の PLAY で、お使いの PC 上でディスクからネイティブコードを準備します(約 10〜15 秒、以降はキャッシュ)。「Find my discs」で日本版・米国版・ディスク 2 のプロモーション版を検出して項目を自動入力し、ダンプが完全かも確認します。画面上の小さなバッジで F1〜F4 のゲームプレイ設定と早送りが分かり、「Show status icons」でオフにできます。<code>launcher.exe</code> の旧バージョンは自動更新され、<code>PersonaRM.exe</code> に移行します。 コントロール / ホットキー: すべてのショートカットを割り当て直せます(Ctrl+S などの組み合わせも可)。ゲームパッドではホットキーボタン(既定は Guide / PS)を押したまま、R1 で保存、L1 で読み込み、十字キー左右でスロット切替、R2 で早送りです。</p>
                 </li>
                 <li><span class="chip works">動作</span>
                     <p><strong>ディスク</strong> 日本版ディスク 1(主)、米国英語版。日本版ディスク 2(プロモーション用)も起動。</p>
                 </li>
                 <li><span class="chip experimental">実験的</span>
-                    <p><strong>ワイドスクリーン</strong> 利用可能ですが粗削りです。キャラクターが分離しなくなり、全画面のフェード、色調、影が横長の画面全体を覆うようになりました。対応できない場面は自動的に 4:3 になります。推奨は 4:3。</p>
+                    <p><strong>ワイドスクリーン</strong> 利用可能ですが粗削りです。キャラクターが分離しなくなり(近くを走るパーティーメンバーが離れたり影からずれたりしなくなり)、全画面のフェード、色調、影が横長の画面全体を覆うようになりました。対応できない場面は自動的に 4:3 になります。推奨は 4:3。</p>
                 </li>
                 <li><span class="chip experimental">実験的</span>
                     <p><strong>Linux</strong> ビルドはできますが、未検証です。</p>
@@ -165,7 +165,7 @@
                 </li>
                 <li class="reveal">
                     <h3>PersonaRM をダウンロードする</h3>
-                    <p><a href="https://github.com/sargon494/PersonaRM/releases/latest">最新リリース</a>(v0.2.3)から
+                    <p><a href="https://github.com/sargon494/PersonaRM/releases/latest">最新リリース</a>(v0.2.5)から
                         Windows 用の zip をダウンロードし、展開して <code>PersonaRM.exe</code> を実行します。</p>
                 </li>
                 <li class="reveal">
@@ -269,7 +269,7 @@ personarm_sdl "/path/to/disc1.cue" --recomp --memcard1 "/path/to/card1.mcd"</cod
             <h2><em>降りる</em>準備はできましたか?</h2>
             <p>ランチャーをダウンロードし、ご自身のディスクを指定して PLAY を押すだけです。</p>
             <div class="dl">
-                <a class="btn btn-primary" href="https://github.com/sargon494/PersonaRM/releases/latest">v0.2.3 をダウンロード</a>
+                <a class="btn btn-primary" href="https://github.com/sargon494/PersonaRM/releases/latest">v0.2.5 をダウンロード</a>
                 <small>Windows · ディスクはご自身で用意 · 実験的</small>
             </div>
             <p class="dev-note">開発者の方は <a href="https://github.com/sargon494/PersonaRM">クローンしてソースからビルド</a>してください。</p>
