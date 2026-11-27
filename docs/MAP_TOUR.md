@@ -96,8 +96,10 @@ a per-area settings file whose `general.save_dir` holds the state as `<serial>.s
 
 - `--renderer gpu --resolution-scale 4 --interp 120`, 4:3: every present of the next 90 frames (still for
   60 frames, then right held 30 frames: the player walks where the area allows it);
-- `--renderer software --resolution-scale 1 --interp 60`: the reference. Emulation does not depend on the
-  renderer, so software frame f is what the game drew at f.
+- `--renderer software --resolution-scale 4 --interp 60`: the reference, at the same internal scale and
+  without interpolation (`SCALE` in `map_tour.py`). Emulation does not depend on the renderer, so software
+  frame f is what the game drew at f, and a non-interpolated GPU present of it must be byte-identical.
+  (The 1x tour of the headless harness is unchanged.)
 
 ```
 python tools/map_tour/map_tour.py --exe build/Release/Release/personarm.exe --disc <disc1.cue> \
@@ -111,17 +113,19 @@ metrics are stored in `result.json`, and `--reflag` re-applies changed threshold
 frames after the load are not judged (the GPU upscaled VRAM and the interpolation history refill).
 The software frames f-4..f+3 are the *window* of GPU present f: interpolation shows the game one or two
 frames late, and the GPU picture of the double-buffered game can be up to two frames ahead of the software
-display. A pixel is *still* when the window's software frames agree there (grown by one pixel).
+display. A pixel is *still* when the window's software frames agree there (grown by one 1x pixel).
+All comparisons are at 4x; thresholds and counts stay in 1x units.
 
 | Flag | Check | Threshold (`map_tour.py`) |
 |---|---|---|
 | HIGH GPU present went back in time | a present matches only software frames older than one an earlier present already showed (more than 0.5 mean luma closer to them): the picture steps back, a visible flicker | any |
 | HIGH / MED GPU jitter in a still scene | consecutive GPU presents, block-averaged to 1x, change by more than 8 on still pixels | MED > 20 px, HIGH > 300 px (1x pixels) |
-| MED GPU thin stray lines | hi-res pixels more than 48 from the software frame upscaled (nearest), on still pixels away from software edges (3x3 grown), that a 3x3 opening removes (1-2 px wide: seams, outlines) | > 400 hi-res px in one present |
-| MED GPU differs from software | median over presents of the mean difference between the GPU present (box-downscaled) and the best software frame of the window | > 16 |
-| MED GPU spike | one present's difference above the median of the 8 presents around it (a pop or flash) | > 8 |
+| MED GPU frame differs from software at the same scale | a non-interpolated present equals none of the window's software frames exactly | > 1 present |
+| MED GPU thin stray lines | hi-res pixels more than 48 from the software 4x frame, on still pixels away from software edges (grown by one 1x pixel), that a 3x3 opening removes (1-2 px wide: seams, outlines) | > 400 hi-res px in one present |
+| MED GPU differs from software | median over presents of the mean difference between the GPU present and the best software frame of the window | > 16 |
+| MED GPU spike | one present's difference above the median of the 16 presents of its kind (exact or interpolated) around it (a pop or flash) | > 8 |
 | HIGH GPU pass: ... | the SDL run hung, crashed, could not load the state or fell back to software | |
 
 Crops in the sheet: back in time = earlier present, this present, change x4; jitter = present, next
-present, change x4; lines = GPU, software upscaled; spike = previous present, this present, software;
-differs = GPU downscaled, software. The GPU pass runs at 4:3 only (comparison with the 4:3 software frame).
+present, change x4; lines = GPU, software 4x; spike = previous present, this present, software;
+differs = GPU, software (both box-downscaled to 1x for the sheet). The GPU pass runs at 4:3 only (comparison with the 4:3 software frame).
