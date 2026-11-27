@@ -256,6 +256,7 @@ looked at.
 | office walking, `--interp 120` + 16:9 and `--interp 90`, 4x | f18900-18915, 32 / 24 presents | no picture far from both neighbours (flicker score 0.01 / 0) | |
 | map tour areas 33, 35, 36, 37, 58 (`--sdl` states), live and replayed in both display buffers | f19451-19490 | 0% / 0% | every frame identical to software 4x; was 20k-95k pixels off by one step and 1-2 pixels differing between the buffers |
 | shrine, `--mods` | f6700 | 6.7% / 3.9% | test pack (every dumped texture 4x with a red hatch): floor, walls, the shrine and Tatsuya's legs replaced as in software; his torso and the old woman stay original (one upload per primitive, see HD textures) |
+| Linux, Vulkan (WSL2, Mesa lavapipe): JP shrine, JP office, US shrine; JP shrine and office `--interp 120` | f6700-6703, f18899-18901, f6799-6801 | 0% / 0% | byte-identical to software 4x on Linux and to D3D12 GPU 4x on Windows (default settings, new memory cards) |
 
 Software 4x of this build against the build before: byte-identical (f6700, f18900, SHA-256), so the
 software path is unchanged. Not exercised by these scenes: the mask-check pipelines (no mask-checked
