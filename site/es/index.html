@@ -74,15 +74,15 @@
                 </p>
                 <div class="actions">
                     <div class="dl">
-                        <a class="btn btn-primary" href="https://github.com/sargon494/PersonaRM/releases/latest">Descargar v0.2.5</a>
-                        <small>Windows · trae tu propio disco · experimental</small>
+                        <a class="btn btn-primary" href="https://github.com/sargon494/PersonaRM/releases/latest">Descargar v0.2.6</a>
+                        <small>Windows y Linux · trae tu propio disco · experimental</small>
                     </div>
                     <a class="btn" href="https://github.com/sargon494/PersonaRM">Ver código</a>
                 </div>
                 <ul class="chips" aria-label="Datos del proyecto">
                     <li>GPL v3+</li>
                     <li>Sin archivos del juego</li>
-                    <li>Linux: sin probar</li>
+                    <li>Linux x64: probado en Ubuntu</li>
                 </ul>
             </div>
         </section>
@@ -122,7 +122,8 @@
                 <li>Intro, pantalla de título, nueva partida, escenas de la historia, movimiento libre y los primeros
                     combates.</li>
                 <li>Guardar y cargar tarjetas de memoria, y estados guardados.</li>
-                <li>Código nativo (recompilado, Windows): unas 2 veces más rápido que el intérprete, con resultados idénticos en el disco 1 japonés.</li>
+                <li>Linux x64 desde v0.2.6: probado en Ubuntu; el renderizador GPU aún no está probado allí.</li>
+                <li>Código nativo (recompilado, Windows y Linux): unas 2 veces más rápido que el intérprete, con resultados idénticos en el disco 1 japonés.</li>
                 <li>30, 60, 90 y 120 fps, y resolución interna de hasta 4K con el renderizador GPU.</li>
                 <li>Un lanzador con biblioteca de juegos que se actualiza solo, con opciones de juego por juego (tasa de encuentros, saltar películas, velocidad de combate, velocidad del texto).</li>
             </ul>
@@ -141,7 +142,7 @@
                     <p><strong>Fotogramas y resolución</strong> 30/60/90/120 fps (a 90 y 120 solo se interpolan los escenarios 3D, así que no hay parpadeo de texturas); hasta 4K con el renderizador GPU. Las líneas sueltas y las costuras de los mosaicos a alta resolución están corregidas. Los retratos y el texto ya no tiemblan en los menús con el renderizador GPU. A 4x dibuja exactamente la misma imagen que el renderizador de software, sin parpadeo residual en escenas y menús estáticos.</p>
                 </li>
                 <li><span class="chip works">Funciona</span>
-                    <p><strong>Lanzador</strong> Biblioteca de juegos con actualización automática. El primer PLAY prepara el código nativo a partir de tu disco (unos 10-15 s, luego se guarda en caché). «Find my discs» encuentra tus discos de Persona 2 (japonés, EE. UU. y el promocional del disco 2), rellena los campos y comprueba que el volcado esté completo. Unos iconos en pantalla muestran las opciones activas F1-F4 y el avance rápido; «Show status icons» los desactiva. Las instalaciones antiguas con <code>launcher.exe</code> se actualizan solas y pasan a <code>PersonaRM.exe</code>. Controles / atajos: todos los atajos se pueden reasignar, incluidas combinaciones como Ctrl+S. En el mando, mantén el botón de atajos (Guide o PS por defecto) con R1 para guardar, L1 para cargar, la cruceta izquierda/derecha para cambiar de ranura y R2 para avance rápido.</p>
+                    <p><strong>Lanzador</strong> Biblioteca de juegos con actualización automática. El primer PLAY prepara el código nativo a partir de tu disco (unos 10-15 s, luego se guarda en caché). «Find my discs» encuentra tus discos de Persona 2 (japonés, EE. UU. y el promocional del disco 2), rellena los campos y comprueba que el volcado esté completo. Unos iconos en pantalla muestran las opciones activas F1-F4 y el avance rápido; «Show status icons» los desactiva. Las instalaciones antiguas con <code>launcher.exe</code> se actualizan solas y pasan a <code>PersonaRM.exe</code>. Desde v0.2.6, los accesos directos antiguos a <code>launcher.exe</code> también se redirigen. Controles / atajos: todos los atajos se pueden reasignar, incluidas combinaciones como Ctrl+S. En el mando, mantén el botón de atajos (Guide o PS por defecto) con R1 para guardar, L1 para cargar, la cruceta izquierda/derecha para cambiar de ranura y R2 para avance rápido.</p>
                 </li>
                 <li><span class="chip works">Funciona</span>
                     <p><strong>Discos</strong> Disco 1 japonés (principal), versión inglesa de EE. UU.; el disco 2
@@ -151,7 +152,7 @@
                     <p><strong>Pantalla panorámica</strong> Disponible, pero tosca: los personajes ya no se separan (los que van juntos ya no se rompen ni se salen de sus sombras), los fundidos, tintes y sombras cubren toda la imagen panorámica, y las escenas que no puede manejar con seguridad vuelven automáticamente a 4:3. 4:3 es el modo recomendado.</p>
                 </li>
                 <li><span class="chip experimental">Experimental</span>
-                    <p><strong>Linux</strong> Compila, pero no se ha probado.</p>
+                    <p><strong>Linux</strong> Build x64 desde v0.2.6, probado en Ubuntu (necesita glibc 2.35 o superior). El renderizador de software funciona allí; el GPU aún no está probado.</p>
                 </li>
             </ul>
             <p class="fine reveal"><a class="link" href="https://github.com/sargon494/PersonaRM#readme">Estado técnico
@@ -171,8 +172,8 @@
                 </li>
                 <li class="reveal">
                     <h3>Descarga PersonaRM</h3>
-                    <p>Descarga el zip para Windows de la <a href="https://github.com/sargon494/PersonaRM/releases/latest">última
-                            versión</a> (v0.2.5), descomprímelo y ejecuta <code>PersonaRM.exe</code>.</p>
+                    <p>Descarga el zip para Windows (o el tar.gz para Linux x64) de la <a href="https://github.com/sargon494/PersonaRM/releases/latest">última
+                            versión</a> (v0.2.6), descomprímelo y ejecuta <code>PersonaRM.exe</code>. En Linux, descomprime el tar.gz con <code>tar xzf</code> y ejecuta <code>./PersonaRM</code>.</p>
                 </li>
                 <li class="reveal">
                     <h3>Elige tu disco y pulsa PLAY</h3>
@@ -289,8 +290,8 @@ personarm_sdl "/ruta/a/disco1.cue" --recomp --memcard1 "/ruta/a/tarjeta1.mcd"</c
             <h2>¿Listo para <em>descender</em>?</h2>
             <p>Descarga el lanzador, indícale tu propio disco y pulsa PLAY.</p>
             <div class="dl">
-                <a class="btn btn-primary" href="https://github.com/sargon494/PersonaRM/releases/latest">Descargar v0.2.5</a>
-                <small>Windows · trae tu propio disco · experimental</small>
+                <a class="btn btn-primary" href="https://github.com/sargon494/PersonaRM/releases/latest">Descargar v0.2.6</a>
+                <small>Windows y Linux · trae tu propio disco · experimental</small>
             </div>
             <p class="dev-note">¿Desarrollas? <a href="https://github.com/sargon494/PersonaRM">Clona y compila desde el código</a>.</p>
         </section>

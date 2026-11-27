@@ -72,15 +72,15 @@
                 </p>
                 <div class="actions">
                     <div class="dl">
-                        <a class="btn btn-primary" href="https://github.com/sargon494/PersonaRM/releases/latest">Download v0.2.5</a>
-                        <small>Windows · bring your own disc · experimental</small>
+                        <a class="btn btn-primary" href="https://github.com/sargon494/PersonaRM/releases/latest">Download v0.2.6</a>
+                        <small>Windows and Linux · bring your own disc · experimental</small>
                     </div>
                     <a class="btn" href="https://github.com/sargon494/PersonaRM">View source</a>
                 </div>
                 <ul class="chips" aria-label="Project facts">
                     <li>GPL v3+</li>
                     <li>No game files included</li>
-                    <li>Linux: untested</li>
+                    <li>Linux x64: tested on Ubuntu</li>
                 </ul>
             </div>
         </section>
@@ -118,7 +118,8 @@
             <ul class="today reveal">
                 <li>Intro, title screen, new game, story scenes, free movement and the first battles.</li>
                 <li>Saving and loading memory cards, and save states.</li>
-                <li>Native code (recompiled, Windows): about 2x faster than the interpreter, with identical results on JP disc 1.</li>
+                <li>Linux x64 from v0.2.6: tested on Ubuntu; the GPU renderer is not yet tested there.</li>
+                <li>Native code (recompiled, Windows and Linux): about 2x faster than the interpreter, with identical results on JP disc 1.</li>
                 <li>30, 60, 90 and 120 fps, and internal resolution up to 4K with the GPU renderer.</li>
                 <li>A game-library launcher that updates itself, with per-game gameplay options (encounter rate, skip movies, battle speed, text speed).</li>
             </ul>
@@ -137,7 +138,7 @@
                     <p><strong>Frame rate and resolution</strong> 30/60/90/120 fps (at 90 and 120 only 3D scenery is interpolated, so no texture jitter); up to 4K with the GPU renderer. Stray lines and tile seams at high resolution are fixed. Portraits and text no longer jitter in menus on the GPU renderer. At 4x it now draws exactly the same image as the software renderer, with no residual shimmer on static scenes and menus.</p>
                 </li>
                 <li><span class="chip works">Works</span>
-                    <p><strong>Launcher</strong> Game library with auto-update. The first PLAY prepares native code from your disc (about 10-15 s, then cached). "Find my discs" finds and identifies your Persona 2 discs (JP, US, the disc 2 promo) and fills the fields. On-screen badges show active F1-F4 options and fast-forward; "Show status icons" turns them off. Older <code>launcher.exe</code> installs update and move to <code>PersonaRM.exe</code> automatically. Controls / Hotkeys: every shortcut can be rebound, including key combos such as Ctrl+S. On a gamepad, hold the hotkey button (Guide or PS by default) with R1 to save, L1 to load, D-pad left/right to change slot and R2 to fast-forward.</p>
+                    <p><strong>Launcher</strong> Game library with auto-update. The first PLAY prepares native code from your disc (about 10-15 s, then cached). "Find my discs" finds and identifies your Persona 2 discs (JP, US, the disc 2 promo) and fills the fields. On-screen badges show active F1-F4 options and fast-forward; "Show status icons" turns them off. Older <code>launcher.exe</code> installs update and move to <code>PersonaRM.exe</code> automatically. Since v0.2.6, old shortcuts to <code>launcher.exe</code> are repointed too. Controls / Hotkeys: every shortcut can be rebound, including key combos such as Ctrl+S. On a gamepad, hold the hotkey button (Guide or PS by default) with R1 to save, L1 to load, D-pad left/right to change slot and R2 to fast-forward.</p>
                 </li>
                 <li><span class="chip works">Works</span>
                     <p><strong>Discs</strong> JP disc 1 (primary), US English release; JP disc 2 (promo) boots.</p>
@@ -146,7 +147,7 @@
                     <p><strong>Widescreen</strong> Available, but rough: characters no longer split apart (party members running close together no longer break apart or slide off their shadows), full-screen fades, tints and shadows cover the whole wide picture, and scenes it can't handle safely fall back to 4:3 automatically. 4:3 is the recommended mode.</p>
                 </li>
                 <li><span class="chip experimental">Experimental</span>
-                    <p><strong>Linux</strong> It builds, but it is untested.</p>
+                    <p><strong>Linux</strong> x64 build since v0.2.6, tested on Ubuntu (needs glibc 2.35 or newer). The software renderer works there; the GPU renderer is not yet tested.</p>
                 </li>
             </ul>
             <p class="fine reveal"><a class="link" href="https://github.com/sargon494/PersonaRM#readme">Full technical
@@ -166,8 +167,8 @@
                 </li>
                 <li class="reveal">
                     <h3>Download PersonaRM</h3>
-                    <p>Get the Windows zip from the <a href="https://github.com/sargon494/PersonaRM/releases/latest">latest
-                            release</a> (v0.2.5), unzip it and run <code>PersonaRM.exe</code>.</p>
+                    <p>Get the Windows zip (or the Linux x64 tar.gz) from the <a href="https://github.com/sargon494/PersonaRM/releases/latest">latest
+                            release</a> (v0.2.6), unzip it and run <code>PersonaRM.exe</code>. On Linux, unpack the tar.gz with <code>tar xzf</code> and run <code>./PersonaRM</code>.</p>
                 </li>
                 <li class="reveal">
                     <h3>Set your disc and press PLAY</h3>
@@ -281,8 +282,8 @@ personarm_sdl "/path/to/disc1.cue" --recomp --memcard1 "/path/to/card1.mcd"</cod
             <h2>Ready to <em>descend</em>?</h2>
             <p>Download the launcher, point it at your own disc and press PLAY.</p>
             <div class="dl">
-                <a class="btn btn-primary" href="https://github.com/sargon494/PersonaRM/releases/latest">Download v0.2.5</a>
-                <small>Windows · bring your own disc · experimental</small>
+                <a class="btn btn-primary" href="https://github.com/sargon494/PersonaRM/releases/latest">Download v0.2.6</a>
+                <small>Windows and Linux · bring your own disc · experimental</small>
             </div>
             <p class="dev-note">Developer? <a href="https://github.com/sargon494/PersonaRM">Clone and build from source</a>.</p>
         </section>
