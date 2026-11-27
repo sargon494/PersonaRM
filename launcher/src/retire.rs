@@ -9,17 +9,32 @@ const OLD_EXE: &str = "launcher.exe";
 
 /// Paths equal ignoring case, slash direction, a trailing slash and the `\\?\` prefix.
 pub fn same_path(a: &str, b: &str) -> bool {
-    let n = |s: &str| s.trim().trim_start_matches(r"\\?\").replace('/', "\\").trim_end_matches('\\').to_ascii_lowercase();
+    let n = |s: &str| {
+        s.trim()
+            .trim_start_matches(r"\\?\")
+            .replace('/', "\\")
+            .trim_end_matches('\\')
+            .to_ascii_lowercase()
+    };
     let (a, b) = (n(a), n(b));
     !a.is_empty() && a == b
 }
 
+/// The real long path when the file exists (resolves 8.3 short names such as RUNNER~1), else as given.
+fn canon(p: &str) -> String {
+    std::fs::canonicalize(p).map_or_else(
+        |_| p.to_string(),
+        |c| c.to_string_lossy().trim_start_matches(r"\\?\").to_string(),
+    )
+}
+
 /// From "<lnk>\t<target>" lines: the shortcut files whose target is `old`.
 pub fn matching_lnks(listing: &str, old: &str) -> Vec<String> {
+    let old = canon(old);
     listing
         .lines()
         .filter_map(|l| l.split_once('\t'))
-        .filter(|(_, t)| same_path(t, old))
+        .filter(|(_, t)| same_path(&canon(t), &old))
         .map(|(p, _)| p.to_string())
         .collect()
 }
@@ -27,12 +42,15 @@ pub fn matching_lnks(listing: &str, old: &str) -> Vec<String> {
 fn ps(script: &str, env: &[(&str, &str)]) -> Option<String> {
     use std::os::windows::process::CommandExt;
     let mut c = Command::new("powershell");
-    c.args(["-NoProfile", "-NonInteractive", "-Command", script]).creation_flags(0x0800_0000); // no console window
+    c.args(["-NoProfile", "-NonInteractive", "-Command", script])
+        .creation_flags(0x0800_0000); // no console window
     for (k, v) in env {
         c.env(k, v);
     }
     let o = c.output().ok()?;
-    o.status.success().then(|| String::from_utf8_lossy(&o.stdout).into_owned())
+    o.status
+        .success()
+        .then(|| String::from_utf8_lossy(&o.stdout).into_owned())
 }
 
 const LIST: &str = "[Console]::OutputEncoding=[Text.Encoding]::UTF8; $sh=New-Object -ComObject WScript.Shell; \
@@ -48,13 +66,25 @@ if($i.StartsWith($o,[StringComparison]::OrdinalIgnoreCase)){ $l.IconLocation=$n+
 /// the icon follows when it came from `old`). None if PowerShell failed or a shortcut could not be
 /// saved; else how many were rewritten.
 pub fn fix_shortcuts(old: &Path, new: &Path, dirs: &[PathBuf]) -> Option<usize> {
-    let joined = dirs.iter().map(|d| d.to_string_lossy().into_owned()).collect::<Vec<_>>().join("|");
+    let joined = dirs
+        .iter()
+        .map(|d| d.to_string_lossy().into_owned())
+        .collect::<Vec<_>>()
+        .join("|");
     let listing = ps(LIST, &[("PRM_DIRS", &joined)])?;
     let hits = matching_lnks(&listing, &old.to_string_lossy());
     if hits.is_empty() {
         return Some(0);
     }
-    ps(SET, &[("PRM_OLD", &old.to_string_lossy()), ("PRM_NEW", &new.to_string_lossy()), ("PRM_LNKS", &hits.join("|"))])?;
+    let (old, new) = (canon(&old.to_string_lossy()), canon(&new.to_string_lossy()));
+    ps(
+        SET,
+        &[
+            ("PRM_OLD", &old),
+            ("PRM_NEW", &new),
+            ("PRM_LNKS", &hits.join("|")),
+        ],
+    )?;
     Some(hits.len())
 }
 
@@ -80,7 +110,9 @@ pub fn default_dirs() -> Vec<PathBuf> {
 /// Any failure (PowerShell, locked file) leaves things as they are; the next start retries.
 pub fn retire_launcher(install: &Path, me: &Path, dirs: &[PathBuf]) {
     let (old, new) = (install.join(OLD_EXE), install.join(crate::update::NEW_EXE));
-    let running_new = me.file_name().is_some_and(|n| n.eq_ignore_ascii_case(crate::update::NEW_EXE));
+    let running_new = me
+        .file_name()
+        .is_some_and(|n| n.eq_ignore_ascii_case(crate::update::NEW_EXE));
     if !running_new || !old.is_file() || !new.is_file() {
         return;
     }
@@ -95,36 +127,66 @@ mod tests {
 
     #[test]
     fn path_matching() {
-        assert!(same_path(r"C:\Games\PRM\launcher.exe", r"c:/games/prm/LAUNCHER.EXE"));
+        assert!(same_path(
+            r"C:\Games\PRM\launcher.exe",
+            r"c:/games/prm/LAUNCHER.EXE"
+        ));
         assert!(same_path(r"\\?\C:\a\launcher.exe", r"C:\a\launcher.exe"));
-        assert!(!same_path(r"C:\Other\launcher.exe", r"C:\Games\PRM\launcher.exe"));
-        assert!(!same_path(r"C:\Games\PRM\launcher.exe.old", r"C:\Games\PRM\launcher.exe"));
-        assert!(!same_path(r"C:\Games\PRM\PersonaRM.exe", r"C:\Games\PRM\launcher.exe"));
+        assert!(!same_path(
+            r"C:\Other\launcher.exe",
+            r"C:\Games\PRM\launcher.exe"
+        ));
+        assert!(!same_path(
+            r"C:\Games\PRM\launcher.exe.old",
+            r"C:\Games\PRM\launcher.exe"
+        ));
+        assert!(!same_path(
+            r"C:\Games\PRM\PersonaRM.exe",
+            r"C:\Games\PRM\launcher.exe"
+        ));
         assert!(!same_path("", ""));
     }
 
     #[test]
     fn listing_filter() {
         let l = "C:\\d\\A.lnk\tC:\\Games\\PRM\\launcher.exe\r\nC:\\d\\B.lnk\tC:\\Other\\launcher.exe\nC:\\d\\C.lnk\t\nC:\\d\\D.lnk\tc:\\games\\prm\\Launcher.exe\r\n";
-        assert_eq!(matching_lnks(l, r"C:\Games\PRM\launcher.exe"), vec!["C:\\d\\A.lnk", "C:\\d\\D.lnk"]);
+        assert_eq!(
+            matching_lnks(l, r"C:\Games\PRM\launcher.exe"),
+            vec!["C:\\d\\A.lnk", "C:\\d\\D.lnk"]
+        );
     }
 
     fn mk_lnk(lnk: &Path, target: &Path, icon: &Path) {
         let s = "$l=(New-Object -ComObject WScript.Shell).CreateShortcut($env:L); $l.TargetPath=$env:T; $l.Arguments='--x'; \
 $l.WorkingDirectory=Split-Path $env:T; $l.IconLocation=$env:I+',0'; $l.Save()";
-        ps(s, &[("L", &lnk.to_string_lossy()), ("T", &target.to_string_lossy()), ("I", &icon.to_string_lossy())]).unwrap();
+        ps(
+            s,
+            &[
+                ("L", &lnk.to_string_lossy()),
+                ("T", &target.to_string_lossy()),
+                ("I", &icon.to_string_lossy()),
+            ],
+        )
+        .unwrap();
     }
 
     fn read_lnk(lnk: &Path) -> String {
         let s = "$l=(New-Object -ComObject WScript.Shell).CreateShortcut($env:L); $l.TargetPath + '|' + $l.Arguments + '|' + $l.IconLocation + '|' + $l.WorkingDirectory";
-        ps(s, &[("L", &lnk.to_string_lossy())]).unwrap().trim().to_string()
+        ps(s, &[("L", &lnk.to_string_lossy())])
+            .unwrap()
+            .trim()
+            .to_string()
     }
 
     #[test]
     fn rewrites_shortcuts_and_deletes_old_exe() {
         let root = std::env::temp_dir().join(format!("prm-retire-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
-        let (install, desk, start) = (root.join("install"), root.join("desk"), root.join("start/sub"));
+        let (install, desk, start) = (
+            root.join("install"),
+            root.join("desk"),
+            root.join("start/sub"),
+        );
         for d in [&install, &desk, &start] {
             std::fs::create_dir_all(d).unwrap();
         }
@@ -147,14 +209,18 @@ $l.WorkingDirectory=Split-Path $env:T; $l.IconLocation=$env:I+',0'; $l.Save()";
 
         retire_launcher(&install, &new, &dirs);
         assert!(!old.exists() && new.exists());
-        let n = new.to_string_lossy().to_lowercase();
+        let n = canon(&new.to_string_lossy()).to_lowercase();
         for l in [&a, &b] {
             let r = read_lnk(l).to_lowercase();
             let f: Vec<&str> = r.split('|').collect();
             assert_eq!(f[0], n);
             assert_eq!(f[1], "--x");
             assert!(f[2].starts_with(&n), "icon: {}", f[2]);
-            assert_eq!(f[3], install.to_string_lossy().to_lowercase());
+            assert!(
+                same_path(f[3], &canon(&install.to_string_lossy())),
+                "dir: {}",
+                f[3]
+            );
         }
         assert_eq!(read_lnk(&c), c_before);
         let _ = std::fs::remove_dir_all(&root);
