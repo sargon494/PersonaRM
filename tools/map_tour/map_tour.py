@@ -149,8 +149,10 @@ def reflag(out):
 
 
 # ---- Player-config pass (--sdl): personarm_sdl with the GPU renderer, 4x and 120 Hz interpolation ----------------
-# Thresholds (luma 0..255). The software 60 Hz 1x run of the same state and input is the reference: emulation
-# does not depend on the renderer, so its frame f is the picture the game drew at f.
+# Thresholds (luma 0..255). The software 60 Hz run of the same state and input at the same --resolution-scale
+# (SCALE, no interpolation) is the reference: emulation does not depend on the renderer, so its frame f is the
+# picture the game drew at f, and a non-interpolated GPU present must equal it exactly ('inexact').
+SCALE = 4              # internal resolution scale of both the GPU run and its software reference
 WINDOW = (-4, 3)       # software frames f-4..f+3 can be on screen at GPU present f (interpolation is late; the
                        # GPU picture of a double-buffered game can also be up to two frames ahead of the display)
 BACK_LEVEL = 0.5       # a present closer to an older frame than to the one already shown, by this mean luma
@@ -163,6 +165,7 @@ GROSS_LEVEL = 16       # median over presents of the mean |GPU downscaled - soft
 GPU_TAIL = 90          # presents dumped for frames stop+1..stop+90: still until +60, then right held 30 frames
 SETTLE = 8             # frames after the state load not judged (GPU upscaled VRAM and interpolation history refill)
 SPIKE_LEVEL = 8        # one present's mean |GPU - software| above the median of the 8 presents around it
+EXACT_PRESENTS = 1     # presents at phase 0 (no interpolation) that may differ from every software frame of the window: MED above
 KIND_WORD = {'back': 'back in time', 'jitter': 'jitter', 'lines': 'lines', 'spike': 'spike', 'gross': 'differs'}  # crop -> flag
 
 
@@ -203,14 +206,15 @@ def save_crop(path, imgs, box, k):
 def thin_strays(gpu_l, sw_l, still_hi, k):
     """Hi-res pixels far from the upscaled software frame, away from its edges, on still areas, and thin
     (gone after a 3x3 opening): seams, outlines and stray lines rather than shape or shading changes."""
-    up = sw_l.resize(gpu_l.size, Image.NEAREST)
-    edges = mask(sw_l.filter(ImageFilter.FIND_EDGES), 24).filter(ImageFilter.MaxFilter(3)).resize(gpu_l.size, Image.NEAREST)
+    up = sw_l.resize(gpu_l.size, Image.NEAREST)  # no-op when the reference has the GPU's size
+    edges = mask(sw_l.filter(ImageFilter.FIND_EDGES), 24).filter(ImageFilter.MaxFilter(2 * k + 1)).resize(gpu_l.size, Image.NEAREST)
     stray = ImageChops.darker(ImageChops.subtract(mask(ImageChops.difference(gpu_l, up), LINE_LEVEL), edges), still_hi)
     return ImageChops.subtract(stray, stray.filter(ImageFilter.MinFilter(3)).filter(ImageFilter.MaxFilter(3)))
 
 
-def analyse_gpu(pg, ps, gd, start):
-    """Metrics, crops and a representative picture from the dumped GPU presents (pg) and software frames (ps)."""
+def analyse_gpu(pg, ps, gd, start, k=SCALE):
+    """Metrics, crops and a representative picture from the dumped GPU presents (pg) and software frames (ps),
+    both k x. Pixels are compared at k x; counts and crops are in 1x units like the thresholds."""
     sw, swc = {}, {}
     for n in os.listdir(ps):
         m = re.match(r'f(\d+)_0_t\d+\.png$', n)
@@ -221,7 +225,7 @@ def analyse_gpu(pg, ps, gd, start):
     for n in sorted(os.listdir(pg)):
         m = re.match(r'f(\d+)_(\d+)_t(\d+)\.png$', n)
         if m and int(m.group(1)) >= start + SETTLE:
-            pres.append((int(m.group(1)), int(m.group(2)), os.path.join(pg, n)))
+            pres.append((int(m.group(1)), int(m.group(2)), int(m.group(3)), os.path.join(pg, n)))  # frame, sub-present, phase t
     if not pres or not sw:
         return ['HIGH GPU pass: no pictures'], [], None, {}
     still = {}
@@ -237,56 +241,61 @@ def analyse_gpu(pg, ps, gd, start):
                 still[f] = ImageChops.invert(ch.filter(ImageFilter.MaxFilter(3)))
         return still[f]
     worst = {'jitter': (0, None), 'lines': (0, None), 'spike': (0, None), 'gross': (0, None), 'back': (0, None)}
+    inexact = 0
     seq, prev, shot = [], None, None  # seq: (gross, label, small GPU, best software) per comparable present
-    for f, s, path in pres:
+    for f, s, t, path in pres:
         rgb = Image.open(path).convert('RGB')
         g = luma(rgb)
         ref = sw.get(f)
-        k = g.size[0] // ref.size[0] if ref else 0
-        if not k or g.size != (ref.size[0] * k, ref.size[1] * k):
+        if not ref or g.size != ref.size or ref.size[0] % k:
             prev = None
             continue  # 24bpp / display mode change: not comparable
-        small = g.resize(ref.size, Image.BOX)
-        dist = {i: ImageStat.Stat(ImageChops.difference(small, sw[i])).mean[0]
+        base = (ref.size[0] // k, ref.size[1] // k)
+        dist = {i: ImageStat.Stat(ImageChops.difference(g, sw[i])).mean[0]
                 for i in range(f + WINDOW[0], f + WINDOW[1] + 1) if i in sw and sw[i].size == ref.size}
         bi = min(dist, key=dist.get)
         gr = dist[bi]
         shown = [i for i in dist if dist[i] <= gr + BACK_LEVEL]  # the game frames this present can be
         label = 'f%d/%d' % (f, s)
+        if t in (0, 999) and not any(ImageChops.difference(rgb, swc[i]).getbbox() is None for i in dist):
+            inexact += 1  # a game frame the GPU drew must equal one the software renderer drew
         # Back in time: this present is an older game frame than one a previous present already showed.
         if prev is not None and prev[4] and max(shown) < prev[4] and prev[4] in dist and dist[prev[4]] > gr + BACK_LEVEL:
             back = prev[4] - max(shown)
             if back > worst['back'][0]:
                 change = ImageChops.difference(prev[3], rgb).point(lambda v: min(255, 4 * v))
-                hs = hotspot(mask(ImageChops.difference(prev[2], g).resize(ref.size, Image.BOX), JITTER_LEVEL))
-                worst['back'] = (back, (hs, [prev[3], rgb, change], k, '%s shows f%d after %s showed f%d' % (label, max(shown), prev[1], prev[4])))
-        seq.append((gr, label, rgb.resize(ref.size, Image.BOX), swc[bi]))
-        if gr > worst['gross'][0]:
-            worst['gross'] = (gr, ((0, 0) + ref.size, [seq[-1][2], swc[bi]], 1, label))
+                hs = [v * k for v in hotspot(mask(ImageChops.difference(prev[2], g).resize(base, Image.BOX), JITTER_LEVEL))]
+                worst['back'] = (back, (hs, [prev[3], rgb, change], 1, '%s shows f%d after %s showed f%d' % (label, max(shown), prev[1], prev[4])))
+        small, best1 = rgb.resize(base, Image.BOX), swc[bi].resize(base, Image.BOX)  # 1x for the sheet
+        gr1 = ImageStat.Stat(ImageChops.difference(luma(small), luma(best1))).mean[0]  # the thresholds below are in 1x units
+        seq.append((gr1, label, small, best1, t in (0, 999)))
+        if gr1 > worst['gross'][0]:
+            worst['gross'] = (gr1, ((0, 0) + base, [small, best1], 1, label))
         sm = still_mask(f)
         if sm is not None:
             if prev is not None and prev[0] >= f - 1 and prev[2].size == g.size:
-                jit = ImageChops.darker(mask(ImageChops.difference(prev[2], g).resize(ref.size, Image.BOX), JITTER_LEVEL), sm)
+                sm1 = sm.resize(base, Image.BOX).point(lambda v: 255 if v > 249 else 0)  # still over the whole 1x pixel
+                jit = ImageChops.darker(mask(ImageChops.difference(prev[2], g).resize(base, Image.BOX), JITTER_LEVEL), sm1)
                 if count(jit) > worst['jitter'][0]:
                     change = ImageChops.difference(prev[3], rgb).point(lambda v: min(255, 4 * v))
-                    worst['jitter'] = (count(jit), (hotspot(jit), [prev[3], rgb, change], k, '%s vs %s' % (prev[1], label)))
-            th = thin_strays(g, sw[bi], sm.resize(g.size, Image.NEAREST), k)
+                    worst['jitter'] = (count(jit), ([v * k for v in hotspot(jit)], [prev[3], rgb, change], 1, '%s vs %s' % (prev[1], label)))
+            th = thin_strays(g, sw[bi], sm, k)
             if count(th) > worst['lines'][0]:
-                hs = hotspot(th.resize(ref.size, Image.BOX).point(lambda v: 255 if v else 0))
-                worst['lines'] = (count(th), (hs, [rgb, swc[bi]], k, label))
+                hs = hotspot(th.resize(base, Image.BOX).point(lambda v: 255 if v else 0))
+                worst['lines'] = (count(th), ([v * k for v in hs], [rgb, swc[bi]], 1, label))
         newest = max(min(shown), prev[4] if prev is not None and prev[4] else 0)  # newest frame shown so far
         prev = (f, label, g, rgb, newest)
         if f <= start + 60:
             shot = rgb
     # A spike: one present much farther from the game's frames than the presents around it (a pop or flash).
-    for i, (gr, label, small, best) in enumerate(seq):
-        around = sorted(x[0] for x in seq[max(0, i - 4):i] + seq[i + 1:i + 5])
+    for i, (gr, label, small, best, exact) in enumerate(seq):  # exact presents are 0 away, blends are not: compare like with like
+        around = sorted(x[0] for x in seq[max(0, i - 8):i] + seq[i + 1:i + 9] if x[4] == exact)
         if around and gr - around[len(around) // 2] > worst['spike'][0]:
             worst['spike'] = (gr - around[len(around) // 2], ((0, 0) + small.size, [seq[i - 1][2] if i else small, small, best], 1,
                                                             '%s (previous | this | software)' % label))
     grs = sorted(x[0] for x in seq)
     metrics = {'jitter_px': worst['jitter'][0], 'line_px': worst['lines'][0], 'spike': round(worst['spike'][0], 1),
-               'back_frames': worst['back'][0],
+               'back_frames': worst['back'][0], 'inexact': inexact,
                'gross_median': round(grs[len(grs) // 2], 1) if grs else 0, 'presents': len(pres)}
     crops = []
     for kind in ('back', 'jitter', 'lines', 'spike', 'gross'):  # the worst case of each, flagged or not (--reflag)
@@ -309,13 +318,15 @@ def gpu_flags(m):
         flags.append('MED GPU thin stray lines (%d hi-res px)' % m['line_px'])
     if m.get('gross_median', 0) > GROSS_LEVEL:
         flags.append('MED GPU differs from software (median %.0f)' % m['gross_median'])
+    if m.get('inexact', 0) > EXACT_PRESENTS:
+        flags.append('MED GPU frame differs from software at the same scale (%d presents)' % m['inexact'])
     if m.get('spike', 0) > SPIKE_LEVEL:
         flags.append('MED GPU spike: one present off the game frames (+%.0f)' % m['spike'])
     return flags
 
 
 def gpu_pass(o, area, d, stop, state):
-    """personarm_sdl from the area's state: GPU 4x 120 Hz presents and the software 1x reference."""
+    """personarm_sdl from the area's state: GPU 4x 120 Hz presents and the software 4x 60 Hz reference."""
     gd = os.path.join(d, 'gpu')
     pg, ps, sd = (os.path.join(gd, x) for x in ('pg', 'ps', 'sd'))
     for x in (pg, ps, sd):
@@ -332,8 +343,8 @@ def gpu_pass(o, area, d, stop, state):
         f.write('%d right 30\n' % (stop + 61))
     end = stop + GPU_TAIL
     flags = []
-    for tag, dump, extra in (('gpu', pg, ['--renderer', 'gpu', '--resolution-scale', '4', '--interp', '120']),
-                             ('sw', ps, ['--renderer', 'software', '--resolution-scale', '1', '--interp', '60'])):
+    for tag, dump, extra in (('gpu', pg, ['--renderer', 'gpu', '--resolution-scale', str(SCALE), '--interp', '120']),
+                             ('sw', ps, ['--renderer', 'software', '--resolution-scale', str(SCALE), '--interp', '60'])):
         last = end + (WINDOW[1] if tag == 'sw' else 0)
         args = [o.disc, '--settings', os.path.join(gd, 'settings.json'), '--hidden', '--unthrottled', '--mute',
                 '--no-recomp', '--load-state', '0', '--frames', str(last), '--dump-dir', dump, '--dump-from',
@@ -525,6 +536,8 @@ if __name__ == '__main__':
         blob = hi.copy()
         blob.paste(255, (400, 400, 480, 480))  # a solid shape: not thin
         assert count(thin_strays(blob, sw, still, 4)) < 50, count(thin_strays(blob, sw, still, 4))
+        assert gpu_flags({'inexact': EXACT_PRESENTS + 1})[0].startswith('MED GPU frame differs')
+        assert gpu_flags({'inexact': EXACT_PRESENTS}) == []
         assert gpu_flags({'jitter_px': JITTER_HIGH + 1})[0].startswith('HIGH GPU jitter')
         assert gpu_flags({'jitter_px': JITTER_PIXELS, 'line_px': 0, 'spike': 0, 'gross_median': 0}) == []
         print('self-test ok')
